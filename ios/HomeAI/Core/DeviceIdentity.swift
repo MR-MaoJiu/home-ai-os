@@ -46,7 +46,7 @@ final class DeviceIdentity: @unchecked Sendable {
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 }
 
-final class PinnedSession: NSObject, URLSessionDelegate, @unchecked Sendable {
+final class PinnedSession: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     let fingerprint: String
     let keyFingerprint: String?
     private let lock = NSLock()
@@ -55,6 +55,11 @@ final class PinnedSession: NSObject, URLSessionDelegate, @unchecked Sendable {
     init(fingerprint: String, keyFingerprint: String? = nil) {
         self.fingerprint = fingerprint.lowercased()
         self.keyFingerprint = keyFingerprint
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        // 不向重定向目标转发会话与设备签名，避免跨来源或降级到 HTTP。
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
