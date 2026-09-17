@@ -24,9 +24,9 @@
 | 身份与管理后台 | 本机初始化、设备签名、短期令牌、撤销；网页密码/TOTP、CSRF、重新认证 | 完整安装向导体验、家庭多成员实用验收 |
 | 数据 | 信封加密、版本冲突、共享/撤权、删除闭包、墓碑 | 分页快照一致性、后台增量同步、批次确认 |
 | 记忆 | 候选确认、规范账本、pgvector、版本检查、自动与手动重建 | 冲突事实裁决、Mem0/Graphiti 真实集成及故障演练 |
-| Agent | 持久化单工具任务、OPA、审批、取消、异常状态 | 多步骤执行、费用预算、执行租约、核对后恢复 |
+| Agent | 持久化多步骤工作流、结果引用、OPA、逐步审批、取消、进程互斥、重启恢复与人工核对 | 模型自主多轮规划、费用预算、复杂条件及补偿 |
 | 隐私 | 云能力限制、公开资料最小调用、披露记录 | 完整 NER、本地复核、占位符往返还原；私人内容上云保持拒绝 |
-| 自动化 | 单动作 Cron、幂等提交、Outbox/JetStream 发布 | 事件消费者、多步骤 Skill、条件与补偿 |
+| 自动化 | 多步骤 Cron 工作流、幂等提交、Outbox/JetStream 发布 | 事件消费者、Skill 条件与补偿 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
 | 文档/语音/家居/邮件 | 对应适配器代码、受控调用路径 | Docling、FunASR、whisper.cpp、CosyVoice、HA、邮件真实闭环 |
@@ -70,7 +70,7 @@ flowchart TB
 | `server/homeai/data.py`、`deletion.py` | 数据版本、访问权限、来源删除闭包 |
 | `server/homeai/memory.py`、`vector_index.py` | 候选确认、规范内容检索、向量对账与重建 |
 | `server/homeai/derived_memory.py` | 外部记忆投影的清除、重建、检查点与失败状态 |
-| `server/homeai/runtime.py`、`worker.py` | 任务执行、审批、定时调度、事务事件发布 |
+| `server/homeai/runtime.py`、`task_control.py`、`worker.py` | 多步骤执行、审批恢复、人工核对、定时调度、事务事件发布 |
 | `server/homeai/policy.py`、`privacy.py` | 核心风险等级、OPA、云出站限制 |
 | `server/homeai/providers.py` | 端点/能力映射、凭据注入、实际 HTTP/MCP 调用 |
 | `server/homeai/remote.py`、`remote_agent.py` | 独立服务器身份、绑定、短租约、frpc 生命周期 |
@@ -144,9 +144,31 @@ sequenceDiagram
 
 当前任务按 `RECEIVED → EXECUTING → SUCCEEDED/FAILED` 执行；高风险工具进入 `AWAITING_APPROVAL → APPROVED`，参数摘要、主体和有效期必须与审批一致。取消标志、设备撤销和引用记录权限在调用返回时再次检查。
 
-任务提交幂等键绑定请求摘要，相同键不同请求返回冲突。外部副作用在超时或进程中断后可能进入 `NEEDS_RECONCILIATION`，不会盲目重放。**目前只支持单工具执行，`max_steps` 不是已经实现的多步骤 Agent；重启恢复与人工核对后续流程仍需开发。**
+任务提交幂等键绑定请求摘要，相同键不同请求返回冲突。外部副作用在超时或进程中断后可能进入 `NEEDS_RECONCILIATION`，不会盲目重放。已支持显式声明的多步骤工作流，`max_steps` 在提交时限制步骤数。每次 worker 执行一个未完成步骤，成功后持久化结果；下一步骤可引用前序结果。任务连接级 PostgreSQL 锁跨事务保持，多个 worker 不会同时执行同一任务；进程退出后锁由数据库释放。启动时不再批量修改所有执行中任务。
 
-Cron 自动化也走任务入口和审批策略。Outbox 与业务写入同事务，NATS 发布使用事件 ID 去重；这不意味着下游所有消费者或外部服务具有恰好一次执行保证。
+恢复时跳过已成功步骤；内部事务操作使用 Invocation ID 作为来源幂等标识；只读网络操作在有限预算内重试；执行中断的外部副作用进入 `NEEDS_RECONCILIATION`，即使任务已过期也不能误报为确定失败。网络调用受单步超时与任务总截止时间限制。
+
+**显式多步骤工作流不等于模型自主多轮 Agent 已完成。** 当前自然语言工具规划仍是单轮，费用预算、条件分支和补偿仍待开发。
+
+```json
+{
+  "idempotency_key": "my-workflow-20260917-001",
+  "max_steps": 2,
+  "timeout_seconds": 600,
+  "step_timeout_seconds": 120,
+  "max_read_retries": 1,
+  "steps": [
+    {"capability": "reminder.create@v1", "arguments": {"title": "准备出行资料"}},
+    {"capability": "reminder.create@v1", "arguments": {"title": "检查前一事项", "linked_record": {"$step": 0, "path": ["record_id"]}}}
+  ]
+}
+```
+
+将上述结构提交到已认证的 `POST /api/v1/tasks`。`$step` 从 0 起，只能指向本任务已完成步骤；`path` 只接受对象键和数组下标，不允许代码或表达式。`model.generate@v1` 的显式步骤可使用 `message` 和 `context` 参数，`context` 可引用前序结果，仍经秘密检测且多步骤工作流只开放本地模式。
+
+通过 `GET /api/v1/tasks/{id}/steps` 或管理后台查看步骤。未知外部结果需先在外部系统核对，再调用 `POST /api/v1/tasks/{id}/reconcile`，提交 `COMPLETED`、`NOT_EXECUTED` 或 `ABORT` 及核对依据。人工确认结果明确标记为 `user_reconciliation`，不伪装成 Provider 自动确认。确认未执行后，R3 操作必须重新审批；过期和已取消任务不能重新执行。浏览器核对操作要求近期密码与 TOTP 验证。
+
+Cron 自动化将整份 Skill 提交为一个工作流，也走相同任务入口和逐步审批策略。Outbox 与业务写入同事务，NATS 发布使用事件 ID 去重；这不意味着下游所有消费者或外部服务具有恰好一次执行保证。
 
 ### 5. 模型、插件与云调用
 

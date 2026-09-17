@@ -1,4 +1,25 @@
 {
+  "$defs": {
+    "Step": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "title": "Capability",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        }
+      },
+      "required": [
+        "capability"
+      ],
+      "title": "Step",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "message": {
@@ -59,6 +80,35 @@
       "maximum": 4096,
       "minimum": 1,
       "title": "Max Output Tokens",
+      "type": "integer"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "maxItems": 16,
+      "title": "Steps",
+      "type": "array"
+    },
+    "timeout_seconds": {
+      "default": 600,
+      "maximum": 3600,
+      "minimum": 10,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    },
+    "step_timeout_seconds": {
+      "default": 120,
+      "maximum": 300,
+      "minimum": 1,
+      "title": "Step Timeout Seconds",
+      "type": "integer"
+    },
+    "max_read_retries": {
+      "default": 1,
+      "maximum": 3,
+      "minimum": 0,
+      "title": "Max Read Retries",
       "type": "integer"
     }
   },

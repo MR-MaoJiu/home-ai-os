@@ -67,6 +67,7 @@ def get_browser_actor(request, setup=False):
         user=db.get(Principal,session.user_id)
         if not device or device.revoked or not user:raise HTTPException(401,'网页设备已撤销')
         sensitive = request.method not in {'GET','HEAD','OPTIONS'} and request.url.path.startswith(('/api/v1/secrets','/api/v1/providers','/api/v1/members','/api/v1/devices','/api/v1/remote/bind','/api/v1/remote/disable'))
+        sensitive = sensitive or (request.method == 'POST' and request.url.path.startswith('/api/v1/tasks/') and request.url.path.endswith('/reconcile'))
         if sensitive:
             proof=db.get(Nonce,'web-stepup:'+session.digest)
             if not proof or proof.expires_at<=now():raise HTTPException(403,'需要重新验证密码与动态验证码')

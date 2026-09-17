@@ -6,11 +6,12 @@ from zoneinfo import ZoneInfo
 import nats
 from nats.js.errors import NotFoundError
 from croniter import croniter
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, or_
 from .api import create_app
-from .db import Principal, Task, Outbox, Nonce, Automation, Device, Invocation, now, scope
+from .db import Principal, Task, Outbox, Nonce, Automation, Device, Invocation, Approval, now, scope
 from .runtime import run_task, submit
 from .contracts import TaskRequest
+from .data import emit, audit
 from .security import Actor
 
 log = logging.getLogger("homeai.worker")
@@ -22,7 +23,14 @@ async def cycle(app, js=None):
     for user_id, household, role in users:
         with app.db() as db:
             scope(db, user_id, household)
-            pending = list(db.scalars(select(Task.id).where(Task.owner_id == user_id, Task.status.in_(["RECEIVED", "APPROVED"])).limit(20)))
+            expired_approvals = select(Invocation.task_id).join(Approval, Approval.invocation_id == Invocation.id).where(Approval.expires_at <= now())
+            for task in db.scalars(select(Task).where(Task.owner_id == user_id, Task.status == "AWAITING_APPROVAL", or_(Task.deadline <= now(), Task.id.in_(expired_approvals))).with_for_update(skip_locked=True)):
+                task.status, task.error = "FAILED", "任务或审批已过期，未执行后续操作"
+                actor = Actor(user_id, household, "scheduler", role)
+                emit(db, actor, "task.updated", task.id)
+                audit(db, actor, "task.expired", task.id)
+            db.commit()
+            pending = list(db.scalars(select(Task.id).where(Task.owner_id == user_id, Task.status.in_(["RECEIVED", "APPROVED", "EXECUTING"])).limit(20)))
         for task_id in pending:
             await run_task(app, task_id, user_id)
         with app.db() as db:
@@ -35,12 +43,7 @@ async def cycle(app, js=None):
                 if not device or device.revoked:
                     automation.enabled = False
                     continue
-                # 仅支持无步骤依赖的单动作，复杂工作流不能伪装为并行任务。
-                if len(skill["steps"]) != 1:
-                    automation.enabled = False
-                    continue
-                step = skill["steps"][0]
-                submit(db, actor, TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}", capability=step["capability"], arguments=step["arguments"]), app.vault)
+                submit(db, actor, TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}", steps=skill["steps"], max_steps=len(skill["steps"])), app.vault)
                 automation.next_run = croniter(automation.cron, datetime.now(ZoneInfo(automation.timezone))).get_next(float)
             db.commit()
         if js:
@@ -55,15 +58,6 @@ async def cycle(app, js=None):
 
 async def main():
     app = create_app().state
-    # 重启时把执行中任务标记为待核对，不自动重放未知副作用。
-    with app.db() as db:
-        users = [(u.id, u.household_id) for u in db.scalars(select(Principal))]
-    for user_id, household in users:
-        with app.db() as db:
-            scope(db, user_id, household)
-            for t in db.scalars(select(Task).where(Task.owner_id == user_id, Task.status == "EXECUTING")):
-                t.status, t.error = "NEEDS_RECONCILIATION", "执行进程中断，请核对外部操作结果"
-            db.commit()
     nc = await nats.connect(app.settings.nats_url)
     js = nc.jetstream()
     try:

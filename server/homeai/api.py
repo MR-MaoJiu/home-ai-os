@@ -214,14 +214,18 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     def decide(approval_id: str, body: Decision, actor: Actor = auth):
         with app.state.db() as db:
             approval = own(db, Approval, approval_id, actor)
-            if approval.decision != "PENDING" or approval.expires_at <= now():
-                raise HTTPException(409, "审批已处理或过期")
             invocation = db.get(Invocation, approval.invocation_id)
             task = own(db, Task, invocation.task_id, actor)
+            db.refresh(task, with_for_update=True)
+            db.refresh(approval, with_for_update=True)
+            if approval.decision != "PENDING" or approval.expires_at <= now():
+                raise HTTPException(409, "审批已处理或过期")
             if task.status != "AWAITING_APPROVAL" or task.cancel_requested:
                 raise HTTPException(409, "任务不再等待审批")
             approval.decision = body.decision
             task.status = "APPROVED" if body.decision == "APPROVED" else "CANCELED"
+            if body.decision == "REJECTED":
+                task.cancel_requested = True
             audit(db, actor, "approval." + body.decision.lower(), approval.id)
             db.commit()
             return {"status": task.status}
@@ -291,10 +295,10 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             next_run = croniter(body.cron, datetime.now(tz)).get_next(float)
         except Exception:
             raise HTTPException(422, "无效的时区或 Cron") from None
-        if len(body.skill.steps) != 1:
-            raise HTTPException(422, "当前只开放单动作自动化；多步骤运行器尚未验收")
         if any(s.capability not in CAPABILITIES for s in body.skill.steps):
             raise HTTPException(422, "Skill 包含未知能力")
+        if any(s.capability in {"memory.semantic.index@v1", "memory.semantic.purge@v1", "memory.graph.index@v1", "memory.graph.purge@v1"} for s in body.skill.steps):
+            raise HTTPException(403, "Skill 不能直接修改派生索引")
         with app.state.db() as db:
             scope(db, actor.user_id, actor.household_id)
             row = Automation(id=uid(), household_id=actor.household_id, owner_id=actor.user_id, name=body.name, cron=body.cron, timezone=body.timezone, skill="", enabled=body.enabled, next_run=next_run)
@@ -310,6 +314,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             row.enabled = False
             db.commit()
             return {"enabled": False}
+
+    from .task_control import router as task_control_router
+    app.include_router(task_control_router)
 
     from .memory import router as memory_router
     app.include_router(memory_router)

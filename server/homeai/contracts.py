@@ -1,5 +1,5 @@
 from typing import Literal, Any
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Contract(BaseModel):
@@ -27,6 +27,11 @@ class SyncBatch(Contract):
     records: list[DataRecord] = Field(max_length=100)
 
 
+class Step(Contract):
+    capability: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class TaskRequest(Contract):
     message: str = Field(default="", max_length=20000)
     idempotency_key: str = Field(min_length=8, max_length=200)
@@ -36,15 +41,22 @@ class TaskRequest(Contract):
     arguments: dict[str, Any] = Field(default_factory=dict)
     max_steps: int = Field(default=8, ge=1, le=16)
     max_output_tokens: int = Field(default=1024, ge=1, le=4096)
+    steps: list[Step] = Field(default_factory=list, max_length=16)
+    timeout_seconds: int = Field(default=600, ge=10, le=3600)
+    step_timeout_seconds: int = Field(default=120, ge=1, le=300)
+    max_read_retries: int = Field(default=1, ge=0, le=3)
+
+    @model_validator(mode="after")
+    def validate_workflow(self):
+        if self.steps and (self.capability or self.mode != "local"):
+            raise ValueError("多步骤工作流必须使用本地模式且不能同时指定单个能力")
+        if len(self.steps) > self.max_steps:
+            raise ValueError("工作流超过步骤预算")
+        return self
 
 
 class Decision(Contract):
     decision: Literal["APPROVED", "REJECTED"]
-
-
-class Step(Contract):
-    capability: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class Skill(Contract):
