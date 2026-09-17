@@ -13,7 +13,7 @@ dependencies = [
   "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "sqlalchemy>=2.0,<3",
   "alembic>=1.14,<2", "psycopg[binary]>=3.2,<4", "pydantic-settings>=2.7,<3",
   "cryptography>=44", "httpx>=0.28,<1", "nats-py>=2.9,<3", "pgvector>=0.3,<1",
-  "python-multipart>=0.0.20", "pyyaml>=6,<7", "croniter>=6,<7", "argon2-cffi>=23,<26", "pyotp>=2.9,<3"
+  "mcp==1.30.0", "python-multipart>=0.0.20", "pyyaml>=6,<7", "croniter>=6,<7", "argon2-cffi>=23,<26", "pyotp>=2.9,<3"
 ]
 [project.optional-dependencies]
 test = ["pytest>=8", "pytest-asyncio>=0.25"]

@@ -719,6 +719,44 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
 
 参考：[whisper.cpp 官方服务说明](https://github.com/ggml-org/whisper.cpp/blob/v1.9.3/examples/server/README.md)。
 
+## 受控 MCP 接入
+
+当前固定官方 Python SDK `mcp==1.30.0` 维护线，与已有接口兼容；不会无提示升级到存在破坏性变化的 2.x。已验证真实 stdio、Streamable HTTP、文件读取，以及 Core 附件上传 → MCP 结构化解析 → 规范账本的链路。SDK 说明见 [官方仓库](https://github.com/modelcontextprotocol/python-sdk)。
+
+MCP 工具名必须显式映射到 Core 已注册能力，风险仍由 Core 定义。每次调用前分页读取工具目录，核对完整工具定义的 SHA-256；工具增加、删除、Schema 或描述变化都会停止调用，要求重新审核。目录指纹不证明远端实现没有变更，也不能代替镜像签名或操作系统沙箱。
+
+HTTP Manifest 使用 `adapter: mcp`、精确端点、允许主机、能力到工具名的映射及 `mcp_catalog_sha256`。凭据继续由成员专属 Secret 提供。映射工具必须返回与 Core 能力匹配的 `structuredContent` 对象，不能把任意文本响应当作成功业务结果。
+
+### stdio 启动配置
+
+私有配置文件须为 `0600`，包含固定绝对可执行路径、文件摘要、固定参数和工具映射。例如字段结构：
+
+```json
+{
+  "command": "/absolute/venv/bin/python",
+  "command_sha256": "可执行文件的SHA256",
+  "args": ["/absolute/provider/server.py"],
+  "file_sha256": {"/absolute/provider/server.py": "入口文件的SHA256"},
+  "env": {},
+  "tools": {"parse": "parse_document"},
+  "catalog_sha256": "审核后的工具目录SHA256"
+}
+```
+
+调用者不能指定命令、环境或工具名；桥接拒绝 shell/按需下载启动器、内联代码、未审核的文件参数与 Core 凭据环境变量。Python 虚拟环境解释器路径应保留，不要解析成系统 Python 路径而丢失安装环境。文件摘要流式计算，避免将大文件整个读入内存。
+
+```bash
+# 只列目录，不调用工具，也不自动批准或改写配置：
+.venv/bin/python scripts/inspect_mcp.py --stdio-config state/mcp/provider.json
+.venv/bin/python scripts/inspect_mcp.py --url https://mcp.example.com/mcp --token-file state/mcp/token
+# 人工核对目录和映射后启动本机桥接：
+.venv/bin/python scripts/run_mcp_stdio.py --config state/mcp/provider.json --token-file state/mcp/bridge.token
+```
+
+stdio 桥默认端口 `8108`，通过普通 HTTP Provider 映射 `/invoke/操作名` 接入 Core，服务令牌按成员加密登记。目录描述和工具返回内容均是不可信数据，不能被当作系统指令。启动器不继承 Core 数据库或主密钥环境，但本机进程仍受宿主用户权限影响；**生产沙箱、进程级网络隔离、OAuth 和完整插件卸载验收尚未完成**。
+
+工具目录校验是调用前检查，不提供与远端执行原子的目录锁。测试使用真正的 MCP 服务处理实际文件/UTF-8 附件，不用协议成功的模拟返回代替业务结果。
+
 ## Home Assistant：实体授权与受控操作
 
 Home Assistant Provider 现在默认不授权任何实体。Manifest 必须显式配置 `home_entities`（最多 50 个、不允许通配符），读取只向这些实体的独立 REST 路径发请求，不先获取全家的所有状态。返回属性经过固定字段投影，不把无关配置、令牌或其他联动实体交给模型。

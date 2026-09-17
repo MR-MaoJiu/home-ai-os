@@ -2667,6 +2667,18 @@
             "minItems": 1,
             "title": "Allowed Hosts"
           },
+          "mcp_catalog_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mcp Catalog Sha256"
+          },
           "home_events": {
             "type": "boolean",
             "title": "Home Events",

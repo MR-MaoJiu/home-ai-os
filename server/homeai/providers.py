@@ -88,13 +88,12 @@ class Registry:
                 # 官方 SDK 处理初始化、会话和流式 HTTP；工具名必须来自显式映射。
                 from mcp import ClientSession
                 from mcp.client.streamable_http import streamable_http_client
-                async with streamable_http_client(manifest.endpoint, http_client=client) as streams:
+                from homeai_providers.mcp_contract import protocol_errors
+                async with protocol_errors(), streamable_http_client(manifest.endpoint, http_client=client) as streams:
                     async with ClientSession(streams[0], streams[1]) as session:
                         await session.initialize()
-                        result = await session.call_tool(mapped, arguments)
-                        if result.isError:
-                            raise HTTPException(502, "MCP 工具执行失败")
-                        return result.model_dump(mode="json")
+                        from homeai_providers.mcp_contract import checked_call
+                        return await checked_call(session, mapped, arguments, manifest.mcp_catalog_sha256, structured=True)
             else:
                 if not mapped.startswith("/") or ".." in mapped or "://" in mapped:
                     raise HTTPException(422, "非法 Provider 路径")

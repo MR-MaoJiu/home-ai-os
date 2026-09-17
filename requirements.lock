@@ -45,3 +45,14 @@ uvicorn==0.53.0
 uvloop==0.22.1
 watchfiles==1.2.0
 websockets==17.1
+
+# MCP SDK 及新增协议依赖
+attrs==26.1.0
+httpx-sse==0.4.3
+jsonschema-specifications==2025.9.1
+jsonschema==4.26.0
+mcp==1.30.0
+pyjwt==2.14.0
+referencing==0.37.0
+rpds-py==2026.6.3
+sse-starlette==3.4.11
