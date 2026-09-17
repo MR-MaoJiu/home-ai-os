@@ -419,6 +419,25 @@ iOS 缓存使用 AES-GCM、Keychain 和文件数据保护，并排除系统备�
 
 原生测试已覆盖后台标识/模式写入构建产物、等待取消、异常释放以及短会话真实并发刷新。**尚未通过真机的系统唤醒、锁屏、低电量和长期调度验收**。APNs 和后台文件上传仍是独立待办。
 
+### 容器构建与产物验收
+
+```bash
+docker build -f deploy/Dockerfile -t homeai-core:packaging-check .
+python3 scripts/smoke_container.py --image homeai-core:packaging-check
+```
+
+Dockerfile 分两阶段构建：Node 安装锁定的前端依赖并生成静态文件，Python 安装 `requirements.lock` 后再安装项目 wheel（不重新解析运行依赖）。两个基础镜像均固定 OCI 摘要；升级时需重新构建并验收。构建上下文排除运行数据、模型目录、私有环境文件和本机代理配置。
+
+镜像默认使用 `HOMEAI_ENVIRONMENT=production`，以 UID `10001` 运行；管理资源固定在 `/app/admin-web/dist`，通过 `HOMEAI_ADMIN_DIST` 显式配置，不依赖包安装位置。源码运行时该配置默认为工作目录下的 `admin-web/dist`。曾经按 `__file__` 推导路径的实现会在 wheel 安装后找错管理目录，现已修复。
+
+验收脚本实际创建一次性数据卷和随机主密钥，启动只读根文件系统容器，仅向宿主 loopback 动态端口提供连接。它检查安装包路径、非 root 身份、管理 HTML/JS/CSS、匿名 API 拒绝、生产文档关闭及私有文件路径不可访问，结束后仅删除本次 UUID 命名的容器与卷。没有预置业务账号、伪造任务响应或使用业务数据卷。
+
+这项检查证明**发布镜像可启动且包含可用管理资源**，不代表数据库、模型、家庭部署或 gVisor 隔离已经验收。CI 新增独立 `container` 工作执行相同构建和启动检查。
+
+实际部署仍需提供应用专用数据库连接、OPA/NATS 地址、持久数据卷和人工解锁后的主密钥文件。容器内的 `127.0.0.1` 指向容器本身，不能直接照搬 Mac 原生开发配置；应用账户禁止拥有数据库超级用户或 BYPASSRLS 权限。持久目录须允许 UID `10001` 写入，主密钥只提供必要读取权限。
+
+默认容器监听 `8000`，属于内部 HTTP 端口。家庭访问需配置 HTTPS，可由 Uvicorn 显式加载只读挂载的证书/私钥，或由受控反向代理终止 TLS 并转发 WebSocket Upgrade；不能把测试用 HTTP 地址当作正式管理入口。安全 Cookie 与客户端证书校验继续生效，不提供关闭校验的部署选项。生产 Provider 仍受尚未通过的操作系统级沙箱验收门禁约束。
+
 ### 现有安装升级
 
 1. 停止旧版 API 与 Core worker，避免新旧写入事务规则混用；先创建并验证加密备份。

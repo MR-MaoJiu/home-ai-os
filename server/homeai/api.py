@@ -452,7 +452,7 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     from .remote import router as remote_router
     app.include_router(remote_router)
     from fastapi.staticfiles import StaticFiles
-    admin_dist = Path(__file__).resolve().parents[2] / "admin-web" / "dist"
+    admin_dist = settings.admin_dist
     if admin_dist.is_dir():
         app.mount("/admin", StaticFiles(directory=admin_dist, html=True), name="admin-web")
     return app

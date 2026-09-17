@@ -22,6 +22,14 @@ jobs:
       - name: Stop isolated services
         if: always()
         run: docker compose --env-file .env.local -f deploy/compose.dev.yml down --volumes
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build locked release image
+        run: docker build -f deploy/Dockerfile -t homeai-core:packaging-check .
+      - name: Verify installed package and admin assets
+        run: python3 scripts/smoke_container.py
   admin-web:
     runs-on: ubuntu-latest
     defaults:

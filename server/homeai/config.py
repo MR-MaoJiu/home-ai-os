@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="HOMEAI_", env_file=".env.local", extra="ignore")
     database_url: str = "postgresql+psycopg://homeai:homeai@127.0.0.1:5432/homeai"
     state_dir: Path = Path("state")
+    admin_dist: Path = Path("admin-web/dist")
     master_key_file: Path = Path("state/master.key")
     environment: str = "development"
     opa_url: str = "http://127.0.0.1:8181"
