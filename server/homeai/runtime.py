@@ -19,6 +19,9 @@ def submit(db, actor, request, vault):
         if old.request_hash != request_hash:
             raise HTTPException(409, "幂等键已用于不同请求")
         return old
+    internal = {"memory.semantic.index@v1", "memory.semantic.purge@v1", "memory.graph.index@v1", "memory.graph.purge@v1"}
+    if request.capability in internal:
+        raise HTTPException(403, "派生索引只能由规范账本同步任务维护")
     if request.capability and request.capability not in CAPABILITIES:
         raise HTTPException(422, "未知能力")
     ensure_model_safe(request.message)
@@ -128,6 +131,16 @@ async def run_task(app, task_id, user_id=None):
                     db.add(Disclosure(household_id=user.household_id, owner_id=user.id, task_id=task.id, provider_id=manifest.id, categories='["public_records"]', bytes_sent=len(canonical(args))))
                     db.commit()
                 result = await app.registry.invoke(db, actor, manifest, capability, args, invocation.id)
+                if capability in {"memory.semantic.search@v1", "memory.graph.search@v1"}:
+                    if not isinstance(result, dict) or not isinstance(result.get("canonical_ids"), list):
+                        raise HTTPException(502, "记忆 Provider 未返回规范记录引用")
+                    records = []
+                    for record_id in dict.fromkeys(x for x in result["canonical_ids"] if isinstance(x, str)):
+                        try: record = read_record(db, actor, record_id)
+                        except HTTPException: continue
+                        if record.kind == "memory.fact" and record.sensitivity != "SECRET":
+                            records.append(serialize(record, app.vault))
+                    result = records
             # 外部请求返回后重新读取撤销/取消，迟到结果不能覆盖取消状态。
             db.refresh(task)
             db.refresh(device)

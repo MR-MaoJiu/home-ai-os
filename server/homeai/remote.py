@@ -48,6 +48,9 @@ def status(request:Request,actor=Depends(authenticate)):
     owner(actor);config=read_config(request.app.state)
     status_file=request.app.state.settings.state_dir/'remote-status.json'
     runtime=json.loads(status_file.read_text()) if status_file.exists() else {'state':'agent_not_running'}
+    import time
+    if runtime.get('checked_at') and time.time()-runtime['checked_at']>180:
+        runtime['state']='stale'
     return {'configured':config is not None,'enabled':bool(config and config.get('enabled')),'url':config.get('url') if config else None,'runtime':runtime}
 
 class Binding(BaseModel):
@@ -63,12 +66,18 @@ async def bind(body:Binding,request:Request,actor=Depends(authenticate)):
     if endpoint.scheme!='https' or not endpoint.hostname or endpoint.username or endpoint.query or endpoint.fragment:raise HTTPException(422,'平台地址必须是 HTTPS')
     try:data=json.loads(base64.b64decode(body.binding_code,validate=True));token=data['binding_token'];instance_id=data['id']
     except Exception:raise HTTPException(422,'绑定码无效') from None
+    target=urlparse(str(data.get('url','')))
+    if target.scheme!='https' or not target.hostname or target.username or target.query or target.fragment:
+        raise HTTPException(422,'绑定地址必须是无凭据的 HTTPS 地址')
     _,key=identity(app)
     signature=base64.b64encode(key.sign(('homeai-connect-bind:'+token).encode(),ec.ECDSA(hashes.SHA256()))).decode()
     async with httpx.AsyncClient(timeout=20,trust_env=False,follow_redirects=False) as client:
         ca=await client.get(body.portal_url.rstrip('/')+'/api/public/relay-ca');ca.raise_for_status()
         response=await client.post(body.portal_url.rstrip('/')+'/api/agent/claim',json={'instance_id':instance_id,'token':token,'signature':signature});response.raise_for_status()
-    credential=response.json()['credential']
+    claimed=response.json()
+    if target.hostname!=claimed.get('domain'):
+        raise HTTPException(422,'绑定地址与平台确认的实例域名不一致')
+    credential=claimed['credential']
     config={'portal_url':body.portal_url.rstrip('/'),'instance_id':instance_id,'credential':credential,'url':data['url'],'local_https_port':body.local_https_port,'relay_ca':ca.json()['certificate'],'enabled':True}
     private_write(app.settings.state_dir/'remote-config.enc',app.vault.seal(config,'remote-config'))
     return {'bound':True,'url':data['url'],'agent_required':True}

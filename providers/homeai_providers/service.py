@@ -151,7 +151,9 @@ async def invoke(operation: str, call: Call):
 def memory_operation(operation, call):
     engine = memory()
     if operation == "search":
-        return engine.search(str(call.arguments["query"]), user_id=call.subject_id, limit=20)
+        result = engine.search(str(call.arguments["query"]), user_id=call.subject_id, limit=20)
+        rows = result.get("results", []) if isinstance(result, dict) else result
+        return {"canonical_ids": [r.get("metadata", {}).get("canonical_id") for r in rows if r.get("metadata", {}).get("canonical_id")]}
     if operation == "index":
         # 禁止二次事实推断；索引输入必须来自 Core 规范内容。
         return engine.add(str(call.arguments["content"]), user_id=call.subject_id, metadata={"canonical_id": call.arguments["record_id"]}, infer=False)

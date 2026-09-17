@@ -33,7 +33,14 @@ async def operation(name, call):
         return {'episode_id': episode.episode.uuid, 'canonical_id': call.arguments['record_id']}
     if name == 'search':
         edges = await client.search(call.arguments['query'], group_ids=[call.subject_id], num_results=20)
-        return {'edges': [edge.model_dump(mode='json') for edge in edges]}
+        from neo4j import AsyncGraphDatabase
+        episode_ids=list({episode for edge in edges for episode in edge.episodes})
+        driver=AsyncGraphDatabase.driver(os.environ['NEO4J_URI'],auth=(os.environ['NEO4J_USER'],os.environ['NEO4J_PASSWORD']))
+        try:
+            records,_,_=await driver.execute_query('MATCH (e:Episodic) WHERE e.uuid IN $ids AND e.group_id=$group RETURN e.name AS canonical_id',ids=episode_ids,group=call.subject_id)
+        finally:
+            await driver.close()
+        return {'canonical_ids':[row['canonical_id'] for row in records]}
     if name == 'purge':
         # 派生摘要可能保留删除事实，因此清空整个主体图再重建，不仅删除单条 episode。
         from neo4j import AsyncGraphDatabase
