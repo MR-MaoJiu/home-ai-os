@@ -95,6 +95,8 @@ speech_lock = asyncio.Semaphore(1)
 @app.get("/health")
 def health():
     result = {"status": "alive", "adapter": os.environ.get("HOMEAI_ADAPTER", "unconfigured")}
+    if result["adapter"] == "mail":
+        result["subject_id"] = os.environ.get("MAIL_SUBJECT_ID")
     if result["adapter"] in {"mem0", "graphiti", "funasr"}:
         from .egress_guard import stats
         result["egress"] = dict(stats)

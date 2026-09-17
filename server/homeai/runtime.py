@@ -116,6 +116,9 @@ async def _run_step(app, task_id, user_id=None):
                     db.commit()
                     return
             args = resolve_arguments(step_body.get("arguments", {}), completed, app.vault, actor.user_id)
+            if capability == "mail.send@v1":
+                from .privacy import validate_mail_send
+                args = validate_mail_send(args)
             if capability == "web.search@v1":
                 from .privacy import validate_search
                 args = validate_search(args)
@@ -248,6 +251,13 @@ async def _run_step(app, task_id, user_id=None):
                 dispatched = True
                 async with asyncio.timeout(min(body.get("step_timeout_seconds", 120), max(0.001, task.deadline - now()))):
                     result = await app.registry.invoke(db, actor, manifest, capability, provider_arguments, invocation.id)
+                if capability == "mail.read@v1":
+                    if not isinstance(result, dict) or not isinstance(result.get('source_key'), str) or len(result['source_key']) > 200:
+                        raise HTTPException(502, "邮件 Provider 缺少规范来源标识")
+                    record = ingest(db, actor, DataRecord(source="mail", source_id=result['source_key'], kind="mail.message",
+                        version=1, sensitivity="PRIVATE", cloud_policy="LOCAL_ONLY", payload=result), app.vault)
+                    body.setdefault('_record_dependencies', {})[record.id] = record.version
+                    result = {**result, 'record_id': record.id}
                 if document_source is not None:
                     from .documents import persist
                     result = persist(db, actor, document_source.id, source_version, result, app)

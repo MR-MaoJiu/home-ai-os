@@ -11,7 +11,7 @@ CAPABILITIES = {
     "memory.graph.search@v1": (1, False), "memory.graph.index@v1": (2, True), "memory.graph.purge@v1": (2, True),
     "home.states@v1": (1, False), "home.execute@v1": (3, True),
     "calendar.search@v1": (1, False), "calendar.create@v1": (2, True), "reminder.create@v1": (2, True),
-    "mail.search@v1": (1, False), "mail.send@v1": (3, True),
+    "mail.search@v1": (1, False), "mail.read@v1": (1, False), "mail.send@v1": (3, True),
     "web.search@v1": (3, False), "photo.analyze@v1": (1, False),
 }
 

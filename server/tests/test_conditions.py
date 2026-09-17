@@ -19,7 +19,7 @@ async def test_missing_calendar_skips_send_and_continues_once(workflow):
     app, user = workflow
     tid = create(user, [
         {'capability': 'calendar.search@v1', 'arguments': {'query': str(uuid.uuid4())}},
-        {'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com'}, 'when': condition(0, 'not_empty')},
+        {'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com', 'subject': '审批验证'}, 'when': condition(0, 'not_empty')},
         {'capability': 'reminder.create@v1', 'arguments': {'title': '没有日程，整理计划'}},
     ])
     await run_task(app, tid, user.user_id)
@@ -45,7 +45,7 @@ async def test_true_condition_still_requires_real_approval(workflow):
     app, user = workflow
     tid = create(user, [
         {'capability': 'reminder.create@v1', 'arguments': {'title': '准备报告'}},
-        {'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com'}, 'when': condition(0, 'equals', ['status'], 'stored')},
+        {'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com', 'subject': '审批验证'}, 'when': condition(0, 'equals', ['status'], 'stored')},
     ])
     await run_task(app, tid, user.user_id)
     await run_task(app, tid, user.user_id)

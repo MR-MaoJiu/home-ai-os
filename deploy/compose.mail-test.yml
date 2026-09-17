@@ -1,0 +1,40 @@
+# 仅用于真实 SMTP/IMAP 协议验收，不是生产邮件托管配置。
+name: homeai-mail-test
+services:
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver@sha256:d0fe7668defe157aad57ea31b1707ad1e2fb57d7a91bdf17cbdf876549946c86
+    hostname: mail.example.test
+    ports:
+      - "127.0.0.1:55465:465"
+      - "127.0.0.1:55587:587"
+      - "127.0.0.1:55993:993"
+      - "127.0.0.1:55143:143"
+    environment:
+      SSL_TYPE: manual
+      SSL_CERT_PATH: /test-tls/server.pem
+      SSL_KEY_PATH: /test-tls/server.key
+      ENABLE_RSPAMD: "0"
+      ENABLE_AMAVIS: "0"
+      ENABLE_CLAMAV: "0"
+      ENABLE_FAIL2BAN: "0"
+      ENABLE_OPENDKIM: "0"
+      ENABLE_OPENDMARC: "0"
+      ENABLE_POLICYD_SPF: "0"
+      ENABLE_DNSBL: "0"
+      ENABLE_UPDATE_CHECK: "0"
+      ENABLE_MTA_STS: "0"
+      POSTFIX_INET_PROTOCOLS: ipv4
+      DOVECOT_INET_PROTOCOLS: ipv4
+    volumes:
+      - ../state/mail-test/config:/tmp/docker-mailserver
+      - ../state/mail-test/tls:/test-tls:ro
+      - data:/var/mail
+      - state:/var/mail-state
+      - logs:/var/log/mail
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+volumes:
+  data:
+  state:
+  logs:

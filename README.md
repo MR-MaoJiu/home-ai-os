@@ -29,7 +29,7 @@
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
-| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、HA、邮件真实闭环 |
+| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、HA、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流 | APNs、后台真机调度验收、App Intent、逐 Token 文本流、真机验收 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
@@ -664,6 +664,70 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
 中文输入由 macOS 系统语音生成，需要本机中文声音和 ffmpeg，仅为测试输入；英文使用固定源码中的 `samples/jfk.wav` 人声样本。测试调用实际转写服务，不替换输出文本。完整系统回归命令可在前述开关基础上再加 `HOMEAI_WHISPER_TEST=1`。
 
 参考：[whisper.cpp 官方服务说明](https://github.com/ggml-org/whisper.cpp/blob/v1.9.3/examples/server/README.md)。
+
+## 邮件 Provider：IMAP / SMTP
+
+邮件桥接实现 `mail.search@v1`、`mail.read@v1` 和 `mail.send@v1`，每个实例绑定一个 Core 成员。Core 仅向该成员的 Provider 注入服务令牌，Provider 再核对 `subject_id`；其他成员不能复用同一邮箱。独立启动器不继承 Core 数据库或模型凭据。
+
+支持隐式 TLS 和 STARTTLS，两种模式都验证证书链、主机名和有效期，没有明文回退选项。自托管邮箱可显式提供 `MAIL_CA_FILE`，用于信任自己的 CA，而不是关闭校验。
+
+| 能力 | 当前行为 |
+|---|---|
+| 查询 | 只读 INBOX 邮件头，按主题/发件人匹配；每批最多扫描 200 个 UID、返回最多 50 项 |
+| 分页 | 返回 `uidvalidity`、`next_before_uid`、`has_more`；续页传入 `before_uid` 和原 `uidvalidity`，邮箱标识变化则重新查询 |
+| 读取 | 用 UID 和 UIDVALIDITY 读取最大 1 MiB 邮件，提取纯文本正文；HTML 不执行、远程资源不加载，附件只返回文件名和类型 |
+| 规范数据 | 读取结果按稳定账户/邮箱/UID 来源写入 `mail.message`，固定为 PRIVATE 与 LOCAL_ONLY；模型和结果查询继续受来源权限与版本检查 |
+| 发送 | 单收件人、主题与纯文本正文，逐次审批；不开放任意邮件头、群发或附件发送 |
+| 去重 | 独立 SQLite 发送账本绑定成员、调用 ID 和参数摘要；重启后重复调用返回已接受结果，不重复发送 |
+| 结果不明 | 发送中断或异常保留 SENDING/UNCERTAIN，阻止自动重发；Core 保持人工核对状态 |
+
+`accepted_by_smtp` 表示邮件服务器接受，不能据此宣称公网收件人已收到。只有同一发送账本中的 ACCEPTED 才可安全返回缓存成功；结果不明不能靠清空账本“修复”。账本需要随 Provider 数据备份，避免丢失去重依据。当前还没有邮件账本的人工解锁接口，Core 的通用“确认未执行”不会绕过 Provider 的不确定状态保护；这部分恢复流程仍需继续实现。
+
+### 配置真实邮箱
+
+将配置保存为权限 `0600` 的本机私有 JSON 文件（例如 `state/mail/account.json`），不要提交仓库。字段如下；所有值使用字符串：
+
+```json
+{
+  "MAIL_SUBJECT_ID": "已存在的 Core 成员 ID",
+  "MAIL_USER": "邮箱登录账号",
+  "MAIL_PASSWORD": "邮箱密码或专用授权码",
+  "MAIL_STATE_DIR": "state/mail/delivery-state",
+  "IMAP_HOST": "imap.example.com",
+  "IMAP_PORT": "993",
+  "IMAP_SECURITY": "tls",
+  "SMTP_HOST": "smtp.example.com",
+  "SMTP_PORT": "465",
+  "SMTP_SECURITY": "tls",
+  "PROVIDER_SERVICE_TOKEN": "本机安全生成的至少32字符随机凭据"
+}
+```
+
+如登录用户名不是发件地址，可另设 `MAIL_FROM`；STARTTLS 常用端口由邮箱服务商提供。配置是开发期本机秘密文件，须配合磁盘加密和受限文件权限；不要通过聊天、模型或普通日志传递。当前没有 OAuth 邮箱授权向导或生产秘密分发验收。
+
+```bash
+.venv/bin/python scripts/run_mail.py --config state/mail/account.json
+# 在另一个终端登记，仅保存加密的 Provider 服务令牌，不发送邮件：
+.venv/bin/python scripts/register_local_mail.py --config state/mail/account.json
+```
+
+默认桥接端口 `8107`；多个成员使用各自配置、账本与端口，登记时传相同的 `--port`。发送可通过任务 API 提交 `mail.send@v1`，参数为 `to`、`subject`、`text`；真实执行仍等待用户批准。HTML-only 邮件返回 `no_plain_text_part`，不伪造正文；附件正文解析和富文本邮件客户端不在当前已完成能力中。
+
+### 本机真实协议验收
+
+```bash
+.venv/bin/python scripts/init_mail_test_server.py
+docker compose -f deploy/compose.mail-test.yml up -d
+HOMEAI_INTEGRATION=1 HOMEAI_MAIL_TEST=1 .venv/bin/pytest -q server/tests/test_mail_live.py
+# 停止验收服务并保留测试数据：
+docker compose -f deploy/compose.mail-test.yml down
+```
+
+固定 Docker Mailserver `v16.0.1`，实际运行 Postfix 与 Dovecot；测试域为 `example.test`，只向本机 `alice@example.test` 投递。Postfix `default_transport` 和 `relay_transport` 明确禁止外部投递，端口仅绑定 loopback，不配置公网 MX 或开放中继。Docker Desktop 的 internal 网络不发布宿主端口，因此测试使用独立 bridge，并验证 Postfix 的外部投递禁令；不把该配置宣传为操作系统级网络沙箱。
+
+初始化生成独立随机密码、本地 CA 和七天有效的测试服务证书，不覆盖已有文件。测试通过真实 TLS/STARTTLS、SMTP 提交、IMAP 收取、正文入账、成员隔离、参数冲突、UIDVALIDITY 检查和 Provider 重启去重。没有用内存邮件模拟器或固定返回值替代投递。部署依据见 [Docker Mailserver 官方安装说明](https://docker-mailserver.github.io/docker-mailserver/latest/examples/tutorials/basic-installation/)。
+
+**外部邮箱账户、公网投递/退信、OAuth、生产隔离与真实账户授权撤销仍待验收**。没有账户时不默认登记测试邮箱到实际家庭服务，也不把本机投递计为真实外部账户验收。
 
 ## SearXNG 联网搜索
 

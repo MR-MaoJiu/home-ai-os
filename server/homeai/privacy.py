@@ -36,3 +36,18 @@ def validate_search(arguments):
     if PII.search(query):
         raise HTTPException(403, '查询包含已识别的个人信息，禁止发送到搜索引擎')
     return {'query': query}
+
+
+def validate_mail_send(arguments):
+    from email.utils import parseaddr
+    if set(arguments) - {'to', 'subject', 'text'}:
+        raise HTTPException(422, '邮件参数包含不支持的头部或附件')
+    recipient, subject, body = arguments.get('to'), arguments.get('subject'), arguments.get('text', '')
+    if not isinstance(recipient, str) or len(recipient) > 254 or any(char in recipient for char in '\r\n,;'):
+        raise HTTPException(422, '每封邮件需要一个有效收件地址')
+    _, parsed = parseaddr(recipient)
+    if parsed != recipient or '@' not in recipient or any(char.isspace() for char in recipient):
+        raise HTTPException(422, '收件地址格式无效')
+    if not isinstance(subject, str) or not 1 <= len(subject) <= 200 or '\r' in subject or '\n' in subject or not isinstance(body, str) or len(body.encode()) > 100000:
+        raise HTTPException(422, '邮件主题或正文格式无效')
+    return dict(arguments)

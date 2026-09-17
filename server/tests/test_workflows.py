@@ -78,7 +78,7 @@ async def test_workflow_approval_and_cancellation(workflow):
     app, user = workflow
     tid = create(user, [
         {'capability': 'reminder.create@v1', 'arguments': {'title': '已完成前序'}},
-        {'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com', 'text': '不执行发送'}},
+        {'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com', 'subject': '审批验证', 'text': '不执行发送'}},
         {'capability': 'reminder.create@v1', 'arguments': {'title': '不应执行'}},
     ])
     await run_task(app, tid, user.user_id)
@@ -104,7 +104,7 @@ def test_workflow_budget_and_private_projection_rejected(workflow):
 @pytest.mark.asyncio
 async def test_unknown_effect_reconciliation_does_not_send(workflow):
     app, user = workflow
-    tid = create(user, [{'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com', 'text': '恢复测试不发送'}}])
+    tid = create(user, [{'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com', 'subject': '审批验证', 'text': '恢复测试不发送'}}])
     await run_task(app, tid, user.user_id)
     approval = user.request('GET', '/api/v1/approvals').json()[0]
     assert user.request('POST', '/api/v1/approvals/' + approval['id'], {'decision': 'APPROVED'}).status_code == 200
@@ -204,7 +204,7 @@ async def test_expired_approval_is_finalized_by_worker(workflow):
     from homeai.worker import cycle
     from homeai.db import Principal, now
     app, user = workflow
-    tid = create(user, [{'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com'}}])
+    tid = create(user, [{'capability': 'mail.send@v1', 'arguments': {'to': 'test@example.com', 'subject': '审批验证'}}])
     await run_task(app, tid, user.user_id)
     with app.db() as db:
         principal = db.get(Principal, user.user_id)
