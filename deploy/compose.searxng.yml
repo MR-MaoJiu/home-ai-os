@@ -1,0 +1,21 @@
+name: homeai-searxng
+services:
+  searxng:
+    image: searxng/searxng@sha256:ba0a344c566ecc6e4429e81d02d93a01fa05c80e9fb6d08f0a1e57a729aa6d87
+    ports: ["127.0.0.1:58088:8080"]
+    environment:
+      SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
+    volumes:
+      - type: bind
+        source: ../state/searxng/settings.yml
+        target: /etc/searxng/settings.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - cache:/var/cache/searxng
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    restart: unless-stopped
+volumes:
+  cache:

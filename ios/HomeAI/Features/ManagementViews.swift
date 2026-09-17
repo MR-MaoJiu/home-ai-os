@@ -11,6 +11,7 @@ struct ActivityView: View {
                     ForEach(state.approvals) { approval in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(approval.capability).font(.headline)
+                            if approval.capability == "web.search@v1" { Text("确认后，下列查询词将发送给外部搜索引擎。").font(.caption) }
                             ForEach(approval.arguments.keys.sorted(), id: \.self) { key in
                                 Text("\(key)：\(approval.arguments[key]?.description ?? "")").font(.caption).textSelection(.enabled)
                             }

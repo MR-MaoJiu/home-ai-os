@@ -1,16 +1,16 @@
 {
   "schema_version": "1.0",
   "id": "searxng",
-  "version": "1.0.0",
+  "version": "2026.9.17-274b63b67",
   "adapter": "searxng",
-  "endpoint": "http://127.0.0.1:8888",
+  "endpoint": "http://127.0.0.1:58088",
   "cloud": false,
   "model": null,
   "capabilities": {
     "web.search@v1": "search"
   },
-  "timeout_seconds": 60,
-  "image_digest": null,
+  "timeout_seconds": 20,
+  "image_digest": "sha256:ba0a344c566ecc6e4429e81d02d93a01fa05c80e9fb6d08f0a1e57a729aa6d87",
   "secret_id": null,
   "allowed_hosts": [
     "127.0.0.1"

@@ -24,3 +24,15 @@ def cloud_context(records):
     # 正则无法可靠识别人名、地址和任意附件。未配置并验证 NER/本地复核链时只允许公开记录。
     if any(r.sensitivity != "PUBLIC" or r.cloud_policy != "REDACT_AND_ALLOW" for r in records):
         raise HTTPException(403, "私人内容的完整脱敏链尚未通过验收，禁止上云")
+
+
+def validate_search(arguments):
+    if set(arguments) != {'query'} or not isinstance(arguments.get('query'), str):
+        raise HTTPException(422, '联网搜索只接受 query 文本')
+    query = arguments['query'].strip()
+    if not 1 <= len(query) <= 500 or any(ord(char) < 32 for char in query) or '!' in query:
+        raise HTTPException(422, '查询为空、过长或含不允许的控制语法')
+    ensure_model_safe(query)
+    if PII.search(query):
+        raise HTTPException(403, '查询包含已识别的个人信息，禁止发送到搜索引擎')
+    return {'query': query}

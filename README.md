@@ -29,7 +29,7 @@
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
-| 文档/语音/家居/邮件 | Docling 七格式真实解析、whisper.cpp/FunASR 中英文转写；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、HA、邮件真实闭环 |
+| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、HA、邮件真实闭环 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流 | APNs、后台真机调度验收、App Intent、逐 Token 文本流、真机验收 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
@@ -664,6 +664,35 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
 中文输入由 macOS 系统语音生成，需要本机中文声音和 ffmpeg，仅为测试输入；英文使用固定源码中的 `samples/jfk.wav` 人声样本。测试调用实际转写服务，不替换输出文本。完整系统回归命令可在前述开关基础上再加 `HOMEAI_WHISPER_TEST=1`。
 
 参考：[whisper.cpp 官方服务说明](https://github.com/ggml-org/whisper.cpp/blob/v1.9.3/examples/server/README.md)。
+
+## SearXNG 联网搜索
+
+已接入官方 `2026.9.17-274b63b67`，固定镜像摘要与源码修订 `274b63b677abe1dad8c7f8284a90a365b9f16658`。它作为独立 Compose 项目运行，仅监听本机 `58088`，独立私有设置和缓存卷，不挂载 Core 数据库、主密钥或家庭文件。
+
+```bash
+.venv/bin/python scripts/init_searxng.py
+docker compose -f deploy/compose.searxng.yml up -d
+# 先统一重启当前版本 Core API 和 worker，再登记能力。
+.venv/bin/python scripts/register_local_searxng.py
+```
+
+初始化不会覆盖已有配置，随机秘密只写入 `state/searxng/settings.yml`。默认保留 Brave、DuckDuckGo 和 Wikipedia，启用 JSON API，关闭自动补全和图片代理。实例不提供公网服务。配置语义见 [官方配置说明](https://docs.searxng.org/admin/settings/settings.html)，搜索格式见 [官方 Search API](https://docs.searxng.org/dev/search_api.html)。SearXNG 上游采用 **AGPL-3.0-or-later**，其许可独立于 Home AI OS；本项目只提供部署配置与协议适配，不改写上游许可。
+
+管理后台“数据与记忆 → 联网搜索”可提交公开查询；查询只接受最多 500 字符的 `query`，每次进入审批。用户在“任务与审批”确认后，Core 再进行策略检查、写入出站披露记录，使用 POST 请求体调用 SearXNG。结果在任务详情中查看。识别到的凭据、邮箱、电话号码等个人信息会在出站前被拒绝；带有私人或未获出站授权来源依赖的工作流也被拒绝。
+
+**自托管不等于离线**：SearXNG 仍向配置的外部引擎发送查询。审批页会显示实际查询词并告知出站；不应填写姓名、地址或其他未被规则可靠识别的个人资料。完整 NER 与私人内容脱敏尚未验收。本次没有把联网搜索直接加入模型自主规划工具，避免模型自动拼接私人上下文。
+
+结果仅接受 HTTP(S) 链接，限制条数、标题及摘要长度，并标记 `untrusted_web`；不能把网页正文当系统指令。引擎部分故障返回 `partial` 和具体故障列表，没有可用结果且上游故障时任务失败，不编造结果。实际验收时 DuckDuckGo 返回 CAPTCHA，其余引擎仍返回真实结果；没有绕过验证码或伪造搜索响应。
+
+每次尝试记录 `web_search_query` 类别、Provider 和查询结构字节数，不将原查询写入披露日志；该字节数不是线路流量计费。停用 Provider 后，新任务不能执行搜索，既有任务结果保留。开发容器隔离不代表 Linux/gVisor 验收，公网限流、长时间稳定性和自主研究 Agent 仍需独立完成。
+
+真实验证命令：
+
+```bash
+HOMEAI_INTEGRATION=1 HOMEAI_SEARXNG_TEST=1 .venv/bin/pytest -q server/tests/test_searxng_live.py
+```
+
+测试会向真实引擎发送公开技术查询；未启用该标志时不把跳过测试记为集成通过。
 
 ## FunASR / SenseVoiceSmall
 

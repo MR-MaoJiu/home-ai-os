@@ -76,7 +76,10 @@ class Registry:
                         payload["temperature"] = temperature
                     r = await client.post(manifest.endpoint + f"/api/services/{domain}/{service}", json=payload, headers=headers)
             elif manifest.adapter == "searxng":
-                r = await client.get(manifest.endpoint + "/search", params={"q": arguments["query"], "format": "json"}, headers=headers)
+                from .privacy import validate_search
+                query = validate_search(arguments)['query']
+                # 查询使用请求体，避免进入本机 URL 访问日志；上游仍会收到查询词。
+                r = await client.post(manifest.endpoint.rstrip('/') + "/search", data={"q": query, "format": "json", "safesearch": "2"}, headers=headers)
             elif manifest.adapter == "mcp":
                 # 官方 SDK 处理初始化、会话和流式 HTTP；工具名必须来自显式映射。
                 from mcp import ClientSession
@@ -95,4 +98,25 @@ class Registry:
             r.raise_for_status()
             if len(r.content) > 4 * 1024 * 1024:
                 raise HTTPException(502, "Provider 返回过大")
-            return r.json()
+            result = r.json()
+            if manifest.adapter == "searxng":
+                if not isinstance(result, dict) or not isinstance(result.get('results'), list):
+                    raise HTTPException(502, "搜索服务返回结构无效")
+                entries = []
+                for item in result['results'][:50]:
+                    if not isinstance(item, dict):
+                        continue
+                    url = item.get('url')
+                    parsed = urlparse(url) if isinstance(url, str) else None
+                    if not parsed or parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username is not None or parsed.password is not None or len(url) > 4000:
+                        continue
+                    entries.append({'title': str(item.get('title', ''))[:500], 'url': url[:4000],
+                        'content': str(item.get('content', ''))[:2000], 'engine': str(item.get('engine', ''))[:100]})
+                failed = result.get('unresponsive_engines', [])
+                failures = [{'engine': str(item[0])[:100], 'reason': str(item[1])[:200]} for item in failed if isinstance(item, list) and len(item) >= 2]
+                if failures and not entries:
+                    raise HTTPException(503, '搜索未返回可用结果且上游引擎存在故障')
+                return {'results': entries[:10], 'unresponsive_engines': failures,
+                        'status': 'partial' if entries and failures else 'ok',
+                        'content_trust': 'untrusted_web'}
+            return result

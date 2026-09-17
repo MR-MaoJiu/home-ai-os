@@ -116,6 +116,14 @@ async def _run_step(app, task_id, user_id=None):
                     db.commit()
                     return
             args = resolve_arguments(step_body.get("arguments", {}), completed, app.vault, actor.user_id)
+            if capability == "web.search@v1":
+                from .privacy import validate_search
+                args = validate_search(args)
+                referenced = set(body.get("record_ids", [])) | set(body.get("_record_dependencies", {}))
+                for identifier in referenced:
+                    record = read_record(db, actor, identifier)
+                    if record.sensitivity != "PUBLIC" or record.cloud_policy != "REDACT_AND_ALLOW":
+                        raise HTTPException(403, "联网搜索不能携带未授权出站的来源数据")
             planned_response = None
             if capability == "model.generate@v1":
                 records = [read_record(db, actor, rid) for rid in body["record_ids"]]
@@ -219,6 +227,10 @@ async def _run_step(app, task_id, user_id=None):
                 result = planned_response
             else:
                 manifest = app.registry.resolve(db, capability, cloud=body["mode"] == "cloud")
+                if capability == "web.search@v1":
+                    db.add(Disclosure(household_id=user.household_id, owner_id=user.id, task_id=task.id,
+                        provider_id=manifest.id, categories='["web_search_query"]', bytes_sent=len(canonical(args))))
+                    db.commit()
                 if manifest.cloud:
                     if capability != "model.generate@v1":
                         raise HTTPException(403, "此云端能力尚未接入隐私网关")
