@@ -968,6 +968,25 @@
         }
       }
     },
+    "/api/v1/home/observations": {
+      "get": {
+        "tags": [
+          "家居观察"
+        ],
+        "summary": "Observations",
+        "operationId": "observations_api_v1_home_observations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/{task_id}/steps": {
       "get": {
         "tags": [
@@ -2647,6 +2666,11 @@
             "type": "array",
             "minItems": 1,
             "title": "Allowed Hosts"
+          },
+          "home_events": {
+            "type": "boolean",
+            "title": "Home Events",
+            "default": false
           },
           "home_entities": {
             "items": {

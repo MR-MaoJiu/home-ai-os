@@ -13,6 +13,7 @@ parser.add_argument('--user', required=True)
 parser.add_argument('--url', required=True)
 parser.add_argument('--token-file', required=True, type=Path)
 parser.add_argument('--entity', action='append', required=True)
+parser.add_argument('--events', action='store_true', help='启用后台事件观察')
 args = parser.parse_args()
 settings = Settings()
 if settings.environment == 'production':
@@ -20,7 +21,7 @@ if settings.environment == 'production':
 if args.token_file.is_symlink() or args.token_file.stat().st_mode & 0o077:
     raise SystemExit('令牌文件必须为权限 0600 的普通文件')
 manifest = ProviderManifest(id='homeassistant.' + args.user, version='pending-verification', adapter='homeassistant',
-    endpoint=args.url, allowed_hosts=[urlparse(args.url).hostname or ''], home_entities=args.entity,
+    endpoint=args.url, allowed_hosts=[urlparse(args.url).hostname or ''], home_entities=args.entity, home_events=args.events,
     capabilities={'home.states@v1': 'states', 'home.execute@v1': 'execute'})
 token = args.token_file.read_text().strip()
 with httpx.Client(timeout=10, trust_env=False, follow_redirects=False, headers={'Authorization': 'Bearer ' + token}) as client:

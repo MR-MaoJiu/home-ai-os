@@ -133,6 +133,7 @@ class ProviderManifest(Contract):
     image_digest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
     secret_id: str | None = None
     allowed_hosts: list[str] = Field(min_length=1)
+    home_events: bool = False
     home_entities: list[str] = Field(default_factory=list, max_length=50)
 
     @field_validator("home_entities")

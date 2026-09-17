@@ -107,6 +107,11 @@
       "title": "Allowed Hosts",
       "type": "array"
     },
+    "home_events": {
+      "default": false,
+      "title": "Home Events",
+      "type": "boolean"
+    },
     "home_entities": {
       "items": {
         "type": "string"

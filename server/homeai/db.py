@@ -184,6 +184,28 @@ class Automation(Owned, Base):
     last_trigger_at: Mapped[float] = mapped_column(default=0)
 
 
+class HomeObservation(Owned, Base):
+    __tablename__ = "home_observations"
+    __table_args__ = (UniqueConstraint("owner_id", "provider_id", "entity_id"),)
+    provider_id: Mapped[str] = mapped_column(String)
+    entity_id: Mapped[str] = mapped_column(String)
+    payload: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    observed_at: Mapped[float] = mapped_column(default=now)
+
+
+class HomeConnection(Owned, Base):
+    __tablename__ = "home_connections"
+    __table_args__ = (UniqueConstraint("owner_id", "provider_id"),)
+    provider_id: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    error_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(default=now)
+    lease_owner: Mapped[str | None] = mapped_column(String, nullable=True)
+    lease_until: Mapped[float] = mapped_column(default=0)
+
+
+
 class Secret(Owned, Base):
     __tablename__ = "secrets"
     provider_id: Mapped[str] = mapped_column(String)

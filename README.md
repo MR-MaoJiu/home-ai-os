@@ -29,14 +29,14 @@
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
-| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、家居事件订阅/物理设备、真实外部邮箱账户 |
+| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、家居自动化因果关联/物理设备、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流 | APNs、后台真机调度验收、App Intent、逐 Token 文本流、真机验收 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
 
 ## 系统架构
 
-核心采用 Python 模块化单体。HTTP API、任务 worker、记忆 worker 是不同进程，共享核心契约和数据库；逻辑模块不是几十个独立微服务。推理服务和第三方 Provider 在独立进程/环境运行，不能获得 Core 数据库凭据。
+核心采用 Python 模块化单体。HTTP API、任务 worker、记忆 worker 和可选家居观察者是不同进程，共享核心契约和数据库；逻辑模块不是几十个独立微服务。推理服务和第三方 Provider 在独立进程/环境运行，不能获得 Core 数据库凭据。
 
 ```mermaid
 flowchart TB
@@ -51,6 +51,10 @@ flowchart TB
     WORKER --> OUTBOX[事务 Outbox]
     OUTBOX --> NATS[NATS JetStream]
     MW[Memory Worker] --> DATA
+    HO[Home Observer] -->|授权实体订阅与快照| HA[Home Assistant]
+    HO --> PG
+    HO --> OUTBOX
+    HO --> POLICY
     MW --> EMBED[本地 Embedding]
     MW --> DERIVED[Mem0 / Graphiti 派生索引]
     WORKER --> POLICY[每次调用策略检查]
@@ -72,6 +76,7 @@ flowchart TB
 | `server/homeai/derived_memory.py` | 外部记忆投影的清除、重建、检查点与失败状态 |
 | `server/homeai/agent.py`、`runtime.py`、`task_control.py`、`worker.py` | 多步骤执行、审批恢复、人工核对、定时调度、事务事件发布 |
 | `server/homeai/policy.py`、`privacy.py` | 核心风险等级、OPA、云出站限制 |
+| `server/homeai/home_observer.py`、`home_events.py` | 家居订阅、租约、加密最新状态、断线恢复与观察 API |
 | `server/homeai/providers.py` | 端点/能力映射、凭据注入、实际 HTTP/MCP 调用 |
 | `server/homeai/remote.py`、`remote_agent.py` | 独立服务器身份、绑定、短租约、frpc 生命周期 |
 | `providers/homeai_providers/` | 第三方 SDK 桥；独立安装依赖 |
@@ -307,11 +312,11 @@ docker compose --env-file .env.local -f deploy/compose.dev.yml up -d
 
 配对码仅有效 5 分钟，不应复制到日志、Git 或聊天中。后续可以用 `homeai pair --user <用户ID>` 重新签发。开发证书指纹位于 `state/tls/fingerprint.txt`。
 
-启动本地模型、API 和 worker（分别在三个终端运行）：
+先按后文说明准备并校验 4B 模型，然后分别启动模型、API 和任务 worker；登记命令在模型服务启动后单独执行：
 
 ```sh
-llama-server -m state/models/Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1 --port 58080 -c 4096 --jinja --reasoning-budget 0
-.venv/bin/python scripts/register_local_model.py
+.venv/bin/python scripts/run_agent_model.py
+.venv/bin/python scripts/register_agent_model.py
 .venv/bin/uvicorn homeai.api:create_app --factory --host 127.0.0.1 --port 58443 --ssl-keyfile state/tls/server.key --ssl-certfile state/tls/server.crt
 .venv/bin/python -m homeai.worker
 ```
@@ -452,7 +457,7 @@ Dockerfile 分两阶段构建：Node 安装锁定的前端依赖并生成静态�
 ### 现有安装升级
 
 1. 停止旧版 API 与 Core worker，避免新旧写入事务规则混用；先创建并验证加密备份。
-2. 更新代码，执行 `.venv/bin/python scripts/migrate.py --runtime`，当前数据库迁移为 `0006`（包含同步、文档索引和事件自动化）。
+2. 更新代码，执行 `.venv/bin/python scripts/migrate.py --runtime`，当前数据库迁移为 `0008`（包含同步、索引、自动化与家居观察租约）。
 3. 构建管理后台并重启 API、任务和索引 worker，再更新 iOS。
 4. 旧配对会通过已认证的 `/api/v1/me` 补齐设备 ID；不会静默更换服务器信任对象。快照失效或备份恢复后，客户端重新建立完整缓存。
 
@@ -696,7 +701,26 @@ HOMEAI_INTEGRATION=1 HOMEAI_HOMEASSISTANT_TEST=1 .venv/bin/pytest -q server/test
 
 使用固定 Home Assistant `2026.9.2` 镜像摘要、独立配置和仅本机端口 `58123`。初始化只为新建协议验收实例创建账户，并保存私有凭据，不替换已有账户或完成用户的真实家庭配置。辅助模板开关实际调用 Home Assistant 的 input_boolean 服务；没有写死 REST 成功响应或伪造设备状态。
 
-已验证真实状态读取、审批前不动作、批准后状态变化、未授权实体拒绝，以及配置改变使旧审批失效。**这些是 Home Assistant 服务与软件辅助实体的通过证据，不是物理设备验收**。持续事件订阅、重连后的状态对账、真实家居设备和生产隔离仍待完成。API 依据见 [Home Assistant 官方 REST 文档](https://developers.home-assistant.io/docs/api/rest/)。
+已验证真实状态读取、审批前不动作、批准后状态变化、未授权实体拒绝，以及配置改变使旧审批失效。**这些是 Home Assistant 服务与软件辅助实体的通过证据，不是物理设备验收**。持续订阅和当前状态快照恢复已实现，家居事件触发自动化的跨系统因果关联、真实设备和生产隔离仍待完成。API 依据见 [Home Assistant 官方 REST 文档](https://developers.home-assistant.io/docs/api/rest/)。
+
+### Home Assistant 后台事件观察
+
+登记时增加 `--events` 可显式启用该成员的观察功能，然后运行独立 Core 进程：
+
+```bash
+.venv/bin/python scripts/migrate.py --runtime
+.venv/bin/python -m homeai.home_observer
+```
+
+观察者从 Secret Broker 使用该成员的凭据，通过 Home Assistant 的 `subscribe_trigger` 订阅授权实体。先订阅，再读取逐实体快照；收到事件后将其视为状态失效通知，重新读取当前状态，避免积压旧事件覆盖重连后的新值。不是设备历史事件的无损重放。
+
+Core 持有加密的 `home_observations` 最新观察值与 `home_connections` 连接状态，均启用 FORCE RLS。每个成员/Provider 使用 30 秒数据库租约，每 5 秒检查授权并续租，多个进程不能同时写入同一观察对象。版本仅在状态变化时推进，重复通知不会重复生成变更；断线保留旧值并明确标记 DISCONNECTED。认证或授权失败后等待配置变化，不持续重试失效凭据；普通网络故障按有上限的退避重连。
+
+`GET /api/v1/home/observations` 只返回当前调用者仍获授权的实体，停用 Provider 或撤回清单立即影响读取。管理后台“数据与记忆”显示连接状态与观察时间。观察进程未运行或租约过期时不能显示为在线。
+
+变更与 `home.state_changed` Outbox 同事务提交，可经现有 NATS 发布进程送入事件总线。它使用独立事件类别，**尚未开放为自动化规则输入**：需要先完成 Core 操作与 Home Assistant 回传事件的因果关联，防止跨系统回声循环。当前不将这些事件伪装为已完成因果追踪的 `record.changed`。
+
+已真实停止/重启独立 Home Assistant 验证自动断线恢复，并验证观察进程重启、状态持久化、租约排他、跨成员隔离和 Provider 停用。此处保存的是最新状态观察，不是完整设备历史；硬件、规模、长时间断网与物理环境仍待验收。
 
 ## 邮件 Provider：IMAP / SMTP
 

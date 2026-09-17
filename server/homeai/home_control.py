@@ -38,6 +38,18 @@ def project_state(value, allowed):
     attributes = value.get('attributes', {})
     if not isinstance(attributes, dict):
         raise HTTPException(502, '家居实体属性无效')
-    keys = {'friendly_name', 'unit_of_measurement', 'device_class', 'temperature', 'current_temperature', 'hvac_action', 'hvac_modes', 'min_temp', 'max_temp'}
+    if len(value['state']) > 500:
+        raise HTTPException(502, '家居状态长度无效')
+    projected = {}
+    for key in ('friendly_name', 'unit_of_measurement', 'device_class', 'hvac_action'):
+        if isinstance(attributes.get(key), str):
+            projected[key] = attributes[key][:500]
+    for key in ('temperature', 'current_temperature', 'min_temp', 'max_temp'):
+        number = attributes.get(key)
+        if type(number) in (int, float) and math.isfinite(number):
+            projected[key] = number
+    modes = attributes.get('hvac_modes')
+    if isinstance(modes, list) and len(modes) <= 30 and all(isinstance(mode, str) and len(mode) <= 100 for mode in modes):
+        projected['hvac_modes'] = modes
     return {'entity_id': value['entity_id'], 'state': value['state'],
-            'attributes': {key: attributes[key] for key in keys if key in attributes}, 'last_updated': value.get('last_updated')}
+            'attributes': projected, 'last_updated': value.get('last_updated') if isinstance(value.get('last_updated'), str) else None}
