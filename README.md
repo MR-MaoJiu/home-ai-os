@@ -26,7 +26,7 @@
 | 记忆 | 候选确认、规范账本、pgvector、版本检查、自动与手动重建 | Mem0/Graphiti 已完成真实重建、检索与删除验收；冲突事实裁决、规模与更多故障演练待完成 |
 | Agent | 本地模型自主多轮规划、持久化工具步骤、Token/轮次预算、结果引用、逐步审批、取消、恢复与核对 | 云端费用预算、更丰富工具、复杂条件及补偿 |
 | 隐私 | 云能力限制、公开资料最小调用、披露记录 | 完整 NER、本地复核、占位符往返还原；私人内容上云保持拒绝 |
-| 自动化 | 多步骤 Cron 工作流、幂等提交、Outbox/JetStream 发布 | 事件消费者、Skill 条件与补偿 |
+| 自动化 | 多步骤 Cron、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 条件与补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
 | 文档/语音/家居/邮件 | Docling 七格式真实解析、whisper.cpp/FunASR 中英文转写；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、HA、邮件真实闭环 |
@@ -173,6 +173,63 @@ sequenceDiagram
 通过 `GET /api/v1/tasks/{id}/steps` 或管理后台查看步骤。未知外部结果需先在外部系统核对，再调用 `POST /api/v1/tasks/{id}/reconcile`，提交 `COMPLETED`、`NOT_EXECUTED` 或 `ABORT` 及核对依据。人工确认结果明确标记为 `user_reconciliation`，不伪装成 Provider 自动确认。确认未执行后，R3 操作必须重新审批；过期和已取消任务不能重新执行。浏览器核对操作要求近期密码与 TOTP 验证。
 
 Cron 自动化将整份 Skill 提交为一个工作流，也走相同任务入口和逐步审批策略。Outbox 与业务写入同事务，NATS 发布使用事件 ID 去重；这不意味着下游所有消费者或外部服务具有恰好一次执行保证。
+
+#### 数据事件自动化
+
+管理后台的“自动化”页面可创建定时提醒，或选择“数据事件”及数据类型、来源和触发间隔。支持 `record.changed`（新增/更新）、`record.deleted`（删除）、`record.revoked`（共享撤权）。默认只处理自己的数据，包含他人共享数据需显式开启。已有数据不会因新建规则被批量追溯触发。
+
+```mermaid
+sequenceDiagram
+    participant Data as 规范数据事务
+    participant Bus as NATS JetStream
+    participant Consumer as 持久消费者
+    participant DB as PostgreSQL
+    participant Worker as 工作流执行器
+    Data->>DB: 数据与 Outbox 同事务提交
+    Data->>Bus: 发布事件 ID（发布失败重试）
+    Bus->>Consumer: 投递或重投事件
+    Consumer->>DB: 回读规范 Outbox，校验主体、事件类型
+    Consumer->>DB: 消费去重记录与自动化投递同事务提交
+    Consumer->>Bus: 提交成功后 ACK
+    Worker->>DB: 锁定规则和排队投递，复核设备、权限、版本
+    Worker->>DB: 幂等创建任务并标记已派发
+    Worker->>Worker: 每步执行策略、审批、预算与来源检查
+```
+
+消费者不信任消息里的家庭、事件类型或记录正文，只使用标识找到具有 RLS 隔离的规范 Outbox。相同事件重复投递、数据库提交后进程中断及多个工作进程并发处理，都通过事务锁、消费账本和 `(automation_id, event_id)` 唯一约束去重。冷却时间内的投递保持 `PENDING`，之后依序派发，不静默丢弃。来源被删除、撤权、改为秘密或版本变化时，过时的更新事件被跳过。
+
+每个事件任务持有来源版本依赖，排队后至实际执行之间也会重新检查。Core 将自动化调用链写进后续规范事件：同一规则不能再次进入调用链，最大允许四层，避免 A→A 和 A→B→A 循环。客户端与模型不能提交或修改内部因果链。
+
+完整 Skill 仍可通过已认证的 `POST /api/v1/automations` 提交，例如：
+
+```json
+{
+  "name": "文档解析完成提醒",
+  "trigger_kind": "event",
+  "event_type": "record.changed",
+  "record_kind": "document.parsed",
+  "cooldown_seconds": 60,
+  "include_shared": false,
+  "enabled": true,
+  "skill": {
+    "name": "文档提醒",
+    "steps": [{
+      "capability": "reminder.create@v1",
+      "arguments": {
+        "title": "新文档已可以检索",
+        "source_record": {"$event": "record_id"}
+      }
+    }]
+  }
+}
+```
+
+`$event` 仅支持整个值替换为 `record_id`、`event_id`、`event_type`，不支持执行表达式或隐式读取正文。需要读取数据的步骤仍通过正常工具及权限检查。提醒保存到规范账本，不表示 APNs 已推送或 iPhone 已写入系统提醒。
+
+`GET /api/v1/automations/{id}/deliveries` 返回自己的最近投递：`PENDING` 排队、`DISPATCHED` 已创建任务、`SKIPPED` 不再满足执行条件、`CANCELED` 已取消。`DISPATCHED` 不是任务成功；用 `task_id` 在任务页面检查最终结果。停用会取消尚未派发的投递，已创建任务需单独取消。
+
+运行 `core-worker` 同时负责发布、持久消费与派发；默认流为 `HOMEAI`、主题前缀 `homeai.events`、消费者 `automation-v1`。数据库迁移 `0006` 必须先于新版 worker 部署。NATS 恢复后会继续消费，持久去重账本保留；不要手工清除生产消费账本或重用其他环境的主题。此实现不承诺外部系统副作用“恰好一次”，未知外部结果仍进入人工核对。
+
 
 ### 5. 模型、插件与云调用
 

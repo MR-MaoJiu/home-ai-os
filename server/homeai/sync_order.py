@@ -11,10 +11,12 @@ def lock_changes(db):
 def notify_recipients(db,actor,kind,record_id,recipients=None):
     if recipients is None:
         recipients=list(db.scalars(select(Grant.grantee_id).where(Grant.owner_id==actor.user_id,Grant.record_id==record_id)))
+    from .data import event_metadata
+    metadata = event_metadata(db, kind, record_id)
     for recipient in set(recipients)-{actor.user_id}:
         # INSERT 不请求 RETURNING，发送者不因此获得读取接收者事件的权限。
         db.flush()
-        db.connection().execute(insert(Outbox).inline().values(event_id=uid(),owner_id=recipient,household_id=actor.household_id,kind=kind,resource_id=record_id,published=False,created_at=now()))
+        db.connection().execute(insert(Outbox).inline().values(event_id=uid(),owner_id=recipient,household_id=actor.household_id,kind=kind,resource_id=record_id,published=False,created_at=now(),**metadata))
 
 
 def invalidate_snapshots(db,actor,recipients):

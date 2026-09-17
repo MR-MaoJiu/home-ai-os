@@ -109,7 +109,18 @@ struct DataEntry: Codable, Identifiable, Sendable {
 struct DataPage: Decodable { let records: [DataEntry] }
 struct ActivityEntry: Decodable, Identifiable { let id: String; let action: String; let resource_id: String; let created_at: Double }
 struct ActivityPage: Decodable { let entries: [ActivityEntry] }
-struct AutomationEntry: Decodable, Identifiable { let id: String; let name: String; let cron: String; let enabled: Bool }
+struct AutomationEntry: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let cron: String
+    let enabled: Bool
+    let trigger_kind: String?
+    let event_type: String?
+    var triggerDescription: String {
+        guard trigger_kind == "event" else { return cron }
+        return ["record.changed": "数据新增或更新", "record.deleted": "数据删除", "record.revoked": "共享授权撤回"][event_type ?? ""] ?? "数据事件"
+    }
+}
 struct ApprovalEntry: Decodable, Identifiable { let id: String; let capability: String; let arguments: [String: JSONValue] }
 
 indirect enum JSONValue: Codable, Sendable, CustomStringConvertible {

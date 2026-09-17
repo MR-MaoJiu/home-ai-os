@@ -36,7 +36,7 @@ async def cycle(app, js=None):
         with app.db() as db:
             scope(db, user_id, household)
             # 自动化逐步骤按固定幂等键提交；每步经过同一审批与策略路径。
-            for automation in db.scalars(select(Automation).where(Automation.owner_id == user_id, Automation.enabled.is_(True), Automation.next_run <= now()).with_for_update(skip_locked=True)):
+            for automation in db.scalars(select(Automation).where(Automation.owner_id == user_id, Automation.enabled.is_(True), Automation.trigger_kind == "cron", Automation.next_run <= now()).with_for_update(skip_locked=True)):
                 skill = app.vault.open(automation.skill, user_id + ":automation:" + automation.id)
                 actor = Actor(user_id, household, skill["device_id"], role)
                 device = db.get(Device, actor.device_id)
@@ -46,12 +46,14 @@ async def cycle(app, js=None):
                 submit(db, actor, TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}", steps=skill["steps"], max_steps=len(skill["steps"])), app.vault)
                 automation.next_run = croniter(automation.cron, datetime.now(ZoneInfo(automation.timezone))).get_next(float)
             db.commit()
+        from .event_automations import dispatch
+        dispatch(app, user_id, household, role)
         if js:
             with app.db() as db:
                 scope(db, user_id, household)
                 events = db.scalars(select(Outbox).where(Outbox.owner_id == user_id, Outbox.published.is_(False)).order_by(Outbox.id).limit(100)).all()
                 for event in events:
-                    await js.publish("homeai.events." + event.kind, json.dumps({"schema_version": "1.0", "event_id": event.event_id, "owner_id": event.owner_id, "household_id": event.household_id, "type": event.kind, "resource_id": event.resource_id}).encode(), headers={"Nats-Msg-Id": event.event_id})
+                    await js.publish(app.settings.event_subject_prefix + "." + event.kind, json.dumps({"schema_version": "1.0", "event_id": event.event_id, "owner_id": event.owner_id, "household_id": event.household_id, "type": event.kind, "resource_id": event.resource_id}).encode(), headers={"Nats-Msg-Id": event.event_id})
                     event.published = True
                 db.commit()
 
@@ -61,13 +63,16 @@ async def main():
     nc = await nats.connect(app.settings.nats_url)
     js = nc.jetstream()
     try:
-        await js.stream_info("HOMEAI")
+        await js.stream_info(app.settings.event_stream)
     except NotFoundError:
-        await js.add_stream(name="HOMEAI", subjects=["homeai.events.>"])
+        await js.add_stream(name=app.settings.event_stream, subjects=[app.settings.event_subject_prefix + ".>"])
+    from .event_automations import subscription, drain
+    sub = await subscription(app, js)
     try:
         while True:
             try:
                 await cycle(app, js)
+                await drain(app, sub)
                 with app.db() as db:
                     db.execute(delete(Nonce).where(Nonce.expires_at < now()))
                     db.commit()

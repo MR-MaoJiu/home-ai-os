@@ -12,7 +12,7 @@ from .policy import CAPABILITIES
 from .privacy import ensure_model_safe, cloud_context, redact
 
 
-def submit(db, actor, request, vault):
+def submit(db, actor, request, vault, *, automation_chain=None, record_dependencies=None):
     scope(db, actor.user_id, actor.household_id)
     payload = request.model_dump()
     request_hash = digest(canonical(payload))
@@ -30,6 +30,10 @@ def submit(db, actor, request, vault):
         raise HTTPException(422, "未知能力")
     ensure_model_safe(request.message)
     payload["_agent"] = request.mode == "local" and not request.capability and not request.steps
+    if automation_chain is not None:
+        payload["_automation_chain"] = automation_chain
+    if record_dependencies:
+        payload["_record_dependencies"] = record_dependencies
     task_id = uid()
     task = Task(id=task_id, household_id=actor.household_id, owner_id=actor.user_id, idempotency_key=request.idempotency_key, request_hash=request_hash, request=vault.seal({**payload, "device_id": actor.device_id}, actor.user_id + ":task:" + task_id), deadline=now() + request.timeout_seconds)
     db.add(task)
@@ -51,6 +55,7 @@ async def _run_step(app, task_id, user_id=None):
         user = db.get(Principal, task.owner_id)
         scope(db, user.id, user.household_id)
         body = app.vault.open(task.request, user.id + ":task:" + task.id)
+        db.info["automation_chain"] = body.get("_automation_chain", [])
         actor = Actor(user.id, user.household_id, body["device_id"], user.role)
         device = db.get(Device, actor.device_id)
         steps = body.get("steps") or []

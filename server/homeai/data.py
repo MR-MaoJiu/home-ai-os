@@ -9,8 +9,19 @@ def audit(db, actor, action, resource_id, details=None):
     db.add(Audit(household_id=actor.household_id, owner_id=actor.user_id, action=action, resource_id=resource_id, details=json.dumps(details or {}, ensure_ascii=False)))
 
 
+def event_metadata(db, kind, resource_id):
+    metadata = {"automation_chain": json.dumps(db.info.get("automation_chain", []))}
+    if kind.startswith("record."):
+        record = db.get(Record, resource_id)
+        if record:
+            metadata.update(record_kind=record.kind, record_source=record.source,
+                            record_owner_id=record.owner_id, record_version=record.version)
+    return metadata
+
+
 def emit(db, actor, kind, resource_id):
-    db.add(Outbox(household_id=actor.household_id, owner_id=actor.user_id, kind=kind, resource_id=resource_id))
+    db.add(Outbox(household_id=actor.household_id, owner_id=actor.user_id, kind=kind,
+                 resource_id=resource_id, **event_metadata(db, kind, resource_id)))
 
 
 def accessible(db, actor, include_deleted=False):

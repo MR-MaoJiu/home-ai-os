@@ -131,7 +131,23 @@ class Outbox(Base):
     owner_id: Mapped[str] = mapped_column(String)
     kind: Mapped[str] = mapped_column(String)
     resource_id: Mapped[str] = mapped_column(String)
+    record_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    record_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    record_owner_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    record_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    automation_chain: Mapped[str] = mapped_column(Text, default="[]")
     published: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[float] = mapped_column(default=now)
+
+
+class AutomationDelivery(Owned, Base):
+    __tablename__ = "automation_deliveries"
+    __table_args__ = (UniqueConstraint("automation_id", "event_id"),)
+    automation_id: Mapped[str] = mapped_column(String)
+    event_id: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[float] = mapped_column(default=now)
 
 
@@ -158,6 +174,14 @@ class Automation(Owned, Base):
     skill: Mapped[str] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     next_run: Mapped[float]
+    trigger_kind: Mapped[str] = mapped_column(String, default="cron")
+    event_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    record_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    record_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    include_shared: Mapped[bool] = mapped_column(Boolean, default=False)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[float] = mapped_column(default=now)
+    last_trigger_at: Mapped[float] = mapped_column(default=0)
 
 
 class Secret(Owned, Base):

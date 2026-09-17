@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     opa_url: str = "http://127.0.0.1:8181"
     nats_url: str = "nats://127.0.0.1:4222"
+    event_stream: str = "HOMEAI"
+    event_subject_prefix: str = "homeai.events"
     session_seconds: int = 900
     max_upload_bytes: int = 20 * 1024 * 1024
     provider_timeout_seconds: int = 60

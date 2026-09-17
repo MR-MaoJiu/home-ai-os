@@ -884,6 +884,53 @@
         }
       }
     },
+    "/api/v1/automations/{automation_id}/deliveries": {
+      "get": {
+        "summary": "Automation Deliveries",
+        "operationId": "automation_deliveries_api_v1_automations__automation_id__deliveries_get",
+        "parameters": [
+          {
+            "name": "automation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Automation Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/automations/{automation_id}": {
       "delete": {
         "summary": "Stop Automation",
@@ -2016,7 +2063,71 @@
           },
           "cron": {
             "type": "string",
-            "title": "Cron"
+            "title": "Cron",
+            "default": ""
+          },
+          "trigger_kind": {
+            "type": "string",
+            "enum": [
+              "cron",
+              "event"
+            ],
+            "title": "Trigger Kind",
+            "default": "cron"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "record.changed",
+                  "record.deleted",
+                  "record.revoked"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "record_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Kind"
+          },
+          "record_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Source"
+          },
+          "include_shared": {
+            "type": "boolean",
+            "title": "Include Shared",
+            "default": false
+          },
+          "cooldown_seconds": {
+            "type": "integer",
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Cooldown Seconds",
+            "default": 0
           },
           "timezone": {
             "type": "string",
@@ -2036,7 +2147,6 @@
         "type": "object",
         "required": [
           "name",
-          "cron",
           "skill"
         ],
         "title": "AutomationInput"

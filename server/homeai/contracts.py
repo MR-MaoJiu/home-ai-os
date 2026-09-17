@@ -68,7 +68,13 @@ class Skill(Contract):
 
 class AutomationInput(Contract):
     name: str = Field(min_length=1, max_length=100)
-    cron: str
+    cron: str = ""
+    trigger_kind: Literal["cron", "event"] = "cron"
+    event_type: Literal["record.changed", "record.deleted", "record.revoked"] | None = None
+    record_kind: str | None = Field(default=None, min_length=1, max_length=100)
+    record_source: str | None = Field(default=None, min_length=1, max_length=100)
+    include_shared: bool = False
+    cooldown_seconds: int = Field(default=0, ge=0, le=86400)
     timezone: str = "Asia/Shanghai"
     skill: Skill
     enabled: bool = False

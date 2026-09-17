@@ -379,32 +379,53 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     def list_automations(actor: Actor = auth):
         with app.state.db() as db:
             scope(db, actor.user_id, actor.household_id)
-            return [{"id": a.id, "name": a.name, "cron": a.cron, "enabled": a.enabled, "next_run": a.next_run} for a in db.scalars(select(Automation).where(Automation.owner_id == actor.user_id))]
+            return [{"id": a.id, "name": a.name, "cron": a.cron, "enabled": a.enabled, "next_run": a.next_run if a.trigger_kind == "cron" else None, "trigger_kind": a.trigger_kind, "event_type": a.event_type, "record_kind": a.record_kind, "record_source": a.record_source, "include_shared": a.include_shared, "cooldown_seconds": a.cooldown_seconds} for a in db.scalars(select(Automation).where(Automation.owner_id == actor.user_id))]
 
     @app.post("/api/v1/automations")
     def create_automation(body: AutomationInput, actor: Actor = auth):
         try:
             tz = ZoneInfo(body.timezone)
-            next_run = croniter(body.cron, datetime.now(tz)).get_next(float)
+            if body.trigger_kind == "event":
+                if not body.event_type or body.cron:
+                    raise ValueError("事件触发必须提供事件类型且不设置 Cron")
+                next_run = 0
+            else:
+                if body.event_type:
+                    raise ValueError("定时触发不能提供事件类型")
+                next_run = croniter(body.cron, datetime.now(tz)).get_next(float)
         except Exception:
-            raise HTTPException(422, "无效的时区或 Cron") from None
+            raise HTTPException(422, "无效的时区、Cron 或事件触发配置") from None
         if any(s.capability not in CAPABILITIES for s in body.skill.steps):
             raise HTTPException(422, "Skill 包含未知能力")
         if any(s.capability in {"memory.semantic.index@v1", "memory.semantic.purge@v1", "memory.graph.index@v1", "memory.graph.purge@v1"} for s in body.skill.steps):
             raise HTTPException(403, "Skill 不能直接修改派生索引")
         with app.state.db() as db:
             scope(db, actor.user_id, actor.household_id)
-            row = Automation(id=uid(), household_id=actor.household_id, owner_id=actor.user_id, name=body.name, cron=body.cron, timezone=body.timezone, skill="", enabled=body.enabled, next_run=next_run)
+            row = Automation(id=uid(), household_id=actor.household_id, owner_id=actor.user_id, name=body.name, cron=body.cron, timezone=body.timezone, skill="", enabled=body.enabled, next_run=next_run, trigger_kind=body.trigger_kind, event_type=body.event_type, record_kind=body.record_kind, record_source=body.record_source, include_shared=body.include_shared, cooldown_seconds=body.cooldown_seconds)
             row.skill = v.seal({**body.skill.model_dump(), "device_id": actor.device_id}, actor.user_id + ":automation:" + row.id)
             db.add(row)
             db.commit()
             return {"id": row.id}
 
+    @app.get("/api/v1/automations/{automation_id}/deliveries")
+    def automation_deliveries(automation_id: str, actor: Actor = auth, limit: int = 50):
+        from .db import AutomationDelivery
+        with app.state.db() as db:
+            own(db, Automation, automation_id, actor)
+            rows = db.scalars(select(AutomationDelivery).where(AutomationDelivery.automation_id == automation_id,
+                AutomationDelivery.owner_id == actor.user_id).order_by(AutomationDelivery.created_at.desc()).limit(max(1, min(limit, 100))))
+            return [{"id": row.id, "event_id": row.event_id, "status": row.status, "task_id": row.task_id,
+                     "reason": row.reason, "created_at": row.created_at} for row in rows]
+
     @app.delete("/api/v1/automations/{automation_id}")
     def stop_automation(automation_id: str, actor: Actor = auth):
         with app.state.db() as db:
             row = own(db, Automation, automation_id, actor)
+            db.refresh(row, with_for_update=True)
             row.enabled = False
+            from .db import AutomationDelivery
+            for delivery in db.scalars(select(AutomationDelivery).where(AutomationDelivery.automation_id == row.id, AutomationDelivery.status == "PENDING").with_for_update()):
+                delivery.status, delivery.reason = "CANCELED", "自动化已停用"
             db.commit()
             return {"enabled": False}
 
