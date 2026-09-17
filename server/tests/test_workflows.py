@@ -21,7 +21,12 @@ def workflow():
     app = create_app(settings)
     client = TestClient(app)
     user = SignedClient(client, app.state.db, household=str(uuid.uuid4()))
-    return app.state, user
+    try:
+        yield app.state, user
+    finally:
+        client.close()
+        # 每个隔离应用拥有独立连接池，测试结束必须主动释放。
+        app.state.db.kw['bind'].dispose()
 
 
 def create(user, steps):

@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "TaskState": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "maxLength": 64,
+          "title": "Status",
+          "type": "string"
+        },
+        "cancel_requested": {
+          "title": "Cancel Requested",
+          "type": "boolean"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/TaskStepState"
+          },
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "cancel_requested",
+        "steps"
+      ],
+      "title": "TaskState",
+      "type": "object"
+    },
+    "TaskStepState": {
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "minimum": 0,
+          "title": "Step",
+          "type": "integer"
+        },
+        "status": {
+          "maxLength": 64,
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "status"
+      ],
+      "title": "TaskStepState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "task.snapshot",
+        "heartbeat"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "has_more": {
+      "default": false,
+      "title": "Has More",
+      "type": "boolean"
+    },
+    "tasks": {
+      "items": {
+        "$ref": "#/$defs/TaskState"
+      },
+      "maxItems": 100,
+      "title": "Tasks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "type"
+  ],
+  "title": "TaskStateNotification",
+  "type": "object"
+}

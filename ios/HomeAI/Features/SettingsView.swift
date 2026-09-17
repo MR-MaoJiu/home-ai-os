@@ -29,6 +29,7 @@ struct SettingsView: View {
                     state.activity = []
                     state.approvals = []
                     state.automations = []
+                    state.taskStates = []
                     state.syncStatus = ""
                     state.connected = true
                     state.connectionRevision = UUID()

@@ -15,6 +15,7 @@ import SwiftUI
         }
         .onChange(of: phase) { _, phase in
             if phase == .background {
+                Task { await state.stopForegroundEvents() }
                 state.configureBackgroundSync(enabled: UserDefaults.standard.bool(forKey: BackgroundSync.preference))
             } else if phase == .active {
                 Task { await state.resumeForeground() }
@@ -29,11 +30,13 @@ struct RootView: View {
         @Bindable var state = state
         TabView {
             Tab("AI", systemImage: "sparkles") { NavigationStack { ChatView().id(state.connectionRevision) } }
-            Tab("活动", systemImage: "clock.arrow.circlepath") { NavigationStack { ActivityView() } }
+            Tab("活动", systemImage: "clock.arrow.circlepath") { NavigationStack { ActivityView().id(state.connectionRevision) } }
             Tab("自动化", systemImage: "bolt") { NavigationStack { AutomationsView() } }
             Tab("数据", systemImage: "externaldrive") { NavigationStack { DataView() } }
             Tab("设置", systemImage: "gearshape") { NavigationStack { SettingsView() } }
         }
+        .task(id: state.connectionRevision) { if state.connected { state.startForegroundEvents() } }
+        .onChange(of: state.connected) { _, connected in if connected { state.startForegroundEvents() } }
         .tint(.teal)
         .alert("操作未完成", isPresented: Binding(get: { state.error != nil }, set: { if !$0 { state.error = nil } })) {
             Button("知道了", role: .cancel) { state.error = nil }

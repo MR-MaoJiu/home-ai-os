@@ -30,8 +30,11 @@ async def test_missing_calendar_skips_send_and_continues_once(workflow):
     # 从另一个应用实例恢复，跳过状态来自数据库，不依赖进程内变量。
     from homeai.api import create_app
     restarted = create_app(app.settings).state
-    await run_task(restarted, tid, user.user_id)
-    await run_task(restarted, tid, user.user_id)
+    try:
+        await run_task(restarted, tid, user.user_id)
+        await run_task(restarted, tid, user.user_id)
+    finally:
+        restarted.db.kw['bind'].dispose()
     steps = user.request('GET', '/api/v1/tasks/' + tid + '/steps').json()
     assert [row['status'] for row in steps] == ['SUCCEEDED', 'SKIPPED', 'SUCCEEDED']
     assert user.request('GET', '/api/v1/data/' + steps[2]['result']['record_id']).json()['payload']['title'] == '没有日程，整理计划'

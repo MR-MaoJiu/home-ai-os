@@ -429,6 +429,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             db.commit()
             return {"enabled": False}
 
+    from .task_events import router as task_events_router
+    app.include_router(task_events_router)
+
     from .task_control import router as task_control_router
     app.include_router(task_control_router)
 

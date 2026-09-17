@@ -17,6 +17,18 @@ struct PairingCode: Codable, Sendable {
 }
 
 /// 网络与身份集中在单一 actor，避免页面自行处理签名或泄露会话。
+struct TaskStateEvent: Decodable, Sendable {
+    struct Item: Decodable, Sendable, Identifiable { let id: String; let status: String }
+    let type: String
+    let tasks: [Item]
+    let has_more: Bool
+}
+
+struct TaskEventSubscription: Sendable {
+    let id: UUID
+    let events: AsyncThrowingStream<TaskStateEvent, Error>
+}
+
 actor APIClient {
     private var connection: Connection?
     private let persistConnection: Bool
@@ -25,6 +37,7 @@ actor APIClient {
     private var generation = UUID()
     private let renewalGate = AsyncOperationGate()
     private var pairingAttempt = UUID()
+    private var eventSockets: [UUID: URLSessionWebSocketTask] = [:]
 
     init(persistConnection: Bool = true) {
         self.persistConnection = persistConnection
@@ -59,6 +72,8 @@ actor APIClient {
         try Self.validate(data, response)
         let result = try JSONDecoder().decode(Tokens.self, from: data)
         guard pairingAttempt == attempt else { throw APIError.message("配对已被更新的请求替代") }
+        for socket in eventSockets.values { socket.cancel(with: .goingAway, reason: nil) }
+        eventSockets.removeAll()
         generation = UUID()
         connection = Connection(url: code.url, fingerprint: code.fingerprint, token: result.access_token, refreshToken: result.refresh_token, expiresAt: Date().addingTimeInterval(Double(result.expires_in)))
         connection?.tlsKeyFingerprint = pinning.acceptedKeyFingerprint
@@ -110,6 +125,65 @@ actor APIClient {
         return data
     }
 
+    /// 前台状态流只推送标识与进度，业务结果必须继续调用鉴权接口。
+    func taskEvents(taskID: String? = nil, expectedNamespace: String) async throws -> TaskEventSubscription {
+        guard try await syncNamespace() == expectedNamespace else { throw APIError.message("连接已切换") }
+        let started = generation
+        guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对") }
+        if saved.expiresAt.timeIntervalSinceNow < 60 {
+            saved = try await renewalGate.withPermit { try await self.renewIfNeeded(generation: started) }
+        }
+        if let taskID, UUID(uuidString: taskID) == nil { throw APIError.message("无效任务标识") }
+        let path = taskID.map { "/api/v1/tasks/\($0)/events" } ?? "/api/v1/events/tasks"
+        var request = try signedRequest("GET", path, body: nil, token: saved.token, base: base)
+        var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: true)!
+        components.scheme = "wss"
+        request.url = components.url
+        let socket = session.webSocketTask(with: request)
+        socket.maximumMessageSize = 256 * 1024
+        let identifier = UUID()
+        eventSockets[identifier] = socket
+        socket.resume()
+        let events = AsyncThrowingStream<TaskStateEvent, Error>(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let reader = Task {
+                do {
+                    while !Task.isCancelled {
+                        let message = try await socket.receive()
+                        guard started == self.generation else { throw APIError.message("连接已切换") }
+                        let data: Data
+                        switch message {
+                        case .data(let value): data = value
+                        case .string(let value): data = Data(value.utf8)
+                        @unknown default: throw APIError.message("未知状态流消息")
+                        }
+                        continuation.yield(try JSONDecoder().decode(TaskStateEvent.self, from: data))
+                    }
+                    continuation.finish()
+                } catch {
+                    if Task.isCancelled { continuation.finish() }
+                    else if socket.closeCode.rawValue == 4401 { continuation.finish(throwing: APIError.http(401, "状态流会话已过期或授权已撤销")) }
+                    else { continuation.finish(throwing: error) }
+                }
+                self.eventSockets.removeValue(forKey: identifier)
+                socket.cancel(with: .goingAway, reason: nil)
+            }
+            continuation.onTermination = { _ in
+                reader.cancel()
+                socket.cancel(with: .goingAway, reason: nil)
+            }
+        }
+        return TaskEventSubscription(id: identifier, events: events)
+    }
+
+    func closeTaskEvents(_ identifier: UUID) {
+        eventSockets.removeValue(forKey: identifier)?.cancel(with: .goingAway, reason: nil)
+    }
+
+    func stopTaskEvents() {
+        for socket in eventSockets.values { socket.cancel(with: .goingAway, reason: nil) }
+        eventSockets.removeAll()
+    }
+
     func uploadDocument(name: String, contents: Data) async throws -> String {
         guard contents.count <= 20 * 1024 * 1024 else { throw APIError.message("文件超过 20 MB") }
         let namespace = try await syncNamespace()
@@ -138,7 +212,7 @@ actor APIClient {
         return saved
     }
 
-    private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession, expectedGeneration: UUID, contentType: String = "application/json") async throws -> Data {
+    private func signedRequest(_ method: String, _ path: String, body: Data?, token: String, base: URL, contentType: String = "application/json") throws -> URLRequest {
         guard let url = URL(string: path, relativeTo: base) else { throw APIError.message("无效请求地址") }
         let timestamp = String(Date().timeIntervalSince1970)
         let nonce = UUID().uuidString
@@ -152,6 +226,11 @@ actor APIClient {
         request.setValue(timestamp, forHTTPHeaderField: "X-HomeAI-Time")
         request.setValue(nonce, forHTTPHeaderField: "X-HomeAI-Nonce")
         request.setValue(try identity.sign(Data(proof.utf8)), forHTTPHeaderField: "X-HomeAI-Signature")
+        return request
+    }
+
+    private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession, expectedGeneration: UUID, contentType: String = "application/json") async throws -> Data {
+        let request = try signedRequest(method, path, body: body, token: token, base: base, contentType: contentType)
         do {
             let (data, response) = try await session.data(for: request)
             guard expectedGeneration == generation else { throw APIError.message("连接已切换，请重试") }

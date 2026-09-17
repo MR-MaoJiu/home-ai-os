@@ -5,6 +5,7 @@ struct ActivityView: View {
     @Environment(AppState.self) private var state
     var body: some View {
         List {
+            if !state.taskEventStatus.isEmpty { Text(state.taskEventStatus).font(.caption).foregroundStyle(.secondary) }
             if !state.approvals.isEmpty {
                 Section("等待你的确认") {
                     ForEach(state.approvals) { approval in
@@ -22,6 +23,18 @@ struct ActivityView: View {
                     }
                 }
             }
+            if !state.taskStates.isEmpty {
+                Section("任务进度") {
+                    ForEach(state.taskStates) { task in
+                        NavigationLink { TaskProgressView(identifier: task.id) } label: {
+                            VStack(alignment: .leading) {
+                                Text(task.status)
+                                Text(task.id.prefix(8)).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
             Section("操作记录") {
                 ForEach(state.activity) { entry in
                     VStack(alignment: .leading) {
@@ -30,7 +43,7 @@ struct ActivityView: View {
                     }
                 }
             }
-        }.overlay { if state.activity.isEmpty && state.approvals.isEmpty { ContentUnavailableView("暂无活动", systemImage: "clock") } }
+        }.overlay { if state.activity.isEmpty && state.approvals.isEmpty && state.taskStates.isEmpty { ContentUnavailableView("暂无活动", systemImage: "clock") } }
         .navigationTitle("活动")
         .task { await reload() }.refreshable { await reload() }
     }
@@ -40,6 +53,47 @@ struct ActivityView: View {
             _ = try await state.api.request("POST", "/api/v1/approvals/" + id, body: JSONSerialization.data(withJSONObject: ["decision": decision]))
             try await state.loadActivity()
         } }
+    }
+}
+
+struct TaskProgressView: View {
+    @Environment(AppState.self) private var state
+    let identifier: String
+    @State private var result: ChatView.TaskResult?
+    @State private var error: String?
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red) }
+            if let result {
+                LabeledContent("状态", value: result.status)
+                if let message = result.error { Text(message) }
+                if let value = ChatView.answer(result.result) { Text(value).textSelection(.enabled) }
+                ForEach(ChatView.sources(result.result)) { source in
+                    NavigationLink { RecordSourceView(source: source) } label: { Text(source.title) }
+                }
+                if ["RECEIVED", "APPROVED", "AWAITING_APPROVAL", "EXECUTING"].contains(result.status) {
+                    Button("取消未完成步骤", role: .destructive) { Task { await state.perform {
+                        _ = try await state.api.request("POST", "/api/v1/tasks/" + identifier + "/cancel")
+                        await reload()
+                    } } }
+                }
+            } else if error == nil { ProgressView("读取任务状态…") }
+        }.navigationTitle("任务 " + identifier.prefix(8))
+        .task(id: state.taskEventRevision) { await reload() }
+        .refreshable { await reload() }
+    }
+    func reload() async {
+        do {
+            let namespace = try await state.api.syncNamespace()
+            let data = try await state.api.request("GET", "/api/v1/tasks/" + identifier, expectedNamespace: namespace)
+            guard !Task.isCancelled else { return }
+            result = try JSONDecoder().decode(ChatView.TaskResult.self, from: data)
+            error = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            result = nil
+            self.error = error.localizedDescription
+        }
     }
 }
 

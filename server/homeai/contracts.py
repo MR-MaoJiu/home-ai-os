@@ -142,3 +142,22 @@ class ProviderManifest(Contract):
         if p.scheme not in {"http", "https"} or not p.hostname or p.username or p.password or p.query or p.fragment:
             raise ValueError("端点必须为不含凭据的 HTTP(S) 地址")
         return v.rstrip("/")
+
+
+class TaskStepState(Contract):
+    step: int = Field(ge=0)
+    status: str = Field(max_length=64)
+
+
+class TaskState(Contract):
+    id: str
+    status: str = Field(max_length=64)
+    cancel_requested: bool
+    steps: list[TaskStepState]
+
+
+class TaskStateNotification(Contract):
+    schema_version: Literal['1.0'] = '1.0'
+    type: Literal['task.snapshot', 'heartbeat']
+    has_more: bool = False
+    tasks: list[TaskState] = Field(default_factory=list, max_length=100)

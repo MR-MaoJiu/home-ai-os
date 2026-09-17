@@ -43,17 +43,10 @@ struct ChatView: View {
                             let body = try JSONSerialization.data(withJSONObject: ["idempotency_key": UUID().uuidString, "capability": "speech.transcribe@v1", "arguments": ["content_base64": audio.base64EncodedString()]])
                             let data = try await state.api.request("POST", "/api/v1/tasks", body: body, expectedNamespace: namespace)
                             let task = try JSONDecoder().decode(TaskCreated.self, from: data)
-                            for _ in 0..<120 {
-                                let raw = try await state.api.request("GET", "/api/v1/tasks/" + task.id, expectedNamespace: namespace)
-                                let result = try JSONDecoder().decode(TaskResult.self, from: raw)
-                                if result.status == "SUCCEEDED", case .object(let object) = result.result {
-                                    input = object["text"]?.description ?? ""
-                                    return
-                                }
-                                if ["FAILED", "CANCELED", "NEEDS_RECONCILIATION"].contains(result.status) { throw APIClient.APIError.message(result.error ?? result.status) }
-                                try await Task.sleep(for: .seconds(1))
-                            }
-                            throw APIClient.APIError.message("语音仍在处理，请在活动中查看")
+                            let result = try await waitForTask(task.id, namespace: namespace, seconds: 120)
+                            if result.status == "SUCCEEDED", case .object(let object) = result.result {
+                                input = object["text"]?.description ?? ""
+                            } else { throw APIClient.APIError.message(result.error ?? result.status) }
                         } else { try await voice.start() }
                     } }
                 } label: { Image(systemName: voice.recording ? "stop.circle.fill" : "mic.circle").font(.title) }
@@ -87,20 +80,45 @@ struct ChatView: View {
             let data = try await state.api.request("POST", "/api/v1/tasks", body: body, expectedNamespace: namespace)
             let created = try JSONDecoder().decode(TaskCreated.self, from: data)
             currentTask = created.id
-            for _ in 0..<300 {
-                try Task.checkCancellation()
-                let result = try await state.api.request("GET", "/api/v1/tasks/" + created.id, expectedNamespace: namespace)
-                let task = try JSONDecoder().decode(TaskResult.self, from: result)
-                status = task.status
-                if ["SUCCEEDED", "FAILED", "CANCELED", "NEEDS_RECONCILIATION", "AWAITING_APPROVAL"].contains(task.status) {
-                    messages.append(ChatMessage(text: task.error ?? Self.answer(task.result) ?? (task.status == "AWAITING_APPROVAL" ? "请在活动页面确认操作。" : task.status), mine: false, sources: Self.sources(task.result)))
-                    return
-                }
-                try await Task.sleep(for: .seconds(1))
-            }
-            throw APIClient.APIError.message("任务仍在服务端运行，可在活动中查看进度")
+            let task = try await waitForTask(created.id, namespace: namespace, seconds: 300)
+            messages.append(ChatMessage(text: task.error ?? Self.answer(task.result) ?? (task.status == "AWAITING_APPROVAL" ? "请在活动页面确认操作。" : task.status), mine: false, sources: Self.sources(task.result)))
         }
     }
+    private func waitForTask(_ identifier: String, namespace: String, seconds: Double) async throws -> TaskResult {
+        let deadline = Date().addingTimeInterval(seconds)
+        for attempt in 0..<4 {
+            try Task.checkCancellation()
+            guard UIApplication.shared.applicationState == .active else {
+                throw APIClient.APIError.message("任务继续在服务器运行，回到活动页面可查看")
+            }
+            do {
+                let subscription = try await state.api.taskEvents(taskID: identifier, expectedNamespace: namespace)
+                defer { Task { await state.api.closeTaskEvents(subscription.id) } }
+                for try await event in subscription.events {
+                    try Task.checkCancellation()
+                    guard Date() < deadline else { throw APIClient.APIError.message("任务仍在服务端运行，可在活动中查看进度") }
+                    guard let task = event.tasks.first(where: { $0.id == identifier }) else { continue }
+                    status = task.status
+                    if ["SUCCEEDED", "FAILED", "CANCELED", "NEEDS_RECONCILIATION", "AWAITING_APPROVAL"].contains(task.status) {
+                        let raw = try await state.api.request("GET", "/api/v1/tasks/" + identifier, expectedNamespace: namespace)
+                        return try JSONDecoder().decode(TaskResult.self, from: raw)
+                    }
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                guard attempt < 3, Date() < deadline, UIApplication.shared.applicationState == .active else { throw error }
+                status = "连接中断，正在恢复任务状态"
+                // 会话刷新、设备撤销和服务器身份检查继续走正常请求入口。
+                do { _ = try await state.api.request("GET", "/api/v1/me", expectedNamespace: namespace) }
+                catch let APIClient.APIError.http(code, message) where code == 401 || code == 403 { throw APIClient.APIError.http(code, message) }
+                catch let APIClient.APIError.message(message) { throw APIClient.APIError.message(message) }
+                catch { }
+                try await Task.sleep(for: .seconds(1 << attempt))
+            }
+        }
+        throw APIClient.APIError.message("任务状态连接中断，请在活动页面重试")
+    }
+
     private func cancel() async {
         guard let currentTask, let namespace = conversationNamespace else { return }
         await state.perform { _ = try await state.api.request("POST", "/api/v1/tasks/" + currentTask + "/cancel", expectedNamespace: namespace) }

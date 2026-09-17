@@ -8,6 +8,10 @@ final class AppState {
     private let dataSync = DeviceDataSync()
     var syncStatus = ""
     var backgroundSyncStatus = ""
+    var taskEventStatus = ""
+    var taskStates: [TaskStateEvent.Item] = []
+    var taskEventRevision = UUID()
+    private var eventRun: Task<Void, Never>?
     private var backgroundRun: (UUID, Task<Void, Never>)?
     var connected = false
     var connectionRevision = UUID()
@@ -24,6 +28,55 @@ final class AppState {
         connected = await api.isConnected()
     }
 
+    func stopForegroundEvents() async {
+        eventRun?.cancel()
+        eventRun = nil
+        await api.stopTaskEvents()
+        taskEventStatus = "后台暂停实时连接"
+    }
+
+    func startForegroundEvents() {
+        eventRun?.cancel()
+        eventRun = Task { [weak self] in
+            guard let self else { return }
+            var retries = 0
+            while !Task.isCancelled && self.connected && UIApplication.shared.applicationState == .active {
+                do {
+                    let namespace = try await self.api.syncNamespace()
+                    let subscription = try await self.api.taskEvents(expectedNamespace: namespace)
+                    defer { Task { await self.api.closeTaskEvents(subscription.id) } }
+                    self.taskEventStatus = "正在连接任务状态…"
+                    for try await event in subscription.events {
+                        try Task.checkCancellation()
+                        guard namespace == (try await self.api.syncNamespace()) else { return }
+                        if event.type == "task.snapshot" {
+                            try await self.loadActivity(expectedNamespace: namespace)
+                            self.taskStates = event.tasks
+                            self.taskEventRevision = UUID()
+                            self.taskEventStatus = event.has_more ? "显示最近 100 个任务状态" : "任务状态已连接"
+                            retries = 0
+                        }
+                    }
+                } catch is CancellationError { return }
+                catch {
+                    if Task.isCancelled { return }
+                    self.taskEventStatus = "连接中断，正在恢复任务状态"
+                    // 用正常签名请求确认授权；刷新失败不伪装在线。
+                    do { _ = try await self.api.request("GET", "/api/v1/me") }
+                    catch let APIClient.APIError.http(code, _) where code == 401 || code == 403 {
+                        self.connected = false
+                        self.activity = []; self.approvals = []; self.taskStates = []
+                        self.taskEventStatus = "授权已失效，请重新配对"
+                        return
+                    } catch { }
+                    retries += 1
+                }
+                do { try await Task.sleep(for: .seconds(min(30, 1 << min(retries, 5)))) }
+                catch { return }
+            }
+        }
+    }
+
     func configureBackgroundSync(enabled: Bool) {
         if !enabled { backgroundRun?.1.cancel() }
         backgroundSyncStatus = BackgroundSync.schedule(enabled: enabled && connected)
@@ -33,6 +86,7 @@ final class AppState {
     func resumeForeground() async {
         await restore()
         guard connected, UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else { return }
+        startForegroundEvents()
         do { try await loadData() }
         catch is CancellationError { }
         catch let error as URLError where error.code == .cancelled { }
@@ -86,11 +140,17 @@ final class AppState {
             throw APIClient.APIError.http(code, message)
         }
     }
-    func loadActivity() async throws {
-        let data = try await api.request("GET", "/api/v1/activity")
-        activity = try JSONDecoder().decode(ActivityPage.self, from: data).entries
-        let approvalsData = try await api.request("GET", "/api/v1/approvals")
-        approvals = try JSONDecoder().decode([ApprovalEntry].self, from: approvalsData)
+    func loadActivity(expectedNamespace: String? = nil) async throws {
+        let namespace: String
+        if let expectedNamespace { namespace = expectedNamespace }
+        else { namespace = try await api.syncNamespace() }
+        let data = try await api.request("GET", "/api/v1/activity", expectedNamespace: namespace)
+        let entries = try JSONDecoder().decode(ActivityPage.self, from: data).entries
+        let approvalsData = try await api.request("GET", "/api/v1/approvals", expectedNamespace: namespace)
+        let pending = try JSONDecoder().decode([ApprovalEntry].self, from: approvalsData)
+        guard namespace == (try await api.syncNamespace()), !Task.isCancelled else { return }
+        activity = entries
+        approvals = pending
     }
     func loadAutomations() async throws {
         let data = try await api.request("GET", "/api/v1/automations")

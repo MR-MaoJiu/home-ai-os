@@ -70,9 +70,31 @@ final class SyncTests: XCTestCase {
             XCTAssertTrue(found.matches.contains { $0.excerpt.contains("八点") })
             _ = try await api.request("DELETE", "/api/v1/data/" + parsed.source_id)
         }
+        // 原生 WSS 使用同一证书固定与设备签名，通知来自真实任务执行。
+        let namespace = try await api.syncNamespace()
+        let createBody = try JSONSerialization.data(withJSONObject: ["idempotency_key": UUID().uuidString, "capability": "reminder.create@v1", "arguments": ["title": "实时事件验收"]])
+        struct CreatedTask: Decodable { let id: String }
+        let created = try JSONDecoder().decode(CreatedTask.self, from: await api.request("POST", "/api/v1/tasks", body: createBody))
+        let subscription = try await api.taskEvents(taskID: created.id, expectedNamespace: namespace)
+        var iterator = subscription.events.makeAsyncIterator()
+        let initialEvent = try await iterator.next()
+        XCTAssertEqual(initialEvent?.tasks.first?.status, "RECEIVED")
+        _ = try await api.request("POST", "/_test/run/" + created.id)
+        let completedEvent = try await iterator.next()
+        XCTAssertEqual(completedEvent?.tasks.first?.status, "SUCCEEDED")
+        await api.closeTaskEvents(subscription.id)
+        let resumed = try await api.taskEvents(taskID: created.id, expectedNamespace: namespace)
+        var resumedIterator = resumed.events.makeAsyncIterator()
+        let resumedEvent = try await resumedIterator.next()
+        XCTAssertEqual(resumedEvent?.tasks.first?.status, "SUCCEEDED")
         struct Me: Decodable { let device_id: String }
         let identity = try JSONDecoder().decode(Me.self, from: await api.request("GET", "/api/v1/me"))
         _ = try await api.request("DELETE", "/api/v1/devices/" + identity.device_id)
+        do {
+            _ = try await resumedIterator.next()
+            XCTFail("设备撤销必须断开已建立的状态流")
+        } catch let APIClient.APIError.http(code, _) { XCTAssertEqual(code, 401) }
+        await api.closeTaskEvents(resumed.id)
         do {
             _ = try await DeviceDataSync().synchronize(api: api)
             XCTFail("撤销设备后不能显示授权成功或返回缓存作为在线数据")
