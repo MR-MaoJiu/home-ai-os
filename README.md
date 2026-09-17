@@ -29,7 +29,7 @@
 | 自动化 | 多步骤 Cron 工作流、幂等提交、Outbox/JetStream 发布 | 事件消费者、Skill 条件与补偿 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
-| 文档/语音/家居/邮件 | Docling 七格式真实解析、whisper.cpp 中英文转写；其余适配器代码 | Linux/生产沙箱验收；FunASR、CosyVoice、HA、邮件真实闭环 |
+| 文档/语音/家居/邮件 | Docling 七格式真实解析、whisper.cpp/FunASR 中英文转写；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、HA、邮件真实闭环 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复 | APNs、后台真机调度验收、App Intent、任务事件流、真机验收 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
@@ -527,6 +527,34 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
 中文输入由 macOS 系统语音生成，需要本机中文声音和 ffmpeg，仅为测试输入；英文使用固定源码中的 `samples/jfk.wav` 人声样本。测试调用实际转写服务，不替换输出文本。完整系统回归命令可在前述开关基础上再加 `HOMEAI_WHISPER_TEST=1`。
 
 参考：[whisper.cpp 官方服务说明](https://github.com/ggml-org/whisper.cpp/blob/v1.9.3/examples/server/README.md)。
+
+## FunASR / SenseVoiceSmall
+
+独立 FunASR 1.4.14 环境已通过真实本地转写。模型使用固定修订的 SenseVoiceSmall，SDK 内置实现，`trust_remote_code=False`；没有下载模型仓库里的 Python 代码。torch 与 torchaudio 固定为平台可用的匹配版本 2.11.0。
+
+```sh
+python3.12 -m venv state/venvs/funasr
+state/venvs/funasr/bin/pip install -r providers/requirements-funasr.txt
+```
+
+模型固定修订为 `3847d57b6bdf2dd8875cb1508d2af43d80a16bf7`，从 [官方模型仓库](https://huggingface.co/FunAudioLLM/SenseVoiceSmall/tree/3847d57b6bdf2dd8875cb1508d2af43d80a16bf7) 获取以下文件到 `state/models/sensevoice/`：`model.pt`、`config.yaml`、`configuration.json`、`am.mvn`、`chn_jpn_yue_eng_ko_spectok.bpe.model`。校验清单在 `providers/models/sensevoice-small.json`，权重不进入仓库。
+
+```sh
+.venv/bin/python scripts/verify_provider_models.py --manifest providers/models/sensevoice-small.json --root state/models/sensevoice
+.venv/bin/python scripts/run_funasr.py
+# 另一个终端登记当前成员
+.venv/bin/python scripts/register_local_funasr.py --user <成员ID>
+```
+
+服务监听 `127.0.0.1:8104`，使用独立凭据，不接收 Core 数据库或云模型密钥。启动前强制校验模型文件，运行时关闭更新与远程代码，并以 Python 出站门禁拒绝连接；实际四项转写验收没有出站连接或被拒绝的联网尝试。SDK 的通用“model hub”初始化日志不代表发生联网，实际加载的是已校验本地路径。
+
+输入复用 WAV/时长/静音校验，SDK 只收到转换后的本地浮点音频数组，不能由请求方选择模型、路径或执行参数。当前使用 CPU 四线程；服务端返回真实文本而非预设短语。已验收中文、英文以及两者的自动识别，粤语/日语/韩语虽然是模型声明支持的参数，尚未进行本项目真实音频验收。
+
+```sh
+HOMEAI_FUNASR_TEST=1 .venv/bin/pytest -q server/tests/test_funasr_live.py
+```
+
+FunASR 与 whisper.cpp 均实现 `speech.transcribe@v1`。当前 Registry 按已启用 Provider ID 选择，管理员可停用其中一个明确切换；这不是自动质量路由，失败不会转发云端。完整已验证依赖见 `providers/locks/funasr-macos-py312.txt`。操作系统沙箱、真机录音、噪声和更多语言仍须验收。
 
 ## 备份
 

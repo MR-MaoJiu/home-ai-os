@@ -35,15 +35,6 @@ def binary(arguments, key="content_base64"):
 
 
 @lru_cache
-def funasr_model():
-    from funasr import AutoModel
-    path = Path(os.environ["FUNASR_MODEL_PATH"])
-    if not path.is_dir():
-        raise RuntimeError("需要预置本地模型")
-    return AutoModel(model=str(path), disable_update=True, trust_remote_code=False, device=os.environ.get("MODEL_DEVICE", "cpu"))
-
-
-@lru_cache
 def cosy_model():
     from cosyvoice.cli.cosyvoice import AutoModel
     path = Path(os.environ["COSYVOICE_MODEL_PATH"])
@@ -60,11 +51,8 @@ def parse_document(call):
 
 
 def transcribe_funasr(call):
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "audio.wav"
-        path.write_bytes(binary(call.arguments))
-        result = funasr_model().generate(input=str(path))
-        return {"text": "\n".join(item.get("text", "") for item in result)}
+    from .funasr_adapter import transcribe
+    return transcribe(call, binary(call.arguments))
 
 
 def synthesize_cosy(call):
@@ -93,6 +81,10 @@ if os.environ.get("HOMEAI_ADAPTER") == "graphiti":
     from .egress_guard import install_graphiti_guard
     install_graphiti_guard()
 
+if os.environ.get("HOMEAI_ADAPTER") == "funasr":
+    from .egress_guard import install_guard
+    install_guard(set(), "FunASR")
+
 app = FastAPI(title="Home AI Provider bridge", dependencies=[Depends(authenticate)])
 docling_lock = asyncio.Semaphore(1)
 memory_lock = asyncio.Semaphore(1)
@@ -103,7 +95,7 @@ speech_lock = asyncio.Semaphore(1)
 @app.get("/health")
 def health():
     result = {"status": "alive", "adapter": os.environ.get("HOMEAI_ADAPTER", "unconfigured")}
-    if result["adapter"] in {"mem0", "graphiti"}:
+    if result["adapter"] in {"mem0", "graphiti", "funasr"}:
         from .egress_guard import stats
         result["egress"] = dict(stats)
     return result
@@ -117,7 +109,8 @@ async def invoke(operation: str, call: Call):
             async with docling_lock:
                 return await asyncio.to_thread(parse_document, call)
         if adapter == "funasr" and operation == "transcribe":
-            return await asyncio.to_thread(transcribe_funasr, call)
+            async with speech_lock:
+                return await asyncio.to_thread(transcribe_funasr, call)
         if adapter == "cosyvoice" and operation == "synthesize":
             return await asyncio.to_thread(synthesize_cosy, call)
         if adapter == "whisper" and operation == "transcribe":

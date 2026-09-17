@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "id": "funasr",
-  "version": "1.0.0",
+  "version": "1.4.14",
   "adapter": "http",
   "endpoint": "http://127.0.0.1:8104",
   "cloud": false,
@@ -9,7 +9,7 @@
   "capabilities": {
     "speech.transcribe@v1": "/invoke/transcribe"
   },
-  "timeout_seconds": 60,
+  "timeout_seconds": 180,
   "image_digest": null,
   "secret_id": null,
   "allowed_hosts": [

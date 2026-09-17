@@ -27,7 +27,7 @@ async def transcribe(call,data):
         raise HTTPException(422,'转写参数不支持服务端路径或额外执行选项')
     duration=validate_audio(data)
     language=call.arguments.get('language','auto')
-    if language not in {'auto','zh','en'}:
+    if not isinstance(language,str) or language not in {'auto','zh','en'}:
         raise HTTPException(422,'当前开放自动识别、中文与英文')
     endpoint=os.environ.get('WHISPER_URL')
     if endpoint!='http://127.0.0.1:58085':

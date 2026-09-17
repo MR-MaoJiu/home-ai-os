@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "provider": "funasr",
+  "sdk_version": "1.4.14",
+  "model_revision": "3847d57b6bdf2dd8875cb1508d2af43d80a16bf7",
+  "files": [
+    {
+      "path": "model.pt",
+      "bytes": 936291369,
+      "sha256": "833ca2dcfdf8ec91bd4f31cfac36d6124e0c459074d5e909aec9cabe6204a3ea"
+    },
+    {
+      "path": "config.yaml",
+      "bytes": 1855,
+      "sha256": "f71e239ba36705564b5bf2d2ffd07eece07b8e3f2bbf6d2c99d8df856339ac19"
+    },
+    {
+      "path": "configuration.json",
+      "bytes": 396,
+      "sha256": "02810a7f8e9e8aee10370a265f7e799728ce25b4c00cdbf4602b303ee395a38e"
+    },
+    {
+      "path": "am.mvn",
+      "bytes": 11203,
+      "sha256": "29b3c740a2c0cfc6b308126d31d7f265fa2be74f3bb095cd2f143ea970896ae5"
+    },
+    {
+      "path": "chn_jpn_yue_eng_ko_spectok.bpe.model",
+      "bytes": 377341,
+      "sha256": "aa87f86064c3730d799ddf7af3c04659151102cba548bce325cf06ba4da4e6a8"
+    }
+  ],
+  "model_repository": "FunAudioLLM/SenseVoiceSmall"
+}
