@@ -10,8 +10,18 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.lock && pip install --no-deps -e .
       - run: python scripts/check_boundaries.py
-      - run: pytest -q
+      - name: Prepare isolated integration services
+        run: |
+          python scripts/dev_env.py
+          docker compose --env-file .env.local -f deploy/compose.dev.yml up -d --wait --wait-timeout 120
+          python scripts/migrate.py --test
+          homeai init-key
+      - name: Unit and PostgreSQL policy/sync tests
+        run: HOMEAI_INTEGRATION=1 pytest -q
       - run: python -m compileall -q server providers
+      - name: Stop isolated services
+        if: always()
+        run: docker compose --env-file .env.local -f deploy/compose.dev.yml down --volumes
   admin-web:
     runs-on: ubuntu-latest
     defaults:

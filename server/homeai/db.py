@@ -234,3 +234,30 @@ class LoginAttempt(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     failures: Mapped[int] = mapped_column(Integer, default=0)
     window_start: Mapped[float] = mapped_column(default=now)
+
+
+class SyncSnapshot(Owned, Base):
+    __tablename__ = 'sync_snapshots'
+    device_id: Mapped[str] = mapped_column(String)
+    watermark: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[str] = mapped_column(Text)
+    next_offset: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[float] = mapped_column()
+
+
+class SyncCursor(Owned, Base):
+    __tablename__ = 'sync_cursors'
+    initialized: Mapped[bool] = mapped_column(Boolean, default=False)
+    __table_args__ = (UniqueConstraint('owner_id', 'device_id'),)
+    device_id: Mapped[str] = mapped_column(String)
+    acknowledged: Mapped[int] = mapped_column(Integer, default=0)
+    offered: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SyncReceipt(Owned, Base):
+    __tablename__ = 'sync_receipts'
+    __table_args__ = (UniqueConstraint('owner_id', 'device_id', 'batch_id'),)
+    device_id: Mapped[str] = mapped_column(String)
+    batch_id: Mapped[str] = mapped_column(String)
+    request_hash: Mapped[str] = mapped_column(String)
+    payload: Mapped[str] = mapped_column(Text)

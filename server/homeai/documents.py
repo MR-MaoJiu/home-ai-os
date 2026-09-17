@@ -28,6 +28,8 @@ def prepare(db, actor, arguments, app):
 
 
 def persist(db, actor, source_id, source_version, result, app):
+    from .sync_order import lock_changes
+    lock_changes(db)
     source = read_record(db, actor, source_id)
     db.refresh(source, with_for_update=True)
     if source.deleted or source.version != source_version or source.sensitivity == 'SECRET':

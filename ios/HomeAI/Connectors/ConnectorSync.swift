@@ -13,27 +13,64 @@ final class ConnectorSync {
         let source_id: String
         let kind: String
         let version: Int
-        let sensitivity = "PRIVATE"
-        let cloud_policy = "LOCAL_ONLY"
+        let sensitivity: String
+        let cloud_policy: String
         let payload: [String: JSONValue]
     }
-    struct Batch: Encodable { let records: [Upload] }
+    struct Batch: Encodable { let batch_id: String; let records: [Upload] }
+
+    private static var activeUploads: Set<String> = []
+    private static var waitingUploads: [String: [CheckedContinuation<Void, Never>]] = [:]
+    private static func acquire(_ key: String) async {
+        if activeUploads.insert(key).inserted { return }
+        await withCheckedContinuation { waitingUploads[key, default: []].append($0) }
+    }
+    private static func release(_ key: String) {
+        if var waiting = waitingUploads[key], !waiting.isEmpty {
+            let next = waiting.removeFirst(); waitingUploads[key] = waiting; next.resume()
+        } else { activeUploads.remove(key); waitingUploads.removeValue(forKey: key) }
+    }
 
     func uploadRecord(source: String, sourceID: String, kind: String, payload: [String: JSONValue]) async throws {
         // 持久化本次内容与版本，失败重试使用相同版本，服务端确认后才更新本地游标。
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let contentHash = DeviceIdentity.hash(try encoder.encode(payload))
-        let key = "sync:" + source + ":" + sourceID
+        let namespace = try await api.syncNamespace()
+        let key = "sync:" + namespace + ":" + source + ":" + sourceID
+        await Self.acquire(key)
+        defer { Self.release(key) }
+        try Task.checkCancellation()
         let cached = DeviceIdentity.read(key).flatMap { try? JSONDecoder().decode(Cursor.self, from: $0) }
-        let version = cached?.hash == contentHash ? cached!.version : (cached?.version ?? 0) + 1
-        let cursor = Cursor(hash: contentHash, version: version, acknowledged: false)
+        if cached?.hash == contentHash, cached?.acknowledged == true { return }
+        let version: Int
+        let sensitivity: String
+        let cloudPolicy: String
+        if let cached, cached.hash == contentHash, !cached.acknowledged {
+            version = cached.version
+            sensitivity = cached.sensitivity ?? "PRIVATE"
+            cloudPolicy = cached.cloudPolicy ?? "LOCAL_ONLY"
+        } else {
+            let body = try JSONSerialization.data(withJSONObject: ["source": source, "source_id": sourceID])
+            let response = try await api.request("POST", "/api/v1/sync/source", body: body, expectedNamespace: namespace)
+            let remote = try JSONDecoder().decode(SourceVersion.self, from: response)
+            guard !remote.deleted else { throw APIClient.APIError.message("该来源已在服务器删除，不会自动恢复") }
+            version = max(remote.version, cached?.version ?? 0) + 1
+            sensitivity = remote.sensitivity
+            cloudPolicy = remote.cloud_policy
+        }
+        let batchID = cached?.hash == contentHash ? (cached?.batchID ?? UUID().uuidString) : UUID().uuidString
+        let cursor = Cursor(hash: contentHash, version: version, acknowledged: false, batchID: batchID, sensitivity: sensitivity, cloudPolicy: cloudPolicy)
         try DeviceIdentity.save(encoder.encode(cursor), name: key)
-        let data = try encoder.encode(Batch(records: [Upload(source: source, source_id: sourceID, kind: kind, version: version, payload: payload)]))
-        _ = try await api.request("POST", "/api/v1/data/sync", body: data)
-        try DeviceIdentity.save(encoder.encode(Cursor(hash: contentHash, version: version, acknowledged: true)), name: key)
+        let data = try encoder.encode(Batch(batch_id: batchID, records: [Upload(source: source, source_id: sourceID, kind: kind, version: version, sensitivity: sensitivity, cloud_policy: cloudPolicy, payload: payload)]))
+        let response = try await api.request("POST", "/api/v1/data/sync", body: data, expectedNamespace: namespace)
+        let receipt = try JSONDecoder().decode(BatchReceipt.self, from: response)
+        guard receipt.batch_id == batchID, receipt.acknowledged == 1, receipt.accepted_versions.count == 1, receipt.accepted_versions.values.first == version else { throw APIClient.APIError.message("同步批次未被完整确认") }
+        try DeviceIdentity.save(encoder.encode(Cursor(hash: contentHash, version: version, acknowledged: true, batchID: batchID, sensitivity: sensitivity, cloudPolicy: cloudPolicy)), name: key)
     }
-    struct Cursor: Codable { let hash: String; let version: Int; let acknowledged: Bool }
+    struct BatchReceipt: Decodable { let batch_id: String?; let acknowledged: Int; let accepted_versions: [String: Int] }
+    struct SourceVersion: Decodable { let version: Int; let deleted: Bool; let sensitivity: String; let cloud_policy: String }
+    struct Cursor: Codable { let hash: String; let version: Int; let acknowledged: Bool; let batchID: String?; let sensitivity: String?; let cloudPolicy: String? }
 
     func calendar() async throws {
         let store = EKEventStore()

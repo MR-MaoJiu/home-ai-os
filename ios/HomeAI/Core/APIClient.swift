@@ -7,6 +7,7 @@ struct Connection: Codable, Sendable {
     var refreshToken: String
     var expiresAt: Date
     var tlsKeyFingerprint: String? = nil
+    var deviceID: String? = nil
 }
 
 struct PairingCode: Codable, Sendable {
@@ -18,11 +19,15 @@ struct PairingCode: Codable, Sendable {
 /// 网络与身份集中在单一 actor，避免页面自行处理签名或泄露会话。
 actor APIClient {
     private var connection: Connection?
+    private let persistConnection: Bool
     private let identity = DeviceIdentity()
     private var session: URLSession?
+    private var generation = UUID()
+    private var pairingAttempt = UUID()
 
-    init() {
-        if let data = DeviceIdentity.read("connection"), let saved = try? JSONDecoder().decode(Connection.self, from: data) {
+    init(persistConnection: Bool = true) {
+        self.persistConnection = persistConnection
+        if persistConnection, let data = DeviceIdentity.read("connection"), let saved = try? JSONDecoder().decode(Connection.self, from: data) {
             connection = saved
             session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: saved.fingerprint, keyFingerprint: saved.tlsKeyFingerprint), delegateQueue: nil)
         }
@@ -31,6 +36,8 @@ actor APIClient {
     func isConnected() -> Bool { connection != nil }
 
     func pair(_ code: PairingCode) async throws {
+        let attempt = UUID()
+        pairingAttempt = attempt
         guard let url = URL(string: code.url), url.scheme == "https", code.fingerprint.count == 64 else { throw APIError.message("需要 HTTPS 地址和完整服务器证书指纹") }
         let pinning = PinnedSession(fingerprint: code.fingerprint)
         let transport = URLSession(configuration: .ephemeral, delegate: pinning, delegateQueue: nil)
@@ -41,24 +48,53 @@ actor APIClient {
         let (data, response) = try await transport.data(for: request)
         try Self.validate(data, response)
         let result = try JSONDecoder().decode(Tokens.self, from: data)
+        guard pairingAttempt == attempt else { throw APIError.message("配对已被更新的请求替代") }
+        generation = UUID()
         connection = Connection(url: code.url, fingerprint: code.fingerprint, token: result.access_token, refreshToken: result.refresh_token, expiresAt: Date().addingTimeInterval(Double(result.expires_in)))
         connection?.tlsKeyFingerprint = pinning.acceptedKeyFingerprint
+        connection?.deviceID = result.device_id
         session = transport
         try persist()
     }
 
-    struct Tokens: Decodable { let access_token: String; let refresh_token: String; let expires_in: Int }
+    struct Tokens: Decodable { let access_token: String; let refresh_token: String; let expires_in: Int; let device_id: String? }
     enum APIError: LocalizedError {
         case message(String)
-        var errorDescription: String? { if case .message(let text) = self { text } else { nil } }
+        case http(Int, String)
+        var errorDescription: String? {
+            switch self { case .message(let text), .http(_, let text): return text }
+        }
     }
 
-    private func persist() throws { try DeviceIdentity.save(JSONEncoder().encode(connection), name: "connection") }
+    func syncNamespace() async throws -> String {
+        if connection?.deviceID == nil {
+            let started = generation
+            struct Me: Decodable { let device_id: String }
+            let data = try await request("GET", "/api/v1/me")
+            guard started == generation else { throw APIError.message("连接已切换，请重试") }
+            connection?.deviceID = try JSONDecoder().decode(Me.self, from: data).device_id
+            try persist()
+        }
+        guard let saved = connection, let device = saved.deviceID else { throw APIError.message("请先配对") }
+        return DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":" + device).utf8))
+    }
 
-    func request(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+    private func persist() throws {
+        if persistConnection { try DeviceIdentity.save(JSONEncoder().encode(connection), name: "connection") }
+    }
+
+    func request(_ method: String, _ path: String, body: Data? = nil, expectedNamespace: String? = nil) async throws -> Data {
+        if let expectedNamespace {
+            guard let saved = connection, let device = saved.deviceID,
+                  DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":" + device).utf8)) == expectedNamespace else {
+                throw APIError.message("同步连接已切换，请重新开始")
+            }
+        }
+        let started = generation
         guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对家庭服务器") }
         if saved.expiresAt.timeIntervalSinceNow < 60 && path != "/api/v1/session/renew" {
             let data = try await send("POST", "/api/v1/session/renew", body: nil, token: saved.refreshToken, base: base, session: session)
+            guard started == generation else { throw APIError.message("连接已切换，请重试") }
             let tokens = try JSONDecoder().decode(Tokens.self, from: data)
             saved.token = tokens.access_token
             saved.refreshToken = tokens.refresh_token
@@ -66,7 +102,9 @@ actor APIClient {
             connection = saved
             try persist()
         }
-        return try await send(method, path, body: body, token: saved.token, base: base, session: session)
+        let data = try await send(method, path, body: body, token: saved.token, base: base, session: session)
+        guard started == generation else { throw APIError.message("连接已切换，请重试") }
+        return data
     }
 
     private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession) async throws -> Data {
@@ -91,7 +129,7 @@ actor APIClient {
     private static func validate(_ data: Data, _ response: URLResponse) throws {
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw APIError.message(body?["detail"] as? String ?? "服务器请求失败")
+            throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? 0, body?["detail"] as? String ?? "服务器请求失败")
         }
     }
 }

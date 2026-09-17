@@ -24,6 +24,11 @@ struct SettingsView: View {
                 SecureField("一次性配对码", text: $token)
                 Button("安全配对") { Task { await state.perform {
                     try await state.api.pair(PairingCode(url: server, fingerprint: fingerprint, token: token))
+                    state.records = []
+                    state.activity = []
+                    state.approvals = []
+                    state.automations = []
+                    state.syncStatus = ""
                     state.connected = true
                     token = ""
                 } } }.disabled(state.busy)

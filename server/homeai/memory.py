@@ -40,6 +40,8 @@ def candidates(request: Request, actor: Actor = Depends(authenticate)):
 @router.post('/candidates/{candidate_id}/{decision}')
 def confirm(candidate_id: str, decision: str, request: Request, actor: Actor = Depends(authenticate)):
     with request.app.state.db() as db:
+        from .sync_order import lock_changes
+        lock_changes(db)
         item=own(db,MemoryCandidate,candidate_id,actor)
         if item.status!='PENDING':raise HTTPException(409,'候选已处理')
         if decision not in {'confirm','reject'}:raise HTTPException(422,'无效决定')

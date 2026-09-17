@@ -48,6 +48,7 @@ struct DataView: View {
     @State private var importing = false
     var body: some View {
         List {
+            if !state.syncStatus.isEmpty { Text(state.syncStatus).font(.caption).foregroundStyle(.secondary) }
             Section("已授权的数据") {
                 ForEach(state.records) { record in
                     NavigationLink {
@@ -65,7 +66,7 @@ struct DataView: View {
                 }
             }
         }
-        .overlay { if state.records.isEmpty { ContentUnavailableView("数据由你掌控", systemImage: "externaldrive", description: Text("在设置中授权同步，或导入文件。")) } }
+        .overlay { if state.records.isEmpty { ContentUnavailableView("数据由你掌控", systemImage: "externaldrive", description: Text(state.syncStatus.isEmpty ? "在设置中授权同步，或导入文件。" : state.syncStatus)) } }
         .navigationTitle("数据")
         .toolbar { Button("导入文件", systemImage: "plus") { importing = true } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in

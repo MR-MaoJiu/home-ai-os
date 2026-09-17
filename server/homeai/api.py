@@ -96,6 +96,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             d.revoked = True
             db.execute(delete(Credential).where(Credential.device_id == device_id))
             scope(db, actor.user_id, actor.household_id)
+            for table in (SyncSnapshot, SyncCursor, SyncReceipt):
+                db.execute(delete(table).where(table.owner_id == actor.user_id, table.device_id == device_id))
             audit(db, actor, "device.revoke", device_id)
             db.commit()
             return {"revoked": True}
@@ -103,9 +105,10 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     @app.post("/api/v1/data/sync")
     def sync(body: SyncBatch, actor: Actor = auth):
         with app.state.db() as db:
-            results = [serialize(ingest(db, actor, item, v), v) for item in body.records]
+            from .sync_batch import apply_batch
+            result = apply_batch(db, actor, body, v)
             db.commit()
-            return {"records": results, "acknowledged": len(results)}
+            return result
 
     @app.get("/api/v1/data")
     def records(actor: Actor = auth, after: str = "", limit: int = 100):
@@ -117,6 +120,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     def changes(after: int = 0, actor: Actor = auth):
         with app.state.db() as db:
             scope(db, actor.user_id, actor.household_id)
+            from .sync_order import lock_changes
+            lock_changes(db)
             rows = db.scalars(select(Outbox).where(Outbox.owner_id == actor.user_id, Outbox.id > after, Outbox.kind.like("record.%")).order_by(Outbox.id).limit(100)).all()
             return {"changes": [{"cursor": r.id, "type": r.kind, "record_id": r.resource_id} for r in rows], "next_cursor": rows[-1].id if rows else after}
 
@@ -136,6 +141,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     @app.put("/api/v1/data/{record_id}/grants/{user_id}")
     def share(record_id: str, user_id: str, actor: Actor = auth):
         with app.state.db() as db:
+            from .sync_order import lock_changes, notify_recipients
+            scope(db, actor.user_id, actor.household_id)
+            lock_changes(db)
             record = own(db, Record, record_id, actor)
             subject = db.get(Principal, user_id)
             if not subject or subject.household_id != actor.household_id or record.deleted:
@@ -145,6 +153,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             existing = db.scalar(select(Grant).where(Grant.record_id == record.id, Grant.grantee_id == user_id))
             if not existing:
                 db.add(Grant(household_id=actor.household_id, owner_id=actor.user_id, record_id=record.id, grantee_id=user_id))
+            if not existing:
+                db.flush()
+                notify_recipients(db, actor, 'record.changed', record.id, [user_id])
             audit(db, actor, "data.share", record.id)
             db.commit()
             return {"shared": True}
@@ -152,8 +163,17 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     @app.delete("/api/v1/data/{record_id}/grants/{user_id}")
     def unshare(record_id: str, user_id: str, actor: Actor = auth):
         with app.state.db() as db:
+            from .sync_order import lock_changes, notify_recipients
+            scope(db, actor.user_id, actor.household_id)
+            lock_changes(db)
             own(db, Record, record_id, actor)
-            db.execute(delete(Grant).where(Grant.record_id == record_id, Grant.grantee_id == user_id))
+            existing = db.scalar(select(Grant).where(Grant.record_id == record_id, Grant.grantee_id == user_id))
+            if existing:
+                from .sync_order import invalidate_snapshots
+                invalidate_snapshots(db, actor, [user_id])
+                db.delete(existing)
+                db.flush()
+                notify_recipients(db, actor, 'record.revoked', record_id, [user_id])
             audit(db, actor, "data.unshare", record_id)
             db.commit()
             return {"revoked": True}
@@ -333,6 +353,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
 
     from .task_control import router as task_control_router
     app.include_router(task_control_router)
+
+    from .device_sync import router as device_sync_router
+    app.include_router(device_sync_router)
 
     from .memory import router as memory_router
     app.include_router(memory_router)

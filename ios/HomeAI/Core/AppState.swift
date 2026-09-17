@@ -4,6 +4,8 @@ import Observation
 @MainActor @Observable
 final class AppState {
     let api = APIClient()
+    private let dataSync = DeviceDataSync()
+    var syncStatus = ""
     var connected = false
     var error: String?
     var busy = false
@@ -20,8 +22,14 @@ final class AppState {
     }
 
     func loadData() async throws {
-        let data = try await api.request("GET", "/api/v1/data")
-        records = try JSONDecoder().decode(DataPage.self, from: data).records
+        do {
+            let result = try await dataSync.synchronize(api: api)
+            records = result.records
+            syncStatus = result.offline ? "离线：显示上次同步缓存" : "已完成增量同步"
+        } catch let APIClient.APIError.http(code, message) {
+            if [401, 403].contains(code) { records = []; syncStatus = "授权已失效" }
+            throw APIClient.APIError.http(code, message)
+        }
     }
     func loadActivity() async throws {
         let data = try await api.request("GET", "/api/v1/activity")
@@ -35,7 +43,7 @@ final class AppState {
     }
 }
 
-struct DataEntry: Decodable, Identifiable {
+struct DataEntry: Codable, Identifiable, Sendable {
     let id: String
     let kind: String
     let sensitivity: String

@@ -40,7 +40,22 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
     result=subprocess.run(['docker','compose','--env-file',str(root/'.env.local'),'-f',str(root/'deploy/compose.dev.yml'),'exec','-T','postgres','pg_restore','-U','homeai_migrator','--no-owner','--exit-on-error','-d',a.database],input=(destination/'database.dump').read_bytes(),capture_output=True)
     if result.returncode:raise SystemExit('数据库恢复失败，隔离库保留供排查；未开放访问')
     target=make_url(admin).set(database=a.database)
-    _,factory=database(target.render_as_string(hide_password=False))
+    # 旧备份先升级到当前模式，才能清除新版本同步缓存并重放删除日志。
+    from alembic.config import Config
+    from alembic import command
+    target_url=target.render_as_string(hide_password=False)
+    previous_url=os.environ.get('HOMEAI_DATABASE_URL')
+    os.environ['HOMEAI_DATABASE_URL']=target_url
+    try:command.upgrade(Config(str(root/'alembic.ini')),'head')
+    finally:
+        if previous_url is None:os.environ.pop('HOMEAI_DATABASE_URL',None)
+        else:os.environ['HOMEAI_DATABASE_URL']=previous_url
+    _,factory=database(target_url)
+    with factory() as db:
+        db.execute(text('GRANT USAGE ON SCHEMA public TO homeai_app'))
+        db.execute(text('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO homeai_app'))
+        db.execute(text('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO homeai_app'))
+        db.commit()
     replay_deletions(factory,Vault.from_file(root/'state/master.key'),a.deletion_journal)
     output=root/'state/restores'/a.database
     output.mkdir(parents=True,exist_ok=False)

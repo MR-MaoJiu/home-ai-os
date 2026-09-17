@@ -60,10 +60,15 @@ def safe_extract(archive, destination: Path):
 
 def replay_deletions(factory, vault, journal: Path):
     from sqlalchemy import delete
-    from .db import Record, Revision, Grant, Principal, Outbox, scope
+    from .db import Record, Revision, Grant, Principal, Outbox, SyncSnapshot, SyncCursor, scope
     if not journal.exists():
         raise RuntimeError('缺少独立删除日志，禁止开放恢复数据')
     with factory() as db:
+        from sqlalchemy import select
+        for user in db.scalars(select(Principal)).all():
+            scope(db,user.id,user.household_id)
+            db.execute(delete(SyncSnapshot).where(SyncSnapshot.owner_id==user.id))
+            db.execute(delete(SyncCursor).where(SyncCursor.owner_id==user.id))
         for line in journal.read_text().splitlines():
             item = vault.open(line, 'deletion-journal')
             user = db.get(Principal, item['owner_id'])

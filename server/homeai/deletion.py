@@ -7,6 +7,8 @@ from .data import emit, audit
 
 
 def delete_tree(db, actor, record, vault, state_dir):
+    from .sync_order import lock_changes, notify_recipients, invalidate_snapshots
+    lock_changes(db)
     # 与派生记录创建共用来源行锁，避免删除闭包计算期间出现新的解析正文。
     db.refresh(record, with_for_update=True)
     targets={record.id:record}
@@ -18,6 +20,8 @@ def delete_tree(db, actor, record, vault, state_dir):
             payload=vault.open(item.payload,actor.user_id+':record:'+item.id)
             if set(payload.get('source_ids',[])) & targets.keys():targets[item.id]=item
         if len(targets)==previous:break
+    recipients=list(db.scalars(select(Grant.grantee_id).where(Grant.owner_id==actor.user_id,Grant.record_id.in_(targets))))
+    invalidate_snapshots(db,actor,[actor.user_id,*recipients])
     journal=state_dir/'deletions.jsonl'
     journal.parent.mkdir(parents=True,exist_ok=True)
     fd=os.open(journal,os.O_WRONLY|os.O_APPEND|os.O_CREAT,0o600)
@@ -32,6 +36,8 @@ def delete_tree(db, actor, record, vault, state_dir):
             candidate.content=vault.seal('',actor.user_id+':candidate:'+candidate.id)
     for item in targets.values():
         item.deleted,item.payload,item.updated_at=True,'',now()
+        notify_recipients(db,actor,'record.deleted',item.id)
+        db.flush()
         for table in (MemoryVector,Revision,Grant):
             db.execute(delete(table).where(table.record_id==item.id))
         emit(db,actor,'record.deleted',item.id)

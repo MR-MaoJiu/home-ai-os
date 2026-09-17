@@ -24,6 +24,7 @@ class DataRecord(Contract):
 
 
 class SyncBatch(Contract):
+    batch_id: str | None = Field(default=None, min_length=8, max_length=200)
     records: list[DataRecord] = Field(max_length=100)
 
 
