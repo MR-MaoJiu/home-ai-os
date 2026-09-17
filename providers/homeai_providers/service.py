@@ -89,16 +89,20 @@ def synthesize_cosy(call):
 if os.environ.get("HOMEAI_ADAPTER") == "mem0":
     from .egress_guard import install_mem0_guard
     install_mem0_guard()
+if os.environ.get("HOMEAI_ADAPTER") == "graphiti":
+    from .egress_guard import install_graphiti_guard
+    install_graphiti_guard()
 
 app = FastAPI(title="Home AI Provider bridge", dependencies=[Depends(authenticate)])
 docling_lock = asyncio.Semaphore(1)
 memory_lock = asyncio.Semaphore(1)
+graphiti_lock = asyncio.Semaphore(1)
 
 
 @app.get("/health")
 def health():
     result = {"status": "alive", "adapter": os.environ.get("HOMEAI_ADAPTER", "unconfigured")}
-    if result["adapter"] == "mem0":
+    if result["adapter"] in {"mem0", "graphiti"}:
         from .egress_guard import stats
         result["egress"] = dict(stats)
     return result
@@ -126,7 +130,9 @@ async def invoke(operation: str, call: Call):
                 return await asyncio.to_thread(memory_operation, operation, call)
         if adapter == "graphiti":
             from .graphiti_adapter import operation as graph_operation
-            return await graph_operation(operation, call)
+            async with asyncio.timeout(300):
+                async with graphiti_lock:
+                    return await graph_operation(operation, call)
         if adapter == "mail":
             from .mail_adapter import operation as mail_operation
             return await asyncio.to_thread(mail_operation, operation, call)

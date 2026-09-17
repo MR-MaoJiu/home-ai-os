@@ -58,12 +58,12 @@ async def reconcile_provider(app, user_id, household_id, provider_id):
             await app.policy.check(actor, prefix + '.purge@v1')
             await app.policy.check(actor, prefix + '.index@v1')
             await app.registry.invoke(db, actor, manifest, prefix + '.purge@v1', {}, identity + ':purge:' + target)
-            records = db.scalars(select(Record).where(Record.owner_id == user_id, Record.deleted.is_(False), Record.kind == 'memory.fact', Record.sensitivity != 'SECRET').order_by(Record.id)).all()
+            records = db.scalars(select(Record).where(Record.owner_id == user_id, Record.deleted.is_(False), Record.kind == 'memory.fact', Record.sensitivity != 'SECRET').order_by(Record.updated_at, Record.id)).all()
             for record in records:
                 db.refresh(record)
                 if record.deleted or record.sensitivity == 'SECRET' or record.kind != 'memory.fact':
                     continue
-                arguments = {'record_id': record.id, 'content': json.dumps(serialize(record, app.vault)['payload'], ensure_ascii=False)}
+                arguments = {'record_id': record.id, 'reference_time': record.updated_at, 'content': json.dumps(serialize(record, app.vault)['payload'], ensure_ascii=False)}
                 await app.registry.invoke(db, actor, manifest, prefix + '.index@v1', arguments, identity + ':' + record.id + ':' + str(record.version))
             # 重建期间发生删除、修改或停用，不允许发布这份旧投影。
             db.refresh(provider)

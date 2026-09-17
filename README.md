@@ -288,6 +288,24 @@ HOMEAI_MEM0_TEST=1 .venv/bin/pytest -q server/tests/test_mem0_live.py
 
 该测试实际调用 SDK、Embedding、Qdrant、PostgreSQL 和 OPA，覆盖重建、搜索回读、跨主体隔离、停用及删除传播。参考 [Mem0 本地 Embedding 配置](https://docs.mem0.ai/components/embedders/models/lmstudio)。
 
+## Graphiti 独立图数据库（集成中）
+
+Graphiti 0.30.2 的依赖和本地客户端适配已准备，实际运行的 Neo4j 5.26.30 使用独立 Compose 项目、数据卷和凭据；仅发布本机 Bolt 端口 `57687`，不发布图数据库网页控制台。镜像已按官方 OCI 清单摘要锁定。**当前尚未完成真实图抽取与搜索验收，不计为可用 Provider。**
+
+```sh
+.venv/bin/python scripts/init_graphiti.py
+docker compose --env-file .env.graphiti -f deploy/compose.graphiti.yml up -d
+python3.12 -m venv state/venvs/graphiti
+state/venvs/graphiti/bin/pip install -r providers/requirements-graphiti.txt
+state/venvs/graphiti/bin/python scripts/check_graphiti_database.py --initialize-indexes
+```
+
+`.env.graphiti` 为 0600 私有配置，不进入仓库；初始化不会覆盖已有凭据。SDK 直接导入但未声明的 `httpx` 已显式锁定。Mac/Python 3.12 完整依赖见 `providers/locks/graphiti-macos-py312.txt`。
+
+`run_graphiti.py` 为独立启动入口，要求 `58082` 的本地生成模型、`58081` 的 Embedding 和已启动的 Neo4j。客户端显式关闭遥测和系统代理，Python 门禁只允许这三个本地端口，不使用默认云模型；原始 episode 正文不保留到图数据库。图仍是派生数据，搜索必须映射回规范记录 ID，再由 Core 重新鉴权。操作系统隔离尚未验收。
+
+数据库认证连接、33 个索引在线和真实主体清理隔离已通过。启动 `run_graphiti.py` 后，可用独立测试节点运行 `state/venvs/graphiti/bin/python scripts/check_graphiti_isolation.py` 复验清理边界。此结果不代表模型实体抽取、语义搜索及规范账本全链路已通过；这些仍等待更强本地模型完成准备后验收。重建使用规范记录更新时间并按时间排序，不以重建时间冒充事实时间。
+
 ## 本地文档解析（Docling）
 
 实际验证版本为 Docling 2.128.0、ONNX Runtime 1.30.0、Python 3.12；与 Core 使用独立环境。已验证 DOCX、Markdown、HTML、TXT、PPTX、PDF 和 PNG 的真实文件解析，PDF/图片使用本地布局、表格及 RapidOCR 模型。七个格式测试不代表任意扫描件或复杂版式都能准确识别；Linux 和生产隔离仍须独立验收。

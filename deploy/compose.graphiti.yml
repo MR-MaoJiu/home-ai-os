@@ -1,0 +1,19 @@
+name: homeai-graphiti
+services:
+  neo4j:
+    image: neo4j@sha256:bb268a2f1b4f3c79e4bd1a00a82a6e63bbd4fcc4088da03c1b2380655f256cb2
+    ports:
+      - "127.0.0.1:57687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${HOMEAI_NEO4J_PASSWORD:?先运行 scripts/init_graphiti.py}
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+      NEO4J_dbms_usage__report_enabled: "false"
+    mem_limit: 1200m
+    cpus: 1.5
+    volumes:
+      - graphiti-data:/data
+    restart: unless-stopped
+volumes:
+  graphiti-data:

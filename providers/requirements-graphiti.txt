@@ -1,3 +1,4 @@
-graphiti-core>=0.17,<1
-fastapi>=0.115,<1
-uvicorn>=0.34,<1
+graphiti-core==0.30.2
+fastapi==0.135.1
+uvicorn==0.42.0
+httpx==0.28.1
