@@ -24,9 +24,7 @@ def backups(request:Request,actor:Actor=Depends(authenticate)):
     return [{'name':p.name,'bytes':p.stat().st_size,'modified_at':p.stat().st_mtime} for p in sorted(directory.glob('*.haib')) if p.is_file() and not p.is_symlink()]
 
 @router.get('/readiness')
-def readiness(request:Request,actor:Actor=Depends(authenticate)):
+async def readiness(request:Request,actor:Actor=Depends(authenticate)):
     owner(actor)
-    settings=request.app.state.settings
-    with request.app.state.db() as db:
-        db.execute(select(1))
-    return {'database':True,'master_key_loaded':True,'environment':settings.environment,'production_sandbox_verified':False,'remote_configured':False}
+    from .diagnostics import inspect
+    return await inspect(request.app.state, actor)
