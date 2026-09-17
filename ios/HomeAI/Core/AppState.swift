@@ -8,6 +8,7 @@ final class AppState {
     private let dataSync = DeviceDataSync()
     var syncStatus = ""
     var backgroundSyncStatus = ""
+    var systemReminderStatus = ""
     var taskEventStatus = ""
     var taskStates: [TaskStateEvent.Item] = []
     var taskEventRevision = UUID()
@@ -51,6 +52,11 @@ final class AppState {
                         guard namespace == (try await self.api.syncNamespace()) else { return }
                         if event.type == "task.snapshot" {
                             try await self.loadActivity(expectedNamespace: namespace)
+                            let owner = try await self.api.ownerIdentity(expectedNamespace: namespace)
+                            if UserDefaults.standard.bool(forKey: SystemReminderSync.preferenceKey(owner.namespace) + ".automatic") {
+                                try await self.loadData()
+                            }
+                            guard namespace == (try await self.api.syncNamespace()), !Task.isCancelled else { return }
                             self.taskStates = event.tasks
                             self.taskEventRevision = UUID()
                             self.taskEventStatus = event.has_more ? "显示最近 100 个任务状态" : "任务状态已连接"
@@ -135,6 +141,17 @@ final class AppState {
             let result = try await dataSync.synchronize(api: api)
             records = result.records
             syncStatus = result.offline ? "离线：显示上次同步缓存" : "已完成增量同步"
+            if !result.offline && UIApplication.shared.applicationState == .active {
+                let namespace = try await api.syncNamespace()
+                let owner = try await api.ownerIdentity(expectedNamespace: namespace)
+                let key = SystemReminderSync.preferenceKey(owner.namespace)
+                if UserDefaults.standard.bool(forKey: key + ".automatic"), let calendar = UserDefaults.standard.string(forKey: key), !calendar.isEmpty {
+                    do {
+                        let report = try await SystemReminderSync.shared.synchronize(records: result.records, api: api, calendarID: calendar, expectedNamespace: namespace)
+                        systemReminderStatus = report.summary
+                    } catch { systemReminderStatus = "系统提醒未同步：" + error.localizedDescription }
+                }
+            }
         } catch let APIClient.APIError.http(code, message) {
             if [401, 403].contains(code) { records = []; connected = false; syncStatus = "授权已失效" }
             throw APIClient.APIError.http(code, message)
@@ -163,6 +180,10 @@ struct DataEntry: Codable, Identifiable, Sendable {
     let kind: String
     let sensitivity: String
     let version: Int?
+    let owner_id: String?
+    let source: String?
+    let source_id: String?
+    let cloud_policy: String?
     let payload: [String: JSONValue]
     var title: String { payload["title"]?.description ?? payload["name"]?.description ?? kind }
 }

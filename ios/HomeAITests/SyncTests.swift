@@ -1,4 +1,5 @@
 import XCTest
+import EventKit
 @testable import HomeAI
 
 final class SyncTests: XCTestCase {
@@ -91,6 +92,71 @@ final class SyncTests: XCTestCase {
         let reminder = try JSONDecoder().decode(DataEntry.self, from: await api.request("GET", "/api/v1/data/" + intentRecordID))
         XCTAssertEqual(reminder.title, "快捷指令真实提醒")
         XCTAssertEqual(reminder.sensitivity, "PRIVATE")
+        // 实际 EventKit 本机列表：创建、去重、完成状态回传和服务器删除传播。
+        let reminderStore = EKEventStore()
+        XCTAssertEqual(EKEventStore.authorizationStatus(for: .reminder), .fullAccess)
+        let localSource = try XCTUnwrap(reminderStore.sources.first { $0.sourceType == .local }, "测试模拟器需要本机提醒来源")
+        let testCalendar = EKCalendar(for: .reminder, eventStore: reminderStore)
+        testCalendar.title = "Home AI 原生提醒验收 " + UUID().uuidString.prefix(8)
+        testCalendar.source = localSource
+        try reminderStore.saveCalendar(testCalendar, commit: true)
+        defer { try? reminderStore.removeCalendar(testCalendar, commit: true) }
+        let reminderBridge = SystemReminderSync()
+        let exported = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
+        XCTAssertEqual(exported.created, 1)
+        let repeated = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
+        XCTAssertEqual(repeated.created, 0)
+        let systemIDs: [String] = await withCheckedContinuation { continuation in
+            reminderStore.fetchReminders(matching: reminderStore.predicateForReminders(in: [testCalendar])) { values in
+                continuation.resume(returning: (values ?? []).map(\.calendarItemIdentifier))
+            }
+        }
+        XCTAssertEqual(systemIDs.count, 1)
+        let systemReminder = try XCTUnwrap(reminderStore.calendarItem(withIdentifier: systemIDs[0]) as? EKReminder)
+        XCTAssertEqual(systemReminder.title, "快捷指令真实提醒")
+        XCTAssertEqual(systemReminder.url?.scheme, SystemReminderSync.markerScheme)
+        struct PairTicket: Decodable { let token: String }
+        let ticket = try JSONDecoder().decode(PairTicket.self, from: await api.request("POST", "/_test/pair-ticket"))
+        let repaired = APIClient(persistConnection: false)
+        try await repaired.pair(PairingCode(url: fixture.pairing.url, fingerprint: fixture.pairing.fingerprint, token: ticket.token))
+        let repairedNamespace = try await repaired.syncNamespace()
+        XCTAssertNotEqual(repairedNamespace, intentNamespace)
+        let repairedReport = try await SystemReminderSync().synchronize(records: [reminder], api: repaired, calendarID: testCalendar.calendarIdentifier, expectedNamespace: repairedNamespace, store: reminderStore)
+        XCTAssertEqual(repairedReport.created, 0)
+        systemReminder.isCompleted = true
+        try reminderStore.save(systemReminder, commit: true)
+        _ = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
+        let completedReminder = try JSONDecoder().decode(DataEntry.self, from: await api.request("GET", "/api/v1/data/" + intentRecordID))
+        XCTAssertEqual(completedReminder.payload["completed"]?.description, "true")
+        // 两端同时编辑同一字段时保留双方，不覆盖；对齐内容后再推进版本。
+        systemReminder.title = "手机侧编辑"
+        try reminderStore.save(systemReminder, commit: true)
+        var changedPayload = completedReminder.payload
+        changedPayload["title"] = .string("服务器侧编辑")
+        let changedUpload = ConnectorSync.Upload(source: "core", source_id: try XCTUnwrap(completedReminder.source_id), kind: "reminder.item", version: try XCTUnwrap(completedReminder.version) + 1, sensitivity: "PRIVATE", cloud_policy: "LOCAL_ONLY", payload: changedPayload)
+        _ = try await api.request("POST", "/api/v1/data/sync", body: JSONEncoder().encode(ConnectorSync.Batch(batch_id: UUID().uuidString, records: [changedUpload])))
+        let conflicted = try JSONDecoder().decode(DataEntry.self, from: await api.request("GET", "/api/v1/data/" + intentRecordID))
+        let conflictReport = try await reminderBridge.synchronize(records: [conflicted], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
+        XCTAssertEqual(conflictReport.conflicts, 1)
+        XCTAssertTrue(systemReminder.refresh())
+        XCTAssertEqual(systemReminder.title, "手机侧编辑")
+        systemReminder.title = "服务器侧编辑"
+        try reminderStore.save(systemReminder, commit: true)
+        _ = try await reminderBridge.synchronize(records: [conflicted], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
+        _ = try await api.request("DELETE", "/api/v1/data/" + intentRecordID)
+        let removedReminder = try await reminderBridge.synchronize(records: [], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
+        XCTAssertEqual(removedReminder.removed, 1)
+        XCTAssertNil(reminderStore.calendarItem(withIdentifier: systemIDs[0]))
+        let invalidBody = try JSONSerialization.data(withJSONObject: ["idempotency_key": UUID().uuidString, "capability": "reminder.create@v1", "arguments": ["title": "无效完成标志", "completed": "not-a-boolean"]])
+        let invalidCreated = try JSONDecoder().decode(IntentCreated.self, from: await api.request("POST", "/api/v1/tasks", body: invalidBody))
+        _ = try await api.request("POST", "/_test/run/" + invalidCreated.id)
+        let invalidTask = try JSONDecoder().decode(ReminderTask.self, from: await api.request("GET", "/api/v1/tasks/" + invalidCreated.id))
+        let invalidRecordID = try XCTUnwrap(invalidTask.result?.record_id)
+        let invalidRecord = try JSONDecoder().decode(DataEntry.self, from: await api.request("GET", "/api/v1/data/" + invalidRecordID))
+        let invalidReport = try await reminderBridge.synchronize(records: [invalidRecord], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
+        XCTAssertEqual(invalidReport.conflicts, 1)
+        XCTAssertEqual(invalidReport.created, 0)
+        _ = try await api.request("DELETE", "/api/v1/data/" + invalidRecordID)
         // 原生 WSS 使用同一证书固定与设备签名，通知来自真实任务执行。
         let namespace = try await api.syncNamespace()
         let createBody = try JSONSerialization.data(withJSONObject: ["idempotency_key": UUID().uuidString, "capability": "reminder.create@v1", "arguments": ["title": "实时事件验收"]])

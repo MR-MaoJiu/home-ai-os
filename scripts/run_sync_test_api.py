@@ -28,4 +28,12 @@ async def run_fixture_task(task_id:str,actor:Actor=Depends(authenticate)):
         task=own(db,Task,task_id,actor)
         return {'id':task.id,'status':task.status}
 
+@app.post('/_test/pair-ticket')
+def pair_ticket(actor:Actor=Depends(authenticate)):
+    from homeai.security import credential
+    with app.state.db() as db:
+        token=credential(db,actor.user_id,'pair',300)
+        db.commit()
+        return {'token':token}
+
 uvicorn.run(app,host='127.0.0.1',port=58444,ssl_keyfile='state/tls/server.key',ssl_certfile='state/tls/server.crt',access_log=False)

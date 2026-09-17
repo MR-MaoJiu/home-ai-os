@@ -31,6 +31,7 @@ struct SettingsView: View {
                     state.automations = []
                     state.taskStates = []
                     state.syncStatus = ""
+                    state.systemReminderStatus = ""
                     state.connected = true
                     state.connectionRevision = UUID()
                     token = ""
@@ -44,9 +45,12 @@ struct SettingsView: View {
                 Text("只同步已授权的服务器数据，不在后台录音，也不会自动扩大系统数据授权。执行时间由 iOS 决定，锁屏时可能无法访问受保护缓存。").font(.caption).foregroundStyle(.secondary)
                 if !state.backgroundSyncStatus.isEmpty { Text(state.backgroundSyncStatus).font(.caption) }
             }
+            Section("系统提醒写入") {
+                NavigationLink("选择系统列表与同步规则") { ReminderSyncSettings() }.disabled(!state.connected)
+            }
             Section("按需授权同步") {
                 Button("同步未来 30 天日历") { sync { try await $0.calendar() } }
-                Button("同步提醒事项") { sync { try await $0.reminders() } }
+                Button("导入手机已有提醒") { sync { try await $0.reminders() } }
                 Button("同步联系人") { sync { try await $0.contacts() } }
                 Button("同步最近 7 天睡眠数据") { sync { try await $0.sleep() } }
                 Button("分享本次位置") {

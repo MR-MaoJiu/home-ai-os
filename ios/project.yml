@@ -19,6 +19,9 @@ targets:
       properties:
         BGTaskSchedulerPermittedIdentifiers: [dev.homeai.sync.refresh]
         UIBackgroundModes: [fetch]
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.homeai.reminder-source
+            CFBundleURLSchemes: [homeai-reminder]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.homeai.ios
@@ -28,7 +31,7 @@ targets:
         INFOPLIST_KEY_NSCameraUsageDescription: 扫描家庭服务器配对二维码
         INFOPLIST_KEY_NSMicrophoneUsageDescription: 录制语音并交给家庭服务器处理
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: 将你授权的日历同步到家庭服务器
-        INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: 将你授权的提醒同步到家庭服务器
+        INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: 读取你授权的提醒，并在你明确启用后将家庭提醒写入所选系统列表
         INFOPLIST_KEY_NSContactsUsageDescription: 将你授权的联系人同步到家庭服务器
         INFOPLIST_KEY_NSHealthShareUsageDescription: 将你授权的健康数据同步到家庭服务器
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: 管理你明确授权的健康数据

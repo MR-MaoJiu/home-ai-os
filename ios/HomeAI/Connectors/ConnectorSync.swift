@@ -89,7 +89,7 @@ final class ConnectorSync {
         let predicate = store.predicateForReminders(in: nil)
         let items: [(String, String, Bool)] = await withCheckedContinuation { continuation in
             store.fetchReminders(matching: predicate) { reminders in
-                continuation.resume(returning: (reminders ?? []).map { ($0.calendarItemIdentifier, $0.title ?? "提醒", $0.isCompleted) })
+                continuation.resume(returning: (reminders ?? []).filter { $0.url?.scheme != SystemReminderSync.markerScheme }.map { ($0.calendarItemIdentifier, $0.title ?? "提醒", $0.isCompleted) })
             }
         }
         for (id, title, completed) in items {

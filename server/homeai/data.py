@@ -39,7 +39,7 @@ def read_record(db, actor, record_id):
 
 
 def serialize(record, vault):
-    return {"id": record.id, "source": record.source, "source_id": record.source_id, "kind": record.kind, "version": record.version, "sensitivity": record.sensitivity, "cloud_policy": record.cloud_policy, "deleted": record.deleted, "payload": {} if record.deleted else vault.open(record.payload, record.owner_id + ":record:" + record.id)}
+    return {"id": record.id, "owner_id": record.owner_id, "source": record.source, "source_id": record.source_id, "kind": record.kind, "version": record.version, "sensitivity": record.sensitivity, "cloud_policy": record.cloud_policy, "deleted": record.deleted, "payload": {} if record.deleted else vault.open(record.payload, record.owner_id + ":record:" + record.id)}
 
 
 def ingest(db, actor, item, vault):

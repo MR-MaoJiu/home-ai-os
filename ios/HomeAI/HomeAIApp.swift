@@ -2,10 +2,28 @@ import SwiftUI
 
 @main struct HomeAIApp: App {
     @State private var state = AppState()
+    @State private var reminderSource: RecordReference?
     @Environment(\.scenePhase) private var phase
     var body: some Scene {
         WindowGroup {
             RootView().environment(state).task { await state.resumeForeground() }
+                .onOpenURL { url in
+                    guard url.scheme == SystemReminderSync.markerScheme, url.query == nil, url.fragment == nil,
+                          url.pathComponents.count == 2, let identifier = UUID(uuidString: String(url.path.dropFirst())) else { return }
+                    Task { await state.perform {
+                        await state.api.restoreConnectionIfNeeded()
+                        let namespace = try await state.api.syncNamespace()
+                        let owner = try await state.api.ownerIdentity(expectedNamespace: namespace)
+                        guard owner.namespace == url.host else { throw APIClient.APIError.message("此提醒属于另一服务器或成员，请先核对配对") }
+                        let recordID = identifier.uuidString.lowercased()
+                        let raw = try await state.api.request("GET", "/api/v1/data/" + recordID, expectedNamespace: namespace)
+                        let record = try JSONDecoder().decode(DataEntry.self, from: raw)
+                        guard record.kind == "reminder.item", record.owner_id == owner.userID else { throw APIClient.APIError.message("此链接不是当前成员的家庭提醒") }
+                        reminderSource = RecordReference(id: recordID, title: "家庭提醒来源", version: nil)
+                    } }
+                }
+                .sheet(item: $reminderSource) { source in NavigationStack { RecordSourceView(source: source) }.environment(state) }
+                .onChange(of: state.connectionRevision) { _, _ in reminderSource = nil }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
                     Task { await state.resumeForeground() }
                 }

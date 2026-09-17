@@ -20,7 +20,9 @@
 		90C6635A6D4A199315B7C027 /* ReminderIntentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */; };
 		97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2801207D982F13C2327BEEB /* CertificateTests.swift */; };
 		97D9238113B8261863C1C533 /* PairingScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */; };
+		9D1E2E3606F70BE747E4DD31 /* SystemReminderSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */; };
 		9FE59175F863F35CE56AE2C8 /* DeviceDataSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */; };
+		C58AE019E455845FE722DAD7 /* ReminderSyncSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 488555DA9581D34F75317DD7 /* ReminderSyncSettings.swift */; };
 		CCB39D61D9DF7DF91B7D9E9D /* valid.der in Resources */ = {isa = PBXBuildFile; fileRef = 66988C5604968C44ACD83192 /* valid.der */; };
 		D1B2F004EE2B58CE1EA46CDC /* HomeIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9615D81084CBED64C6522C73 /* HomeIntents.swift */; };
 		DA9AF565CA34AC8B41343DFB /* RecordSourceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C088017C48A7E19CF39BF89 /* RecordSourceView.swift */; };
@@ -55,6 +57,7 @@
 		31F98BE893BDC6DAF21EE75D /* SyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTests.swift; sourceTree = "<group>"; };
 		34C88046675947658051AA23 /* BackgroundSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncTests.swift; sourceTree = "<group>"; };
 		3B8932B1B8685BDE56BD299D /* HomeAITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HomeAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		488555DA9581D34F75317DD7 /* ReminderSyncSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderSyncSettings.swift; sourceTree = "<group>"; };
 		4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentTests.swift; sourceTree = "<group>"; };
 		59682522EF3FF4C68D504EDE /* ManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementViews.swift; sourceTree = "<group>"; };
 		6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncOperationGate.swift; sourceTree = "<group>"; };
@@ -71,6 +74,7 @@
 		9615D81084CBED64C6522C73 /* HomeIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeIntents.swift; sourceTree = "<group>"; };
 		9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCapture.swift; sourceTree = "<group>"; };
 		A2801207D982F13C2327BEEB /* CertificateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTests.swift; sourceTree = "<group>"; };
+		CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemReminderSync.swift; sourceTree = "<group>"; };
 		DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
 		F29C16E91255A0E4D8BA30DC /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		FE55D2FE3C69D506D916C9A3 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
@@ -106,6 +110,7 @@
 				59682522EF3FF4C68D504EDE /* ManagementViews.swift */,
 				78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */,
 				1C088017C48A7E19CF39BF89 /* RecordSourceView.swift */,
+				488555DA9581D34F75317DD7 /* ReminderSyncSettings.swift */,
 				183D74AAB13DDE4008A68FBE /* SettingsView.swift */,
 			);
 			path = Features;
@@ -171,6 +176,7 @@
 			children = (
 				870F09D02633F5C931A181DA /* ConnectorSync.swift */,
 				75E227CB9D07EC6BD64E95F2 /* LocationCapture.swift */,
+				CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */,
 				9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */,
 			);
 			path = Connectors;
@@ -295,7 +301,9 @@
 				97D9238113B8261863C1C533 /* PairingScanner.swift in Sources */,
 				DA9AF565CA34AC8B41343DFB /* RecordSourceView.swift in Sources */,
 				90C6635A6D4A199315B7C027 /* ReminderIntentService.swift in Sources */,
+				C58AE019E455845FE722DAD7 /* ReminderSyncSettings.swift in Sources */,
 				E4AEE4ABEC5743739C53A0AD /* SettingsView.swift in Sources */,
+				9D1E2E3606F70BE747E4DD31 /* SystemReminderSync.swift in Sources */,
 				8BC859052EB0D6804590A98A /* VoiceCapture.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -398,7 +406,7 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "将本次位置分享给家庭服务器";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "录制语音并交给家庭服务器处理";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "读取你选择的照片并同步到家庭服务器";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "将你授权的提醒同步到家庭服务器";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "读取你授权的提醒，并在你明确启用后将家庭提醒写入所选系统列表";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -460,7 +468,7 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "将本次位置分享给家庭服务器";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "录制语音并交给家庭服务器处理";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "读取你选择的照片并同步到家庭服务器";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "将你授权的提醒同步到家庭服务器";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "读取你授权的提醒，并在你明确启用后将家庭提醒写入所选系统列表";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (

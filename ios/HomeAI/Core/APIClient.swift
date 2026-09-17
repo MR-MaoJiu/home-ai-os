@@ -104,6 +104,17 @@ actor APIClient {
         return DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":" + device).utf8))
     }
 
+    struct OwnerIdentity: Sendable { let userID: String; let namespace: String }
+    func ownerIdentity(expectedNamespace: String) async throws -> OwnerIdentity {
+        let started = generation
+        struct Me: Decodable { let user_id: String }
+        let data = try await request("GET", "/api/v1/me", expectedNamespace: expectedNamespace)
+        let me = try JSONDecoder().decode(Me.self, from: data)
+        guard started == generation, let saved = connection else { throw APIError.message("连接已切换") }
+        let namespace = DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":owner:" + me.user_id).utf8))
+        return OwnerIdentity(userID: me.user_id, namespace: namespace)
+    }
+
     private func persist() throws {
         if persistConnection { try DeviceIdentity.save(JSONEncoder().encode(connection), name: "connection") }
     }
