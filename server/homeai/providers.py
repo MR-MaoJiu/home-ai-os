@@ -41,6 +41,11 @@ class Registry:
                 if capability in {"model.generate@v1", "photo.analyze@v1"}:
                     path = "/chat/completions"
                     payload = {"model": manifest.model, "messages": arguments["messages"], "max_tokens": min(arguments.get("max_tokens", 1024), 4096)}
+                    if "temperature" in arguments:
+                        temperature = arguments["temperature"]
+                        if type(temperature) not in (int, float) or not 0 <= temperature <= 2:
+                            raise HTTPException(422, "采样温度无效")
+                        payload["temperature"] = temperature
                     if arguments.get("tools"):
                         payload["tools"] = arguments["tools"]
                         payload["tool_choice"] = "auto"

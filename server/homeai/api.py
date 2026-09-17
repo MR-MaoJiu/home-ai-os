@@ -182,7 +182,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             return {"id": task.id, "status": task.status}
 
     def task_view(task):
-        return {"id": task.id, "status": task.status, "error": task.error, "result": v.open(task.result, task.owner_id + ":task-result:" + task.id) if task.result else None}
+        payload = v.open(task.request, task.owner_id + ":task:" + task.id)
+        return {"id": task.id, "status": task.status, "error": task.error, "result": v.open(task.result, task.owner_id + ":task-result:" + task.id) if task.result else None, "execution": {"agent": bool(payload.get("_agent")), "planned_steps": len(payload.get("steps", [])), "max_steps": payload.get("max_steps", 8), "model_rounds": payload.get("_model_rounds", 0), "model_token_charge": payload.get("_model_token_charge", 0), "max_model_tokens": payload.get("max_model_tokens"), "deadline": task.deadline}}
 
     @app.get("/api/v1/tasks/{task_id}")
     def get_task(task_id: str, actor: Actor = auth):

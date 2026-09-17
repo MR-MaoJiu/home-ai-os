@@ -44,6 +44,7 @@ class TaskRequest(Contract):
     steps: list[Step] = Field(default_factory=list, max_length=16)
     timeout_seconds: int = Field(default=600, ge=10, le=3600)
     step_timeout_seconds: int = Field(default=120, ge=1, le=300)
+    max_model_tokens: int = Field(default=32768, ge=256, le=262144)
     max_read_retries: int = Field(default=1, ge=0, le=3)
 
     @model_validator(mode="after")

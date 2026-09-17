@@ -38,7 +38,13 @@ def delete_tree(db, actor, record, vault, state_dir):
     for task in db.scalars(select(Task).where(Task.owner_id==actor.user_id)):
         task.result=None
         body=vault.open(task.request,actor.user_id+':task:'+task.id)
-        if task.status == 'EXECUTING' or set(body.get('record_ids',[])) & targets.keys():
+        if body.get('_agent'):
+            # 规划草稿和模型生成的工具参数也可能复制来源内容，删除时一并撤下。
+            body.pop('_draft_answer', None)
+            body.pop('_agent_batches', None)
+            body['steps'] = []
+            task.request = vault.seal(body, actor.user_id + ':task:' + task.id)
+        if body.get('_agent') or task.status == 'EXECUTING' or set(body.get('record_ids',[])) & targets.keys():
             task.cancel_requested=True
             if task.status in {'RECEIVED','APPROVED','AWAITING_APPROVAL'}:task.status='CANCELED'
     for invocation in db.scalars(select(Invocation).where(Invocation.owner_id==actor.user_id)):

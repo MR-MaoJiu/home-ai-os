@@ -1,7 +1,7 @@
 import {useState} from 'react';
 import {api} from './api';
 
-type Task={id:string;status:string;error?:string};
+type Task={id:string;status:string;error?:string;execution?:{agent:boolean;planned_steps:number;max_steps:number;model_rounds:number;model_token_charge:number;max_model_tokens:number|null}};
 type Step={id:string;step:number;capability:string;status:string;result:unknown};
 export function TaskHistory({tasks,onChanged}:{tasks:Task[]|null;onChanged:()=>void}){
  const[selected,setSelected]=useState<Task|null>(null),[steps,setSteps]=useState<Step[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -34,6 +34,7 @@ export function TaskHistory({tasks,onChanged}:{tasks:Task[]|null;onChanged:()=>v
   {!tasks?.length?<p className="empty">暂无任务</p>:tasks.map(task=><div className="row" key={task.id}><span>{task.id.slice(0,8)}</span><span>{task.status}</span><span>{task.error}</span><button disabled={busy} onClick={()=>inspect(task)}>查看步骤</button></div>)}
   {selected&&<div><h3>任务 {selected.id.slice(0,8)} · {selected.status}</h3><p>已完成步骤会保留；取消和重启不会自动撤销已经发生的外部操作。</p>
    <button disabled={busy} onClick={()=>inspect(selected)}>刷新步骤</button>
+   {selected.execution?.agent&&<p>本地 Agent · 已规划 {selected.execution.planned_steps}/{selected.execution.max_steps} 步 · 模型 {selected.execution.model_rounds} 轮 · Token 计入 {selected.execution.model_token_charge}/{selected.execution.max_model_tokens}（包含未知消耗的保守预留）</p>}
    {['RECEIVED','APPROVED','AWAITING_APPROVAL','EXECUTING'].includes(selected.status)&&<button disabled={busy} onClick={cancel}>取消后续执行</button>}
    {steps.map(step=><details key={step.id}><summary>步骤 {step.step+1} · {step.capability} · {step.status}</summary><pre>{JSON.stringify(step.result,null,2)}</pre></details>)}
    {selected.status==='NEEDS_RECONCILIATION'&&<form onSubmit={reconcile}><h3>外部结果人工核对</h3><p>请先查阅外部系统记录。确认未执行后，高风险操作仍需重新审批；过期或已取消的任务不能重新执行。</p>

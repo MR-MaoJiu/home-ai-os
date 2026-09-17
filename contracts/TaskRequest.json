@@ -104,6 +104,13 @@
       "title": "Step Timeout Seconds",
       "type": "integer"
     },
+    "max_model_tokens": {
+      "default": 32768,
+      "maximum": 262144,
+      "minimum": 256,
+      "title": "Max Model Tokens",
+      "type": "integer"
+    },
     "max_read_retries": {
       "default": 1,
       "maximum": 3,

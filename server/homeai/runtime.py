@@ -29,6 +29,7 @@ def submit(db, actor, request, vault):
     if any(capability not in CAPABILITIES for capability in requested):
         raise HTTPException(422, "未知能力")
     ensure_model_safe(request.message)
+    payload["_agent"] = request.mode == "local" and not request.capability and not request.steps
     task_id = uid()
     task = Task(id=task_id, household_id=actor.household_id, owner_id=actor.user_id, idempotency_key=request.idempotency_key, request_hash=request_hash, request=vault.seal({**payload, "device_id": actor.device_id}, actor.user_id + ":task:" + task_id), deadline=now() + request.timeout_seconds)
     db.add(task)
@@ -209,7 +210,7 @@ async def _run_step(app, task_id, user_id=None):
                 read_record(db, actor, referenced_id)
             invocation.result = app.vault.seal(result, user.id + ":invocation-result:" + invocation.id)
             invocation.status = "SUCCEEDED"
-            task.status = "CANCELED" if task.cancel_requested or device.revoked else ("RECEIVED" if steps and step_number + 1 < len(steps) else "SUCCEEDED")
+            task.status = "CANCELED" if task.cancel_requested or device.revoked else ("RECEIVED" if body.get("_agent") or (steps and step_number + 1 < len(steps)) else "SUCCEEDED")
             if task.deadline <= now() and task.status != "CANCELED":
                 task.status, task.error = "FAILED", "任务截止时间已到，已完成步骤不会重放"
             task.result = app.vault.seal(result, user.id + ":task-result:" + task.id)
@@ -266,8 +267,18 @@ async def run_task(app, task_id, user_id=None):
     # 连接级锁跨步骤事务提交保持有效；进程退出后由 PostgreSQL 自动释放。
     with app.db() as session:
         engine = session.get_bind()
+    async def dispatch():
+        from .agent import advance
+        target_user = user_id
+        if target_user is None and engine.dialect.name != "postgresql":
+            with app.db() as db:
+                task = db.get(Task, task_id)
+                target_user = task.owner_id if task else None
+        if target_user and await advance(app, task_id, target_user):
+            return
+        await _run_step(app, task_id, target_user)
     if engine.dialect.name != "postgresql":
-        return await _run_step(app, task_id, user_id)
+        return await dispatch()
     key = int.from_bytes(hashlib.sha256(('task:' + task_id).encode()).digest()[:8], 'big', signed=True)
     with engine.connect() as lock_connection:
         locked = lock_connection.scalar(text('SELECT pg_try_advisory_lock(:key)'), {'key': key})
@@ -275,7 +286,7 @@ async def run_task(app, task_id, user_id=None):
         if not locked:
             return
         try:
-            await _run_step(app, task_id, user_id)
+            await dispatch()
         finally:
             lock_connection.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': key})
             lock_connection.commit()

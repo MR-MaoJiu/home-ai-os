@@ -47,7 +47,7 @@ def reconcile(task_id: str, body: Reconciliation, request: Request, actor: Actor
             invocation.status = 'SUCCEEDED'
             payload = app.vault.open(task.request, actor.user_id + ':task:' + task.id)
             count = len(payload.get('steps') or []) or 1
-            task.status = 'CANCELED' if task.cancel_requested else ('RECEIVED' if invocation.step + 1 < count else 'SUCCEEDED')
+            task.status = 'CANCELED' if task.cancel_requested else ('RECEIVED' if payload.get('_agent') or invocation.step + 1 < count else 'SUCCEEDED')
             task.result = app.vault.seal(result, actor.user_id + ':task-result:' + task.id)
         else:
             if task.deadline <= now() or task.cancel_requested:
