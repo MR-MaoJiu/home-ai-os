@@ -4,7 +4,7 @@ import UIKit
 
 @MainActor @Observable
 final class AppState {
-    let api = APIClient()
+    let api = AppServices.api
     private let dataSync = DeviceDataSync()
     var syncStatus = ""
     var backgroundSyncStatus = ""

@@ -70,6 +70,27 @@ final class SyncTests: XCTestCase {
             XCTAssertTrue(found.matches.contains { $0.excerpt.contains("八点") })
             _ = try await api.request("DELETE", "/api/v1/data/" + parsed.source_id)
         }
+        // Intent 的不确定提交恢复：真实服务已收下请求，但客户端尚未清除待确认记录。
+        let intentNamespace = try await api.syncNamespace()
+        let intentStorage = "intent-test-" + UUID().uuidString
+        let intentService = ReminderIntentService(storageKey: intentStorage)
+        let intentPending = try await intentService.prepare(title: "快捷指令真实提醒", namespace: intentNamespace)
+        let intentBody = try JSONSerialization.data(withJSONObject: ["idempotency_key": intentPending.idempotencyKey,
+            "capability": "reminder.create@v1", "arguments": ["title": intentPending.title]])
+        struct IntentCreated: Decodable { let id: String }
+        let firstIntent = try JSONDecoder().decode(IntentCreated.self, from: await api.request("POST", "/api/v1/tasks", body: intentBody, expectedNamespace: intentNamespace))
+        let restoredIntent = ReminderIntentService(storageKey: intentStorage)
+        let recoveredID = try await restoredIntent.submit(title: "快捷指令真实提醒", api: api)
+        XCTAssertEqual(recoveredID, firstIntent.id)
+        _ = try await api.request("POST", "/_test/run/" + recoveredID)
+        struct ReminderReceipt: Decodable { let record_id: String }
+        struct ReminderTask: Decodable { let status: String; let result: ReminderReceipt? }
+        let intentTask = try JSONDecoder().decode(ReminderTask.self, from: await api.request("GET", "/api/v1/tasks/" + recoveredID))
+        XCTAssertEqual(intentTask.status, "SUCCEEDED")
+        let intentRecordID = try XCTUnwrap(intentTask.result?.record_id)
+        let reminder = try JSONDecoder().decode(DataEntry.self, from: await api.request("GET", "/api/v1/data/" + intentRecordID))
+        XCTAssertEqual(reminder.title, "快捷指令真实提醒")
+        XCTAssertEqual(reminder.sensitivity, "PRIVATE")
         // 原生 WSS 使用同一证书固定与设备签名，通知来自真实任务执行。
         let namespace = try await api.syncNamespace()
         let createBody = try JSONSerialization.data(withJSONObject: ["idempotency_key": UUID().uuidString, "capability": "reminder.create@v1", "arguments": ["title": "实时事件验收"]])

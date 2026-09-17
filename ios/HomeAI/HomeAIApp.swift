@@ -25,15 +25,16 @@ import SwiftUI
 }
 
 struct RootView: View {
+    @State private var navigation = IntentRouter.shared
     @Environment(AppState.self) private var state
     var body: some View {
         @Bindable var state = state
-        TabView {
-            Tab("AI", systemImage: "sparkles") { NavigationStack { ChatView().id(state.connectionRevision) } }
-            Tab("活动", systemImage: "clock.arrow.circlepath") { NavigationStack { ActivityView().id(state.connectionRevision) } }
-            Tab("自动化", systemImage: "bolt") { NavigationStack { AutomationsView() } }
-            Tab("数据", systemImage: "externaldrive") { NavigationStack { DataView() } }
-            Tab("设置", systemImage: "gearshape") { NavigationStack { SettingsView() } }
+        TabView(selection: $navigation.destination) {
+            Tab("AI", systemImage: "sparkles", value: HomeDestination.ai) { NavigationStack { ChatView().id(state.connectionRevision) } }
+            Tab("活动", systemImage: "clock.arrow.circlepath", value: HomeDestination.activity) { NavigationStack { ActivityView().id(state.connectionRevision) } }
+            Tab("自动化", systemImage: "bolt", value: HomeDestination.automations) { NavigationStack { AutomationsView() } }
+            Tab("数据", systemImage: "externaldrive", value: HomeDestination.data) { NavigationStack { DataView() } }
+            Tab("设置", systemImage: "gearshape", value: HomeDestination.settings) { NavigationStack { SettingsView() } }
         }
         .task(id: state.connectionRevision) { if state.connected { state.startForegroundEvents() } }
         .onChange(of: state.connected) { _, connected in if connected { state.startForegroundEvents() } }

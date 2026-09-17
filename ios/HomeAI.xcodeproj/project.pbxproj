@@ -15,17 +15,21 @@
 		3200B4ACE967E878200789FE /* SyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F98BE893BDC6DAF21EE75D /* SyncTests.swift */; };
 		3ECFD7DC6007E52EFC8313C5 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE55D2FE3C69D506D916C9A3 /* ChatView.swift */; };
 		6571226787D32CC9D94130D3 /* AsyncOperationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */; };
+		67741F121857E92BB53DB322 /* IntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */; };
 		8BC859052EB0D6804590A98A /* VoiceCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */; };
+		90C6635A6D4A199315B7C027 /* ReminderIntentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */; };
 		97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2801207D982F13C2327BEEB /* CertificateTests.swift */; };
 		97D9238113B8261863C1C533 /* PairingScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */; };
 		9FE59175F863F35CE56AE2C8 /* DeviceDataSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */; };
 		CCB39D61D9DF7DF91B7D9E9D /* valid.der in Resources */ = {isa = PBXBuildFile; fileRef = 66988C5604968C44ACD83192 /* valid.der */; };
+		D1B2F004EE2B58CE1EA46CDC /* HomeIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9615D81084CBED64C6522C73 /* HomeIntents.swift */; };
 		DA9AF565CA34AC8B41343DFB /* RecordSourceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C088017C48A7E19CF39BF89 /* RecordSourceView.swift */; };
 		E4AEE4ABEC5743739C53A0AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183D74AAB13DDE4008A68FBE /* SettingsView.swift */; };
 		E54A2D234B033B4C84F8192B /* expired.der in Resources */ = {isa = PBXBuildFile; fileRef = 69B6E5AB48EE76965AD72D13 /* expired.der */; };
 		F14D0F35AF71D3CE64599B24 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */; };
 		F157368B807DCEA022253C7B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030A9C6729AEAA14F8E8E130 /* APIClient.swift */; };
 		F23F05F824092191E1852E69 /* HomeAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E4C314968102960503AA /* HomeAIApp.swift */; };
+		F2A9DADDD37E5F78ECA1B800 /* AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = 95C00AFF2B6A9C9C42CCE3F2 /* AppShortcuts.strings */; };
 		F70BA49598AEC176FE65A948 /* future.der in Resources */ = {isa = PBXBuildFile; fileRef = 7663DFFCF83A100838851D5D /* future.der */; };
 		F9B16823F9E13697EC44B81F /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 026E7BEC5639994664ECC698 /* DeviceIdentity.swift */; };
 /* End PBXBuildFile section */
@@ -51,6 +55,7 @@
 		31F98BE893BDC6DAF21EE75D /* SyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTests.swift; sourceTree = "<group>"; };
 		34C88046675947658051AA23 /* BackgroundSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncTests.swift; sourceTree = "<group>"; };
 		3B8932B1B8685BDE56BD299D /* HomeAITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HomeAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentTests.swift; sourceTree = "<group>"; };
 		59682522EF3FF4C68D504EDE /* ManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementViews.swift; sourceTree = "<group>"; };
 		6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncOperationGate.swift; sourceTree = "<group>"; };
 		66988C5604968C44ACD83192 /* valid.der */ = {isa = PBXFileReference; path = valid.der; sourceTree = "<group>"; };
@@ -59,8 +64,11 @@
 		7663DFFCF83A100838851D5D /* future.der */ = {isa = PBXFileReference; path = future.der; sourceTree = "<group>"; };
 		7780E4C314968102960503AA /* HomeAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAIApp.swift; sourceTree = "<group>"; };
 		78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScanner.swift; sourceTree = "<group>"; };
+		7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderIntentService.swift; sourceTree = "<group>"; };
 		870F09D02633F5C931A181DA /* ConnectorSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectorSync.swift; sourceTree = "<group>"; };
 		8BDF0FE60E34CE16D2DDD28B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		95C00AFF2B6A9C9C42CCE3F2 /* AppShortcuts.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = AppShortcuts.strings; path = "zh-Hans.lproj/AppShortcuts.strings"; sourceTree = "<group>"; };
+		9615D81084CBED64C6522C73 /* HomeIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeIntents.swift; sourceTree = "<group>"; };
 		9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCapture.swift; sourceTree = "<group>"; };
 		A2801207D982F13C2327BEEB /* CertificateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTests.swift; sourceTree = "<group>"; };
 		DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
@@ -76,10 +84,19 @@
 				A2801207D982F13C2327BEEB /* CertificateTests.swift */,
 				69B6E5AB48EE76965AD72D13 /* expired.der */,
 				7663DFFCF83A100838851D5D /* future.der */,
+				4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */,
 				31F98BE893BDC6DAF21EE75D /* SyncTests.swift */,
 				66988C5604968C44ACD83192 /* valid.der */,
 			);
 			path = HomeAITests;
+			sourceTree = "<group>";
+		};
+		2CD985B63594BE2640B1EBDF /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				95C00AFF2B6A9C9C42CCE3F2 /* AppShortcuts.strings */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		311AF46D3716E4293947732B /* Features */ = {
@@ -112,8 +129,17 @@
 				DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */,
 				20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */,
 				026E7BEC5639994664ECC698 /* DeviceIdentity.swift */,
+				7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		5ADB638544DD8EF180A44736 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				9615D81084CBED64C6522C73 /* HomeIntents.swift */,
+			);
+			path = Intents;
 			sourceTree = "<group>";
 		};
 		7DCA41109DD34FA9E37B5D9E /* Products */ = {
@@ -134,6 +160,8 @@
 				C7A72B4ED1D545BD9618F97F /* Connectors */,
 				486CF881A1A352D4BA54175F /* Core */,
 				311AF46D3716E4293947732B /* Features */,
+				5ADB638544DD8EF180A44736 /* Intents */,
+				2CD985B63594BE2640B1EBDF /* Resources */,
 			);
 			path = HomeAI;
 			sourceTree = "<group>";
@@ -156,6 +184,7 @@
 			buildConfigurationList = 854045FF71EBC983C77EEAC0 /* Build configuration list for PBXNativeTarget "HomeAI" */;
 			buildPhases = (
 				CF6BF380ABE25CC23BD2C531 /* Sources */,
+				8C69A5E6AB5ED85C5D99E934 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -210,6 +239,7 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 3D10D10553520F18274DEF53;
 			minimizedProjectReferenceProxies = 1;
@@ -235,6 +265,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		8C69A5E6AB5ED85C5D99E934 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F2A9DADDD37E5F78ECA1B800 /* AppShortcuts.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -251,10 +289,12 @@
 				9FE59175F863F35CE56AE2C8 /* DeviceDataSync.swift in Sources */,
 				F9B16823F9E13697EC44B81F /* DeviceIdentity.swift in Sources */,
 				F23F05F824092191E1852E69 /* HomeAIApp.swift in Sources */,
+				D1B2F004EE2B58CE1EA46CDC /* HomeIntents.swift in Sources */,
 				0D457DD2610BAB68B05948CC /* LocationCapture.swift in Sources */,
 				2B722EC57F0E02CE17CC9169 /* ManagementViews.swift in Sources */,
 				97D9238113B8261863C1C533 /* PairingScanner.swift in Sources */,
 				DA9AF565CA34AC8B41343DFB /* RecordSourceView.swift in Sources */,
+				90C6635A6D4A199315B7C027 /* ReminderIntentService.swift in Sources */,
 				E4AEE4ABEC5743739C53A0AD /* SettingsView.swift in Sources */,
 				8BC859052EB0D6804590A98A /* VoiceCapture.swift in Sources */,
 			);
@@ -266,6 +306,7 @@
 			files = (
 				23C1EA8A5112A8D8B3F2A6EC /* BackgroundSyncTests.swift in Sources */,
 				97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */,
+				67741F121857E92BB53DB322 /* IntentTests.swift in Sources */,
 				3200B4ACE967E878200789FE /* SyncTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
