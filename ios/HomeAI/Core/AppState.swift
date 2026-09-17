@@ -1,11 +1,14 @@
 import Foundation
 import Observation
+import UIKit
 
 @MainActor @Observable
 final class AppState {
     let api = APIClient()
     private let dataSync = DeviceDataSync()
     var syncStatus = ""
+    var backgroundSyncStatus = ""
+    private var backgroundRun: (UUID, Task<Void, Never>)?
     var connected = false
     var error: String?
     var busy = false
@@ -14,11 +17,62 @@ final class AppState {
     var automations: [AutomationEntry] = []
     var approvals: [ApprovalEntry] = []
 
-    func restore() async { connected = await api.isConnected() }
+    func restore() async {
+        guard UIApplication.shared.isProtectedDataAvailable else { return }
+        await api.restoreConnectionIfNeeded()
+        connected = await api.isConnected()
+    }
+
+    func configureBackgroundSync(enabled: Bool) {
+        if !enabled { backgroundRun?.1.cancel() }
+        backgroundSyncStatus = BackgroundSync.schedule(enabled: enabled && connected)
+        if enabled && !connected { backgroundSyncStatus = "配对后才会申请后台同步" }
+    }
+
+    func resumeForeground() async {
+        await restore()
+        guard connected, UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else { return }
+        do { try await loadData() }
+        catch is CancellationError { }
+        catch let error as URLError where error.code == .cancelled { }
+        catch { if syncStatus != "授权已失效" { syncStatus = "同步未完成，可下拉重试" } }
+    }
+
+    func refreshInBackground() async {
+        let enabled = UserDefaults.standard.bool(forKey: BackgroundSync.preference)
+        backgroundSyncStatus = BackgroundSync.schedule(enabled: enabled)
+        guard enabled, UIApplication.shared.isProtectedDataAvailable, backgroundRun == nil else { return }
+        let identifier = UUID()
+        let operation = Task { [weak self] in
+            guard let self else { return }
+            await self.restore()
+            guard self.connected, !Task.isCancelled else { return }
+            do {
+                let result = try await self.dataSync.synchronize(api: self.api)
+                guard !Task.isCancelled else { return }
+                self.records = result.records
+                self.backgroundSyncStatus = result.offline ? "网络不可用，保留缓存等待下次同步" : "后台同步已完成"
+            } catch {
+                if case APIClient.APIError.http(let code, _) = error, [401, 403].contains(code) {
+                    self.records = []
+                    self.connected = false
+                    _ = BackgroundSync.schedule(enabled: false)
+                }
+                if !UserDefaults.standard.bool(forKey: BackgroundSync.preference) { self.backgroundSyncStatus = "后台同步已关闭" }
+                else { self.backgroundSyncStatus = Task.isCancelled ? "系统结束了本次后台时间，下次继续" : "后台同步未完成，可在前台重试" }
+            }
+        }
+        backgroundRun = (identifier, operation)
+        await withTaskCancellationHandler { await operation.value } onCancel: { operation.cancel() }
+        if backgroundRun?.0 == identifier { backgroundRun = nil }
+    }
     func perform(_ operation: () async throws -> Void) async {
         busy = true
         defer { busy = false }
-        do { try await operation() } catch { self.error = error.localizedDescription }
+        do { try await operation() }
+        catch is CancellationError { }
+        catch let error as URLError where error.code == .cancelled { }
+        catch { self.error = error.localizedDescription }
     }
 
     func loadData() async throws {
@@ -27,7 +81,7 @@ final class AppState {
             records = result.records
             syncStatus = result.offline ? "离线：显示上次同步缓存" : "已完成增量同步"
         } catch let APIClient.APIError.http(code, message) {
-            if [401, 403].contains(code) { records = []; syncStatus = "授权已失效" }
+            if [401, 403].contains(code) { records = []; connected = false; syncStatus = "授权已失效" }
             throw APIClient.APIError.http(code, message)
         }
     }

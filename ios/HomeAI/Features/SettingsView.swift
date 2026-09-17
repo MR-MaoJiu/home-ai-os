@@ -4,6 +4,7 @@ import VisionKit
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
+    @AppStorage("backgroundSyncEnabled") private var backgroundSyncEnabled = false
     @State private var server = "https://"
     @State private var fingerprint = ""
     @State private var token = ""
@@ -33,6 +34,14 @@ struct SettingsView: View {
                     token = ""
                 } } }.disabled(state.busy)
             }
+            Section("后台同步") {
+                Toggle("允许系统后台刷新", isOn: $backgroundSyncEnabled)
+                    .onChange(of: backgroundSyncEnabled) { _, enabled in
+                        state.configureBackgroundSync(enabled: enabled)
+                    }
+                Text("只同步已授权的服务器数据，不在后台录音，也不会自动扩大系统数据授权。执行时间由 iOS 决定，锁屏时可能无法访问受保护缓存。").font(.caption).foregroundStyle(.secondary)
+                if !state.backgroundSyncStatus.isEmpty { Text(state.backgroundSyncStatus).font(.caption) }
+            }
             Section("按需授权同步") {
                 Button("同步未来 30 天日历") { sync { try await $0.calendar() } }
                 Button("同步提醒事项") { sync { try await $0.reminders() } }
@@ -54,7 +63,7 @@ struct SettingsView: View {
             Section("隐私") {
                 Label("个人数据默认仅在本地处理", systemImage: "hand.raised")
                 Text("授权由 iOS 系统管理，可随时在系统设置中撤回。已上传的数据需要在数据页面单独删除。").font(.caption).foregroundStyle(.secondary)
-                Text("当前为开发版本：推送、后台增量同步、完整脱敏链与生产插件隔离仍需验收。").font(.caption).foregroundStyle(.secondary)
+                Text("当前为开发版本：推送、后台调度真机表现、完整脱敏链与生产插件隔离仍需验收。").font(.caption).foregroundStyle(.secondary)
             }
         }.navigationTitle("设置")
             .sheet(isPresented: $scanning) {

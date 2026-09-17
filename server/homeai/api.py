@@ -70,8 +70,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             token = credential(db, actor.user_id, "access", settings.session_seconds, actor.device_id)
             incoming = request.headers.get("authorization", "").removeprefix("Bearer ")
             old = db.scalar(select(Credential).where(Credential.digest == digest(incoming.encode())).with_for_update())
-            if not old or old.expires_at <= now():
-                raise HTTPException(401, "刷新凭据已失效")
+            if not old or old.kind != "refresh" or old.expires_at <= now():
+                raise HTTPException(401, "需要有效的刷新凭据")
             if old.kind == "refresh":
                 db.delete(old)
             refresh = credential(db, actor.user_id, "refresh", 30 * 86400, actor.device_id)

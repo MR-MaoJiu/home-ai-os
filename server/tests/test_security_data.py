@@ -79,3 +79,13 @@ def test_signed_multipart_body_not_consumed_or_tampered(system, alice):
     headers['content-type'] = request.headers['content-type']
     response = alice.client.post('/api/v1/files', content=raw, headers=headers)
     assert response.status_code == 200, response.text
+
+
+def test_nonfinite_signed_timestamp_is_rejected(alice):
+    from homeai.crypto import digest
+    for timestamp in ('nan','inf','-inf'):
+        headers=alice.headers('GET','/api/v1/me',b'')
+        headers['x-homeai-time']=timestamp
+        proof='\n'.join([timestamp,headers['x-homeai-nonce'],'GET','/api/v1/me',digest(b''),digest(alice.token.encode())])
+        headers['x-homeai-signature']=alice.sign(proof.encode())
+        assert alice.client.get('/api/v1/me',headers=headers).status_code==401

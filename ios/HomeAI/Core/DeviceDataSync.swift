@@ -10,21 +10,13 @@ actor DeviceDataSync {
     private struct Ack: Codable { let cursor: Int; let snapshot_id: String? }
     private struct PendingSnapshot: Codable { let id: String; let watermark: Int; var offset: Int; var records: [DataEntry] }
     private struct Cache: Codable { var cursor: Int; var records: [DataEntry]; var pendingAck: Ack?; var snapshot: PendingSnapshot? }
-    private var running = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    private func acquire() async {
-        if !running { running = true; return }
-        await withCheckedContinuation { waiters.append($0) }
-    }
-
-    private func release() {
-        if waiters.isEmpty { running = false } else { waiters.removeFirst().resume() }
-    }
+    private let gate = AsyncOperationGate()
 
     func synchronize(api: APIClient) async throws -> Result {
-        await acquire()
-        defer { release() }
+        try await gate.withPermit { try await self.performSync(api: api) }
+    }
+
+    private func performSync(api: APIClient) async throws -> Result {
         try Task.checkCancellation()
         let namespace = try await api.syncNamespace()
         let file = try cacheURL(namespace)

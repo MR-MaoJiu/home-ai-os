@@ -2,9 +2,23 @@ import SwiftUI
 
 @main struct HomeAIApp: App {
     @State private var state = AppState()
+    @Environment(\.scenePhase) private var phase
     var body: some Scene {
         WindowGroup {
-            RootView().environment(state).task { await state.restore() }
+            RootView().environment(state).task { await state.resumeForeground() }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+                    Task { await state.resumeForeground() }
+                }
+        }
+        .backgroundTask(.appRefresh(BackgroundSync.identifier)) {
+            await state.refreshInBackground()
+        }
+        .onChange(of: phase) { _, phase in
+            if phase == .background {
+                state.configureBackgroundSync(enabled: UserDefaults.standard.bool(forKey: BackgroundSync.preference))
+            } else if phase == .active {
+                Task { await state.resumeForeground() }
+            }
         }
     }
 }

@@ -10,9 +10,11 @@
 		0D457DD2610BAB68B05948CC /* LocationCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75E227CB9D07EC6BD64E95F2 /* LocationCapture.swift */; };
 		0DDC420981C50F73DD18E556 /* ConnectorSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 870F09D02633F5C931A181DA /* ConnectorSync.swift */; };
 		13BD270422782D463674448B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29C16E91255A0E4D8BA30DC /* AppState.swift */; };
+		23C1EA8A5112A8D8B3F2A6EC /* BackgroundSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34C88046675947658051AA23 /* BackgroundSyncTests.swift */; };
 		2B722EC57F0E02CE17CC9169 /* ManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59682522EF3FF4C68D504EDE /* ManagementViews.swift */; };
 		3200B4ACE967E878200789FE /* SyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F98BE893BDC6DAF21EE75D /* SyncTests.swift */; };
 		3ECFD7DC6007E52EFC8313C5 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE55D2FE3C69D506D916C9A3 /* ChatView.swift */; };
+		6571226787D32CC9D94130D3 /* AsyncOperationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */; };
 		8BC859052EB0D6804590A98A /* VoiceCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */; };
 		97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2801207D982F13C2327BEEB /* CertificateTests.swift */; };
 		97D9238113B8261863C1C533 /* PairingScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */; };
@@ -20,6 +22,7 @@
 		CCB39D61D9DF7DF91B7D9E9D /* valid.der in Resources */ = {isa = PBXBuildFile; fileRef = 66988C5604968C44ACD83192 /* valid.der */; };
 		E4AEE4ABEC5743739C53A0AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183D74AAB13DDE4008A68FBE /* SettingsView.swift */; };
 		E54A2D234B033B4C84F8192B /* expired.der in Resources */ = {isa = PBXBuildFile; fileRef = 69B6E5AB48EE76965AD72D13 /* expired.der */; };
+		F14D0F35AF71D3CE64599B24 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */; };
 		F157368B807DCEA022253C7B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030A9C6729AEAA14F8E8E130 /* APIClient.swift */; };
 		F23F05F824092191E1852E69 /* HomeAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E4C314968102960503AA /* HomeAIApp.swift */; };
 		F70BA49598AEC176FE65A948 /* future.der in Resources */ = {isa = PBXBuildFile; fileRef = 7663DFFCF83A100838851D5D /* future.der */; };
@@ -44,8 +47,10 @@
 		20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDataSync.swift; sourceTree = "<group>"; };
 		2565FEAD234C22AC9F0B12E7 /* HomeAI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HomeAI.entitlements; sourceTree = "<group>"; };
 		31F98BE893BDC6DAF21EE75D /* SyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTests.swift; sourceTree = "<group>"; };
+		34C88046675947658051AA23 /* BackgroundSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncTests.swift; sourceTree = "<group>"; };
 		3B8932B1B8685BDE56BD299D /* HomeAITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HomeAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		59682522EF3FF4C68D504EDE /* ManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementViews.swift; sourceTree = "<group>"; };
+		6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncOperationGate.swift; sourceTree = "<group>"; };
 		66988C5604968C44ACD83192 /* valid.der */ = {isa = PBXFileReference; path = valid.der; sourceTree = "<group>"; };
 		69B6E5AB48EE76965AD72D13 /* expired.der */ = {isa = PBXFileReference; path = expired.der; sourceTree = "<group>"; };
 		75E227CB9D07EC6BD64E95F2 /* LocationCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationCapture.swift; sourceTree = "<group>"; };
@@ -53,8 +58,10 @@
 		7780E4C314968102960503AA /* HomeAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAIApp.swift; sourceTree = "<group>"; };
 		78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScanner.swift; sourceTree = "<group>"; };
 		870F09D02633F5C931A181DA /* ConnectorSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectorSync.swift; sourceTree = "<group>"; };
+		8BDF0FE60E34CE16D2DDD28B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCapture.swift; sourceTree = "<group>"; };
 		A2801207D982F13C2327BEEB /* CertificateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTests.swift; sourceTree = "<group>"; };
+		DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
 		F29C16E91255A0E4D8BA30DC /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		FE55D2FE3C69D506D916C9A3 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -63,6 +70,7 @@
 		28D2C01869CF8CDC3D66616F /* HomeAITests */ = {
 			isa = PBXGroup;
 			children = (
+				34C88046675947658051AA23 /* BackgroundSyncTests.swift */,
 				A2801207D982F13C2327BEEB /* CertificateTests.swift */,
 				69B6E5AB48EE76965AD72D13 /* expired.der */,
 				7663DFFCF83A100838851D5D /* future.der */,
@@ -97,6 +105,8 @@
 			children = (
 				030A9C6729AEAA14F8E8E130 /* APIClient.swift */,
 				F29C16E91255A0E4D8BA30DC /* AppState.swift */,
+				6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */,
+				DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */,
 				20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */,
 				026E7BEC5639994664ECC698 /* DeviceIdentity.swift */,
 			);
@@ -117,6 +127,7 @@
 			children = (
 				2565FEAD234C22AC9F0B12E7 /* HomeAI.entitlements */,
 				7780E4C314968102960503AA /* HomeAIApp.swift */,
+				8BDF0FE60E34CE16D2DDD28B /* Info.plist */,
 				C7A72B4ED1D545BD9618F97F /* Connectors */,
 				486CF881A1A352D4BA54175F /* Core */,
 				311AF46D3716E4293947732B /* Features */,
@@ -230,6 +241,8 @@
 			files = (
 				F157368B807DCEA022253C7B /* APIClient.swift in Sources */,
 				13BD270422782D463674448B /* AppState.swift in Sources */,
+				6571226787D32CC9D94130D3 /* AsyncOperationGate.swift in Sources */,
+				F14D0F35AF71D3CE64599B24 /* BackgroundSync.swift in Sources */,
 				3ECFD7DC6007E52EFC8313C5 /* ChatView.swift in Sources */,
 				0DDC420981C50F73DD18E556 /* ConnectorSync.swift in Sources */,
 				9FE59175F863F35CE56AE2C8 /* DeviceDataSync.swift in Sources */,
@@ -247,6 +260,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				23C1EA8A5112A8D8B3F2A6EC /* BackgroundSyncTests.swift in Sources */,
 				97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */,
 				3200B4ACE967E878200789FE /* SyncTests.swift in Sources */,
 			);
@@ -328,6 +342,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = HomeAI/HomeAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = HomeAI/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Home AI";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "将你授权的日历同步到家庭服务器";
 				INFOPLIST_KEY_NSCameraUsageDescription = "扫描家庭服务器配对二维码";
@@ -389,6 +404,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = HomeAI/HomeAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = HomeAI/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Home AI";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "将你授权的日历同步到家庭服务器";
 				INFOPLIST_KEY_NSCameraUsageDescription = "扫描家庭服务器配对二维码";

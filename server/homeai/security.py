@@ -1,4 +1,5 @@
 import base64
+import math
 import secrets
 from dataclasses import dataclass
 from sqlalchemy import select
@@ -43,7 +44,8 @@ async def authenticate(request: Request):
     nonce = request.headers.get("x-homeai-nonce", "")
     signature = request.headers.get("x-homeai-signature", "")
     try:
-        if abs(now() - float(timestamp)) > 60 or not 16 <= len(nonce) <= 100:
+        parsed_time = float(timestamp)
+        if not math.isfinite(parsed_time) or abs(now() - parsed_time) > 60 or not 16 <= len(nonce) <= 100:
             raise ValueError()
     except ValueError:
         raise HTTPException(401, "请求证明缺失或已过期") from None

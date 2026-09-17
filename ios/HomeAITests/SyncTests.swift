@@ -22,6 +22,11 @@ final class SyncTests: XCTestCase {
         let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         let api = APIClient(persistConnection: false)
         try await api.pair(fixture.pairing)
+        // 短会话测试服务会强制进入刷新路径，验证前后台并发请求不重复消费旧凭据。
+        async let firstIdentity = api.request("GET", "/api/v1/me")
+        async let secondIdentity = api.request("GET", "/api/v1/me")
+        let identities = try await (firstIdentity, secondIdentity)
+        XCTAssertEqual(identities.0, identities.1)
         let wrongTarget = try JSONSerialization.data(withJSONObject: ["records": [["source": "native_sync", "source_id": "wrong-target", "kind": "note", "version": 1, "payload": ["title": "不应上传"]]]])
         do {
             _ = try await api.request("POST", "/api/v1/data/sync", body: wrongTarget, expectedNamespace: "different-connection")

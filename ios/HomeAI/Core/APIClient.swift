@@ -23,6 +23,7 @@ actor APIClient {
     private let identity = DeviceIdentity()
     private var session: URLSession?
     private var generation = UUID()
+    private let renewalGate = AsyncOperationGate()
     private var pairingAttempt = UUID()
 
     init(persistConnection: Bool = true) {
@@ -34,6 +35,15 @@ actor APIClient {
     }
 
     func isConnected() -> Bool { connection != nil }
+
+    func restoreConnectionIfNeeded() {
+        guard connection == nil, persistConnection,
+              let data = DeviceIdentity.read("connection"),
+              let saved = try? JSONDecoder().decode(Connection.self, from: data) else { return }
+        generation = UUID()
+        connection = saved
+        session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: saved.fingerprint, keyFingerprint: saved.tlsKeyFingerprint), delegateQueue: nil)
+    }
 
     func pair(_ code: PairingCode) async throws {
         let attempt = UUID()
@@ -93,21 +103,28 @@ actor APIClient {
         let started = generation
         guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对家庭服务器") }
         if saved.expiresAt.timeIntervalSinceNow < 60 && path != "/api/v1/session/renew" {
-            let data = try await send("POST", "/api/v1/session/renew", body: nil, token: saved.refreshToken, base: base, session: session)
-            guard started == generation else { throw APIError.message("连接已切换，请重试") }
-            let tokens = try JSONDecoder().decode(Tokens.self, from: data)
-            saved.token = tokens.access_token
-            saved.refreshToken = tokens.refresh_token
-            saved.expiresAt = Date().addingTimeInterval(Double(tokens.expires_in))
-            connection = saved
-            try persist()
+            saved = try await renewalGate.withPermit { try await self.renewIfNeeded(generation: started) }
         }
-        let data = try await send(method, path, body: body, token: saved.token, base: base, session: session)
+        let data = try await send(method, path, body: body, token: saved.token, base: base, session: session, expectedGeneration: started)
         guard started == generation else { throw APIError.message("连接已切换，请重试") }
         return data
     }
 
-    private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession) async throws -> Data {
+    private func renewIfNeeded(generation started: UUID) async throws -> Connection {
+        guard started == generation, var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("连接已切换，请重试") }
+        if saved.expiresAt.timeIntervalSinceNow >= 60 { return saved }
+        let data = try await send("POST", "/api/v1/session/renew", body: nil, token: saved.refreshToken, base: base, session: session, expectedGeneration: started)
+        guard started == generation else { throw APIError.message("连接已切换，请重试") }
+        let tokens = try JSONDecoder().decode(Tokens.self, from: data)
+        saved.token = tokens.access_token
+        saved.refreshToken = tokens.refresh_token
+        saved.expiresAt = Date().addingTimeInterval(Double(tokens.expires_in))
+        connection = saved
+        try persist()
+        return saved
+    }
+
+    private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession, expectedGeneration: UUID) async throws -> Data {
         guard let url = URL(string: path, relativeTo: base) else { throw APIError.message("无效请求地址") }
         let timestamp = String(Date().timeIntervalSince1970)
         let nonce = UUID().uuidString
@@ -121,9 +138,15 @@ actor APIClient {
         request.setValue(timestamp, forHTTPHeaderField: "X-HomeAI-Time")
         request.setValue(nonce, forHTTPHeaderField: "X-HomeAI-Nonce")
         request.setValue(try identity.sign(Data(proof.utf8)), forHTTPHeaderField: "X-HomeAI-Signature")
-        let (data, response) = try await session.data(for: request)
-        try Self.validate(data, response)
-        return data
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard expectedGeneration == generation else { throw APIError.message("连接已切换，请重试") }
+            try Self.validate(data, response)
+            return data
+        } catch {
+            guard expectedGeneration == generation else { throw APIError.message("连接已切换，请重试") }
+            throw error
+        }
     }
 
     private static func validate(_ data: Data, _ response: URLResponse) throws {

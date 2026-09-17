@@ -86,3 +86,7 @@ def test_validation_does_not_echo_secrets(alice):
 def test_untrusted_task_cannot_write_derived_memory(alice):
     result=alice.request('POST','/api/v1/tasks',{'idempotency_key':'derived-write-0001','capability':'memory.semantic.index@v1','arguments':{'record_id':'fake','content':'伪造事实'}})
     assert result.status_code==403
+
+
+def test_access_token_cannot_mint_refresh_credentials(alice):
+    assert alice.request('POST','/api/v1/session/renew').status_code==401

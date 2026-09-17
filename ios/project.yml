@@ -14,6 +14,11 @@ targets:
     type: application
     platform: iOS
     sources: [HomeAI]
+    info:
+      path: HomeAI/Info.plist
+      properties:
+        BGTaskSchedulerPermittedIdentifiers: [dev.homeai.sync.refresh]
+        UIBackgroundModes: [fetch]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.homeai.ios
