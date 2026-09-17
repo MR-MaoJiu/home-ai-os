@@ -117,10 +117,22 @@ async def run_task(app, task_id, user_id=None):
                 result = {"record_id": record.id, "status": "stored", "device_sync": "pending"}
             elif capability in {"memory.search@v1", "calendar.search@v1"}:
                 from .data import accessible
-                prefix = "memory." if capability == "memory.search@v1" else "calendar."
-                rows = db.scalars(accessible(db, actor).where(__import__("homeai.db", fromlist=["Record"]).Record.kind.startswith(prefix)).limit(200)).all()
-                query = str(args.get("query", "")).casefold()
-                result = [serialize(r, app.vault) for r in rows if query in json.dumps(serialize(r, app.vault)["payload"], ensure_ascii=False).casefold()]
+                query = str(args.get("query", ""))
+                semantic = None
+                if capability == "memory.search@v1":
+                    from .vector_index import search as vector_search
+                    try:
+                        semantic = await vector_search(app, db, actor, query)
+                    except Exception:
+                        db.rollback()
+                        scope(db, actor.user_id, actor.household_id)
+                if semantic:
+                    result = {"mode": "pgvector_exact", "records": semantic}
+                else:
+                    prefix = "memory.fact" if capability == "memory.search@v1" else "calendar."
+                    rows = db.scalars(accessible(db, actor).where(__import__("homeai.db", fromlist=["Record"]).Record.kind.startswith(prefix)).limit(1000)).all()
+                    records = [serialize(r, app.vault) for r in rows if query.casefold() in json.dumps(serialize(r, app.vault)["payload"], ensure_ascii=False).casefold()]
+                    result = {"mode": "authorized_literal", "records": records[:50]} if capability == "memory.search@v1" else records[:50]
             elif planned_response is not None:
                 result = planned_response
             else:
@@ -130,8 +142,12 @@ async def run_task(app, task_id, user_id=None):
                         raise HTTPException(403, "此云端能力尚未接入隐私网关")
                     db.add(Disclosure(household_id=user.household_id, owner_id=user.id, task_id=task.id, provider_id=manifest.id, categories='["public_records"]', bytes_sent=len(canonical(args))))
                     db.commit()
+                if capability in {"memory.semantic.search@v1", "memory.graph.search@v1"}:
+                    from .derived_memory import require_ready
+                    require_ready(db, actor, manifest)
                 result = await app.registry.invoke(db, actor, manifest, capability, args, invocation.id)
                 if capability in {"memory.semantic.search@v1", "memory.graph.search@v1"}:
+                    require_ready(db, actor, manifest)
                     if not isinstance(result, dict) or not isinstance(result.get("canonical_ids"), list):
                         raise HTTPException(502, "记忆 Provider 未返回规范记录引用")
                     records = []

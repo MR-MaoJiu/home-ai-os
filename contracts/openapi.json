@@ -992,6 +992,63 @@
         }
       }
     },
+    "/api/v1/memory/index": {
+      "get": {
+        "tags": [
+          "记忆"
+        ],
+        "summary": "Index Status",
+        "operationId": "index_status_api_v1_memory_index_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/index/rebuild": {
+      "post": {
+        "tags": [
+          "记忆"
+        ],
+        "summary": "Rebuild Index",
+        "operationId": "rebuild_index_api_v1_memory_index_rebuild_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memory/derived": {
+      "get": {
+        "tags": [
+          "记忆"
+        ],
+        "summary": "Derived Status",
+        "operationId": "derived_status_api_v1_memory_derived_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/members/invite": {
       "post": {
         "tags": [
@@ -1775,6 +1832,18 @@
               }
             ],
             "title": "Model"
+          },
+          "embedding_query_prefix": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Embedding Query Prefix",
+            "default": ""
+          },
+          "embedding_document_prefix": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Embedding Document Prefix",
+            "default": ""
           },
           "capabilities": {
             "additionalProperties": {

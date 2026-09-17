@@ -68,6 +68,8 @@ class ProviderManifest(Contract):
     endpoint: str
     cloud: bool = False
     model: str | None = None
+    embedding_query_prefix: str = Field(default="", max_length=500)
+    embedding_document_prefix: str = Field(default="", max_length=500)
     capabilities: dict[str, str]
     timeout_seconds: int = Field(default=60, ge=1, le=300)
     image_digest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")

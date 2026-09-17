@@ -48,6 +48,18 @@
       "default": null,
       "title": "Model"
     },
+    "embedding_query_prefix": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Embedding Query Prefix",
+      "type": "string"
+    },
+    "embedding_document_prefix": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Embedding Document Prefix",
+      "type": "string"
+    },
     "capabilities": {
       "additionalProperties": {
         "type": "string"

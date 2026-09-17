@@ -13,5 +13,9 @@ async def main():
         for user,household in users:
             try:await reconcile(app,user,household)
             except Exception as exc:log.warning('索引失败，保留事件重试：%s',type(exc).__name__)
+            try:
+                from .derived_memory import reconcile as reconcile_derived
+                await reconcile_derived(app,user,household)
+            except Exception as exc:log.warning('派生索引失败，保留重建任务：%s',type(exc).__name__)
         await asyncio.sleep(5)
 if __name__=='__main__':asyncio.run(main())

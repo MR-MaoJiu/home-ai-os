@@ -76,3 +76,49 @@ async def search(request: Request, q: str, actor: Actor = Depends(authenticate))
         rows=db.scalars(accessible(db,actor).where(Record.kind=='memory.fact').limit(1000)).all()
         results=[serialize(r,app.vault) for r in rows if q.casefold() in json.dumps(serialize(r,app.vault)['payload'],ensure_ascii=False).casefold()]
         return {'mode':'authorized_literal','records':results[:50]}
+
+
+@router.get('/index')
+def index_status(request: Request, actor: Actor = Depends(authenticate)):
+    from .vector_index import current
+    app = request.app.state
+    with app.db() as db:
+        scope(db, actor.user_id, actor.household_id)
+        try:
+            manifest = app.registry.resolve(db, 'model.embed@v1', cloud=False)
+        except HTTPException:
+            manifest = None
+        rows = db.execute(select(Record, MemoryVector).outerjoin(MemoryVector, MemoryVector.record_id == Record.id).where(Record.owner_id == actor.user_id, Record.deleted.is_(False), Record.kind == 'memory.fact', Record.sensitivity != 'SECRET')).all()
+        ready = sum(bool(manifest and current(vector, record, manifest, app.vault)) for record, vector in rows)
+        return {'provider_id': manifest.id if manifest else None, 'eligible': len(rows), 'ready': ready, 'pending': len(rows) - ready, 'status': 'UNCONFIGURED' if not manifest else ('READY' if ready == len(rows) else 'PENDING')}
+
+
+@router.post('/index/rebuild')
+def rebuild_index(request: Request, actor: Actor = Depends(authenticate)):
+    # 仅丢弃调用者的派生数据。规范账本保持不变，工作进程自动补建。
+    with request.app.state.db() as db:
+        scope(db, actor.user_id, actor.household_id)
+        db.execute(delete(MemoryVector).where(MemoryVector.owner_id == actor.user_id))
+        audit(db, actor, 'memory.index.rebuild', actor.user_id)
+        db.commit()
+    return {'status': 'PENDING', 'requires_worker': True}
+
+
+@router.get('/derived')
+def derived_status(request: Request, actor: Actor = Depends(authenticate)):
+    from .db import Provider
+    from .contracts import ProviderManifest
+    from .derived_memory import checkpoint, job_id
+    with request.app.state.db() as db:
+        scope(db, actor.user_id, actor.household_id)
+        result = []
+        for provider in db.scalars(select(Provider).order_by(Provider.id)):
+            manifest = ProviderManifest.model_validate_json(provider.manifest)
+            if not any(cap in manifest.capabilities for cap in ('memory.semantic.index@v1', 'memory.graph.index@v1')):
+                continue
+            job = db.get(DerivedJob, job_id(actor.user_id, provider.id))
+            status = 'DISABLED' if not provider.enabled else 'PENDING'
+            if provider.enabled and job:
+                status = job.status if job.event_id == checkpoint(db, actor.user_id, manifest) else 'PENDING'
+            result.append({'provider_id': provider.id, 'status': status, 'attempts': job.attempts if job else 0, 'error_type': job.error if job else None})
+        return result
