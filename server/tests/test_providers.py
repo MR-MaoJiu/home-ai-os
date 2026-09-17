@@ -74,3 +74,14 @@ for operation in (lambda:socket.getaddrinfo("example.com",443),lambda:socket.soc
 assert stats["blocked_connections"]==2
 '''
     subprocess.run([sys.executable,'-c',code],env={**os.environ,'PYTHONPATH':'providers'},check=True)
+
+
+def test_local_schema_expansion_preserves_requirements():
+    from homeai_providers.json_schema import inline_schema
+    source={'$defs':{'Entity':{'type':'object','properties':{'name':{'type':'string'}},'required':['name']}},'type':'object','properties':{'entities':{'type':'array','items':{'$ref':'#/$defs/Entity'}}},'required':['entities']}
+    result=inline_schema(source)
+    assert result['properties']['entities']['items']['required']==['name']
+    assert result['properties']['entities']['items']['additionalProperties'] is False
+    assert '$defs' not in result and '$defs' in source
+    with pytest.raises(ValueError):inline_schema({'$ref':'https://example.com/schema'})
+    with pytest.raises(ValueError):inline_schema({'$defs':{'A':{'$ref':'#/$defs/A'}},'$ref':'#/$defs/A'})

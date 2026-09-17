@@ -13,6 +13,13 @@ def graph():
     from graphiti_core import Graphiti
     from graphiti_core.llm_client.config import LLMConfig
     from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
+    from .json_schema import inline_schema
+    class LocalStructuredClient(OpenAIGenericClient):
+        def _build_response_format(self, response_model):
+            result = super()._build_response_format(response_model)
+            if result['type'] == 'json_schema':
+                result['json_schema']['schema'] = inline_schema(result['json_schema']['schema'])
+            return result
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
     from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
     base = os.environ['LOCAL_MODEL_URL']
@@ -29,7 +36,7 @@ def graph():
     embed_client = AsyncOpenAI(api_key='local-only', base_url=embed_base, http_client=DefaultAsyncHttpxClient(trust_env=False), timeout=60, max_retries=1)
     config = LLMConfig(api_key='local-only', model=os.environ['LOCAL_MODEL_NAME'], small_model=os.environ['LOCAL_MODEL_NAME'], base_url=base, temperature=0)
     return Graphiti(os.environ['NEO4J_URI'], os.environ['NEO4J_USER'], os.environ['NEO4J_PASSWORD'],
-        llm_client=OpenAIGenericClient(config=config, client=model_client, max_tokens=2048),
+        llm_client=LocalStructuredClient(config=config, client=model_client, max_tokens=2048),
         embedder=OpenAIEmbedder(OpenAIEmbedderConfig(api_key='local-only',base_url=embed_base,embedding_model=os.environ['LOCAL_EMBEDDING_MODEL'],embedding_dim=int(os.environ['LOCAL_EMBEDDING_DIM'])), client=embed_client),
         cross_encoder=OpenAIRerankerClient(config=config, client=model_client),
         store_raw_episode_content=False)

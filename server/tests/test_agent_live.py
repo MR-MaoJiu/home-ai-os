@@ -20,7 +20,7 @@ async def test_real_agent_creates_two_reminders_then_summarizes(iteration):
     settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
     app=create_app(settings)
     user=SignedClient(TestClient(app),app.state.db,household=str(uuid.uuid4()))
-    manifest=ProviderManifest(id='a.agent.local',version='8460',adapter='openai',endpoint='http://127.0.0.1:58080/v1',model='Qwen3-0.6B-Q8_0.gguf',allowed_hosts=['127.0.0.1'],capabilities={'model.generate@v1':'chat'})
+    manifest=ProviderManifest(id='a.agent.local',version='8460',adapter='openai',endpoint=os.environ.get('HOMEAI_AGENT_TEST_URL','http://127.0.0.1:58080/v1'),model=os.environ.get('HOMEAI_AGENT_TEST_MODEL','Qwen3-0.6B-Q8_0.gguf'),allowed_hosts=['127.0.0.1'],capabilities={'model.generate@v1':'chat'})
     with app.state.db() as db:
         row=db.get(Provider,manifest.id)
         if row:row.manifest,row.enabled=manifest.model_dump_json(),True

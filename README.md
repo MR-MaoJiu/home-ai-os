@@ -23,7 +23,7 @@
 |---|---|---|
 | 身份与管理后台 | 本机初始化、设备签名、短期令牌、撤销；网页密码/TOTP、CSRF、重新认证 | 完整安装向导体验、家庭多成员实用验收 |
 | 数据 | 信封加密、版本冲突、共享/撤权、删除闭包、墓碑 | 分页快照一致性、后台增量同步、批次确认 |
-| 记忆 | 候选确认、规范账本、pgvector、版本检查、自动与手动重建 | Mem0 已完成真实重建/检索/删除验收；冲突事实裁决、Graphiti 和更多故障演练待完成 |
+| 记忆 | 候选确认、规范账本、pgvector、版本检查、自动与手动重建 | Mem0/Graphiti 已完成真实重建、检索与删除验收；冲突事实裁决、规模与更多故障演练待完成 |
 | Agent | 本地模型自主多轮规划、持久化工具步骤、Token/轮次预算、结果引用、逐步审批、取消、恢复与核对 | 云端费用预算、更丰富工具、复杂条件及补偿 |
 | 隐私 | 云能力限制、公开资料最小调用、披露记录 | 完整 NER、本地复核、占位符往返还原；私人内容上云保持拒绝 |
 | 自动化 | 多步骤 Cron 工作流、幂等提交、Outbox/JetStream 发布 | 事件消费者、Skill 条件与补偿 |
@@ -240,7 +240,7 @@ open ios/HomeAI.xcodeproj
 
 ## 测试
 
-当前 0.6B 链路模型在重复多轮验收中仍会漏执行或重复提出操作；运行器会阻止重复副作用。请以最新 [验收记录](docs/验收记录.md) 的实际通过/失败结果为准，不能把一次模型测试成功视为稳定性保证。更强本地模型正在单独验收。
+当前 0.6B 链路模型在重复多轮验收中仍会漏执行或重复提出操作；运行器会阻止重复副作用。请以最新 [验收记录](docs/验收记录.md) 的实际通过/失败结果为准，不能把一次模型测试成功视为稳定性保证。4B 模型已使用相同断言连续三次通过验收，开发默认优先使用它；这仍不构成任意任务的准确性保证。
 
 ```sh
 .venv/bin/pytest -q
@@ -256,6 +256,34 @@ HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 .venv/bin/pytest -q
 `providers/manifests/` 为端点配置示例，注册后默认停用。模型名称和地址必须与实际服务一致。独立 SDK 适配器通过 `HOMEAI_ADAPTER` 选择，并强制校验 `PROVIDER_SERVICE_TOKEN`。各适配器使用独立环境，不把 Docling、语音或图数据库依赖安装到核心服务环境。
 
 当前生产启用接口主动阻止未完成沙箱验收的 Provider。所有依赖尚未按生产 OCI Digest 和签名完成锁定，因此不能将开发 Compose 作为生产部署配置使用。
+
+## 4B 本地 Agent 模型
+
+0.6B 模型保留作低成本链路测试，已发现其多轮操作不稳定。当前开发实例优先登记真实 Qwen3-4B-Q4_K_M；模型来自 [Qwen 官方固定版本](https://huggingface.co/Qwen/Qwen3-4B-GGUF/tree/bc640142c66e1fdd12af0bd68f40445458f3869b)，权重约 2.5 GB，不进入 Git。
+
+```sh
+curl -fL --retry 3 -C - 'https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf' -o state/models/Qwen3-4B-Q4_K_M.gguf
+.venv/bin/python scripts/run_agent_model.py
+```
+
+另开终端运行 `.venv/bin/python scripts/register_agent_model.py`。启动脚本检查大小 `2497280256` 和 SHA256 `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`；校验不符不会加载。服务位于 `127.0.0.1:58082`，使用单并发、8192 上下文，保留原 `58080` 链路测试服务。
+
+Graphiti 使用 4B 服务进行真实抽取和重排。已验证版本的 llama.cpp 对含 `$ref` 的嵌套 Schema 存在约束兼容问题，适配层展开本地引用并保留必填字段；拒绝远程/循环引用，不修改模型返回内容，不事后补造字段。
+
+Graphiti 服务启动、数据库和模型就绪后，为成员登记：
+
+```sh
+.venv/bin/python scripts/run_graphiti.py
+.venv/bin/python scripts/register_local_graphiti.py --user <成员ID>
+```
+
+完整已接入服务回归使用：
+
+```sh
+HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_EMBEDDING_TEST=1 HOMEAI_DOCLING_TEST=1 HOMEAI_MEM0_TEST=1 HOMEAI_GRAPHITI_TEST=1 HOMEAI_AGENT_TEST_URL=http://127.0.0.1:58082/v1 HOMEAI_AGENT_TEST_MODEL=Qwen3-4B-Q4_K_M.gguf .venv/bin/pytest -q
+```
+
+测试仍要求两条实际提醒、模型最终回答及重复调度无新增操作，另验证 Graphiti 实际关系检索与删除传播。没有启用对应标志的跳过结果不算验收通过。
 
 ## 可拆卸记忆投影（Mem0）
 
@@ -288,9 +316,9 @@ HOMEAI_MEM0_TEST=1 .venv/bin/pytest -q server/tests/test_mem0_live.py
 
 该测试实际调用 SDK、Embedding、Qdrant、PostgreSQL 和 OPA，覆盖重建、搜索回读、跨主体隔离、停用及删除传播。参考 [Mem0 本地 Embedding 配置](https://docs.mem0.ai/components/embedders/models/lmstudio)。
 
-## Graphiti 独立图数据库（集成中）
+## Graphiti 独立图数据库
 
-Graphiti 0.30.2 的依赖和本地客户端适配已准备，实际运行的 Neo4j 5.26.30 使用独立 Compose 项目、数据卷和凭据；仅发布本机 Bolt 端口 `57687`，不发布图数据库网页控制台。镜像已按官方 OCI 清单摘要锁定。**当前尚未完成真实图抽取与搜索验收，不计为可用 Provider。**
+Graphiti 0.30.2 的依赖和本地客户端适配已准备，实际运行的 Neo4j 5.26.30 使用独立 Compose 项目、数据卷和凭据；仅发布本机 Bolt 端口 `57687`，不发布图数据库网页控制台。镜像已按官方 OCI 清单摘要锁定。真实模型抽取、图搜索、Core 规范记录回读、跨主体隔离和删除传播已通过开发验收；生产沙箱仍未完成。
 
 ```sh
 .venv/bin/python scripts/init_graphiti.py
@@ -304,7 +332,7 @@ state/venvs/graphiti/bin/python scripts/check_graphiti_database.py --initialize-
 
 `run_graphiti.py` 为独立启动入口，要求 `58082` 的本地生成模型、`58081` 的 Embedding 和已启动的 Neo4j。客户端显式关闭遥测和系统代理，Python 门禁只允许这三个本地端口，不使用默认云模型；原始 episode 正文不保留到图数据库。图仍是派生数据，搜索必须映射回规范记录 ID，再由 Core 重新鉴权。操作系统隔离尚未验收。
 
-数据库认证连接、33 个索引在线和真实主体清理隔离已通过。启动 `run_graphiti.py` 后，可用独立测试节点运行 `state/venvs/graphiti/bin/python scripts/check_graphiti_isolation.py` 复验清理边界。此结果不代表模型实体抽取、语义搜索及规范账本全链路已通过；这些仍等待更强本地模型完成准备后验收。重建使用规范记录更新时间并按时间排序，不以重建时间冒充事实时间。
+数据库认证连接、33 个索引在线和真实主体清理隔离已通过。启动 `run_graphiti.py` 后，可用独立测试节点运行 `state/venvs/graphiti/bin/python scripts/check_graphiti_isolation.py` 复验清理边界。随后已通过模型实体抽取、语义搜索及规范账本回读全链路测试。重建使用规范记录更新时间并按时间排序，不以重建时间冒充事实时间。
 
 ## 本地文档解析（Docling）
 
@@ -415,7 +443,7 @@ HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_EMBEDDING_TEST=1 .venv/bin/pytes
 
 ### 派生向量索引
 
-配置本地 `model.embed@v1` Provider 后，单独运行 `python -m homeai.memory_worker`，避免索引阻塞任务执行。PostgreSQL 使用精确向量检索，结果回到规范账本读取；缺少 Embedding Provider 或索引不可用时明确降级为授权范围内文字检索。Mem0 已通过真实 SDK、本地 Embedding、Qdrant 与 Core 重建/检索/删除验收。Graphiti 消费者代码已接入，但 Neo4j 与真实模型集成仍未通过；两者状态分别记录。
+配置本地 `model.embed@v1` Provider 后，单独运行 `python -m homeai.memory_worker`，避免索引阻塞任务执行。PostgreSQL 使用精确向量检索，结果回到规范账本读取；缺少 Embedding Provider 或索引不可用时明确降级为授权范围内文字检索。Mem0 已通过真实 SDK、本地 Embedding、Qdrant 与 Core 重建/检索/删除验收。Graphiti 已通过真实 Neo4j、4B 模型、Embedding 与 Core 集成；规模、生产隔离与更复杂事实冲突仍需验收。
 
 ## 许可与出处
 
