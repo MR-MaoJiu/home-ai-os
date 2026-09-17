@@ -174,6 +174,21 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             db.commit()
             return serialize(record, v)
 
+    @app.post("/api/v1/files/{record_id}/parse", status_code=202)
+    def parse_file(record_id: str, actor: Actor = auth):
+        with app.state.db() as db:
+            record = own(db, Record, record_id, actor)
+            if record.deleted or record.kind != "document.file" or record.sensitivity == "SECRET":
+                raise HTTPException(403, "来源不能解析")
+            db.refresh(record, with_for_update=True)
+            prefix = "parse:" + record.id + ":" + str(record.version)
+            previous = db.scalar(select(Task).where(Task.owner_id == actor.user_id, Task.idempotency_key.startswith(prefix + ":")).order_by(Task.created_at.desc()).limit(1))
+            if previous and previous.status not in {"FAILED", "CANCELED"}:
+                return {"id": previous.id, "status": previous.status}
+            task = submit(db, actor, TaskRequest(idempotency_key=prefix + ":" + uid(), capability="document.parse@v1", record_ids=[record.id], arguments={"record_id": record.id}, step_timeout_seconds=300), v)
+            db.commit()
+            return {"id": task.id, "status": task.status}
+
     @app.post("/api/v1/tasks", status_code=202)
     def create_task(body: TaskRequest, actor: Actor = auth):
         with app.state.db() as db:

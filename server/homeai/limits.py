@@ -1,4 +1,5 @@
 from starlette.responses import JSONResponse
+import hashlib
 
 
 class BodyLimitMiddleware:
@@ -17,6 +18,7 @@ class BodyLimitMiddleware:
             if len(body)>self.limit:
                 return await JSONResponse({'detail':'请求正文超过限制'},status_code=413)(scope,receive,send)
             if not message.get('more_body',False):break
+        scope["homeai.body_digest"] = hashlib.sha256(body).hexdigest()
         used=False
         async def replay():
             nonlocal used

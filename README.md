@@ -29,7 +29,7 @@
 | 自动化 | 多步骤 Cron 工作流、幂等提交、Outbox/JetStream 发布 | 事件消费者、Skill 条件与补偿 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
-| 文档/语音/家居/邮件 | 对应适配器代码、受控调用路径 | Docling、FunASR、whisper.cpp、CosyVoice、HA、邮件真实闭环 |
+| 文档/语音/家居/邮件 | Docling 七格式真实解析、加密附件与来源删除；其余适配器代码 | Docling Linux/生产沙箱验收；FunASR、whisper.cpp、CosyVoice、HA、邮件真实闭环 |
 | iOS | 五个页面、配对、数据授权导入、录音入口、证书校验 | APNs、后台队列、App Intent、任务事件流、真机验收 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
@@ -240,6 +240,8 @@ open ios/HomeAI.xcodeproj
 
 ## 测试
 
+当前 0.6B 链路模型在重复多轮验收中仍会漏执行或重复提出操作；运行器会阻止重复副作用。请以最新 [验收记录](docs/验收记录.md) 的实际通过/失败结果为准，不能把一次模型测试成功视为稳定性保证。更强本地模型正在单独验收。
+
 ```sh
 .venv/bin/pytest -q
 .venv/bin/python scripts/check_boundaries.py
@@ -254,6 +256,49 @@ HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 .venv/bin/pytest -q
 `providers/manifests/` 为端点配置示例，注册后默认停用。模型名称和地址必须与实际服务一致。独立 SDK 适配器通过 `HOMEAI_ADAPTER` 选择，并强制校验 `PROVIDER_SERVICE_TOKEN`。各适配器使用独立环境，不把 Docling、语音或图数据库依赖安装到核心服务环境。
 
 当前生产启用接口主动阻止未完成沙箱验收的 Provider。所有依赖尚未按生产 OCI Digest 和签名完成锁定，因此不能将开发 Compose 作为生产部署配置使用。
+
+## 本地文档解析（Docling）
+
+实际验证版本为 Docling 2.128.0、ONNX Runtime 1.30.0、Python 3.12；与 Core 使用独立环境。已验证 DOCX、Markdown、HTML、TXT、PPTX、PDF 和 PNG 的真实文件解析，PDF/图片使用本地布局、表格及 RapidOCR 模型。七个格式测试不代表任意扫描件或复杂版式都能准确识别；Linux 和生产隔离仍须独立验收。
+
+```sh
+python3.12 -m venv state/venvs/docling
+state/venvs/docling/bin/pip install -r providers/requirements-docling.txt
+state/venvs/docling/bin/docling-tools models download layout tableformer rapidocr --rapidocr-backend-lang onnxruntime:iso:zh --output-dir state/models/docling
+.venv/bin/python scripts/verify_provider_models.py --manifest providers/models/docling-2.128.0.json --root state/models/docling
+.venv/bin/python scripts/run_docling.py
+```
+
+另开终端登记当前成员：
+
+```sh
+.venv/bin/python scripts/register_local_docling.py --user <成员ID>
+```
+
+Mac/Python 3.12 的完整已验证依赖记录在 `providers/locks/docling-macos-py312.txt`；其他平台不能直接把此记录视为已验证。模型校验清单仅包含相对文件名、大小和 SHA256，不提交权重。上游权重若发生变化，校验脚本会拒绝，不能跳过校验后宣称使用相同模型。
+
+启动脚本强制核对模型 SHA256，只传递必要环境，服务绑定 `127.0.0.1:8103`；随机服务凭据保存在 `state/provider-secrets/docling.token`（0600），登记时写入该成员的加密 Secret。不要将此文件、模型或环境目录提交到 Git。其他成员需分别登记；Registry 不会选择属于其他成员的服务凭据。
+
+运行阶段关闭 Hugging Face/Transformers 自动下载，Docling 关闭远程服务和外部插件。预下载模型与实际文档处理分开。应用层选项不是操作系统网络沙箱；生产启用门禁仍保留。
+
+### 上传到正文的流程
+
+1. 管理后台“数据与记忆”选择文件，上传原始附件。设备上传签名覆盖完整 Multipart 正文摘要；正文被修改时返回 401。
+2. Core 以信封加密保存附件。解析接口 `POST /api/v1/files/{record_id}/parse` 只允许当前成员自己的非秘密附件，重复提交返回原进行中或成功任务。
+3. Worker 检查 OPA，经授权记录 ID 读取文件，解密后将字节交给独立 Provider；不下发宿主路径或数据库凭据。
+4. Provider 串行解析，限制 20 MB 输入、100 页和 3 MB 输出。Office 外部关系、实体声明、过大的解压内容及大于 3000 万像素的图片会被拒绝。
+5. Core 再次核对来源版本，将正文保存为 `document.parsed`，记录 `source_ids`、来源版本与解析器版本。解析期间来源变化时不保存旧结果。
+6. 失败会保留明确失败任务，再次提交可重试；删除源附件时解析正文进入同一删除闭包，不保留孤立副本。删除和派生创建共用来源行锁。
+
+在独立测试库运行真实验收：
+
+```sh
+HOMEAI_DOCLING_TEST=1 .venv/bin/pytest -q server/tests/test_docling_live.py
+```
+
+测试生成有效文档文件并调用真实 Docling HTTP 服务，不返回固定 Markdown。完整回归可以同时打开 `HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_EMBEDDING_TEST=1 HOMEAI_DOCLING_TEST=1`。
+
+参考：[Docling 离线与模型预下载](https://docling-project.github.io/docling/usage/advanced_options/)、[Pipeline 配置](https://docling-project.github.io/docling/reference/pipeline_options/)。
 
 ## 备份
 

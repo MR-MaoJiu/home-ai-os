@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "id": "docling",
-  "version": "1.0.0",
+  "version": "2.128.0",
   "adapter": "http",
   "endpoint": "http://127.0.0.1:8103",
   "cloud": false,
@@ -9,7 +9,7 @@
   "capabilities": {
     "document.parse@v1": "/invoke/parse"
   },
-  "timeout_seconds": 60,
+  "timeout_seconds": 300,
   "image_digest": null,
   "secret_id": null,
   "allowed_hosts": [

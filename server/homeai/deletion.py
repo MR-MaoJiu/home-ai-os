@@ -7,9 +7,11 @@ from .data import emit, audit
 
 
 def delete_tree(db, actor, record, vault, state_dir):
+    # 与派生记录创建共用来源行锁，避免删除闭包计算期间出现新的解析正文。
+    db.refresh(record, with_for_update=True)
     targets={record.id:record}
     # 规范事实也可能引用另一条规范事实，计算闭包防止多层来源残留。
-    memories=db.scalars(select(Record).where(Record.owner_id==actor.user_id,Record.kind=='memory.fact',Record.deleted.is_(False))).all()
+    memories=db.scalars(select(Record).where(Record.owner_id==actor.user_id,Record.kind.in_(['memory.fact','document.parsed']),Record.deleted.is_(False))).all()
     while True:
         previous=len(targets)
         for item in memories:

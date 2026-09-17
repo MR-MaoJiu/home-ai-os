@@ -67,15 +67,8 @@ def memory():
 
 
 def parse_document(call):
-    from docling.document_converter import DocumentConverter
-    suffix = Path(call.arguments.get("filename", "document.pdf")).suffix.lower()
-    if suffix not in {".pdf", ".docx", ".pptx", ".html", ".txt", ".md", ".png", ".jpg"}:
-        raise HTTPException(422, "文档格式不支持")
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / ("input" + suffix)
-        path.write_bytes(binary(call.arguments))
-        result = DocumentConverter().convert(path)
-        return {"markdown": result.document.export_to_markdown()}
+    from .docling_adapter import parse
+    return parse(call, binary(call.arguments))
 
 
 def transcribe_funasr(call):
@@ -106,6 +99,7 @@ def synthesize_cosy(call):
 
 
 app = FastAPI(title="Home AI Provider bridge", dependencies=[Depends(authenticate)])
+docling_lock = asyncio.Semaphore(1)
 
 
 @app.get("/health")
@@ -118,7 +112,8 @@ async def invoke(operation: str, call: Call):
     adapter = os.environ.get("HOMEAI_ADAPTER")
     try:
         if adapter == "docling" and operation == "parse":
-            return await asyncio.to_thread(parse_document, call)
+            async with docling_lock:
+                return await asyncio.to_thread(parse_document, call)
         if adapter == "funasr" and operation == "transcribe":
             return await asyncio.to_thread(transcribe_funasr, call)
         if adapter == "cosyvoice" and operation == "synthesize":

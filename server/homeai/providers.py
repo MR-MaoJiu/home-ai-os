@@ -16,6 +16,10 @@ class Registry:
         for row in db.scalars(select(Provider).where(Provider.enabled.is_(True)).order_by(Provider.id)):
             manifest = ProviderManifest.model_validate_json(row.manifest)
             if capability in manifest.capabilities and manifest.cloud == cloud:
+                if manifest.secret_id:
+                    secret = db.get(Secret, manifest.secret_id)
+                    if not secret or secret.owner_id != db.info.get("user_id") or secret.provider_id != manifest.id:
+                        continue
                 matches.append(manifest)
         if not matches:
             raise HTTPException(503, f"能力尚未配置可用 Provider：{capability}")

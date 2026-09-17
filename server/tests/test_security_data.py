@@ -65,3 +65,17 @@ def test_encryption_context_bound():
     assert '数据' not in value
     assert vault.open(value,'alice')['private']=='数据'
     with pytest.raises(Exception):vault.open(value,'bob')
+
+
+def test_signed_multipart_body_not_consumed_or_tampered(system, alice):
+    request = alice.client.build_request('POST', '/api/v1/files', files={'file': ('note.txt', b'original document')})
+    raw = request.read()
+    headers = alice.headers('POST', '/api/v1/files', raw)
+    headers['content-type'] = request.headers['content-type']
+    changed = raw.replace(b'original document', b'modified document')
+    response = alice.client.post('/api/v1/files', content=changed, headers=headers)
+    assert response.status_code == 401
+    headers = alice.headers('POST', '/api/v1/files', raw)
+    headers['content-type'] = request.headers['content-type']
+    response = alice.client.post('/api/v1/files', content=raw, headers=headers)
+    assert response.status_code == 200, response.text

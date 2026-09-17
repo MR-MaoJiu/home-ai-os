@@ -55,9 +55,11 @@ async def authenticate(request: Request):
         user = db.get(Principal, auth.user_id)
         if not device or device.revoked or not user or device.user_id != user.id:
             raise HTTPException(401, "设备已撤销")
-        body = await request.body()
+        body_digest = request.scope.get("homeai.body_digest")
+        if body_digest is None:
+            body_digest = digest(await request.body())
         path = request.url.path + ("?" + request.url.query if request.url.query else "")
-        proof = "\n".join([timestamp, nonce, request.method, path, digest(body), digest(token.encode())])
+        proof = "\n".join([timestamp, nonce, request.method, path, body_digest, digest(token.encode())])
         verify(device.public_key, signature, proof.encode())
         db.add(Nonce(id=device.id + ":" + nonce, expires_at=now() + 120))
         try:

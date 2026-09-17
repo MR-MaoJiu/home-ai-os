@@ -34,3 +34,28 @@ async def test_provider_host_denied_before_network(system,alice):
     registry=Registry(system[0].state.vault,httpx.MockTransport(never))
     with system[2]() as db:
         with pytest.raises(HTTPException):await registry.invoke(db,Actor(alice.user_id,'h1',alice.device_id,'adult'),manifest,'document.parse@v1',{},'inv1')
+
+
+def test_document_external_relationship_cannot_bypass_with_quotes():
+    import io,zipfile
+    from homeai_providers.docling_adapter import preflight
+    for quote in ('"', "'"):
+        data=io.BytesIO()
+        with zipfile.ZipFile(data,'w') as archive:
+            archive.writestr('_rels/.rels', f'<Relationships><Relationship TargetMode={quote}External{quote} Target={quote}file:///private/data{quote}/></Relationships>')
+        with pytest.raises(HTTPException):
+            preflight(data.getvalue(),'.docx')
+
+
+def test_registry_skips_other_members_credentials(system,alice):
+    from homeai.db import Provider,scope
+    vault=system[0].state.vault
+    with system[2]() as db:
+        scope(db,alice.user_id,'h1')
+        for provider_id,owner in [('a.other','someone-else'),('b.mine',alice.user_id)]:
+            secret_id=provider_id+'.secret'
+            db.add(Secret(id=secret_id,owner_id=owner,household_id='h1',provider_id=provider_id,value=vault.seal('test-token',owner+':secret:'+secret_id)))
+            manifest=ProviderManifest(id=provider_id,version='1',adapter='http',endpoint='http://127.0.0.1:8103',allowed_hosts=['127.0.0.1'],capabilities={'document.parse@v1':'/invoke/parse'},secret_id=secret_id)
+            db.add(Provider(id=provider_id,manifest=manifest.model_dump_json(),enabled=True))
+        db.commit()
+        assert Registry(vault).resolve(db,'document.parse@v1').id=='b.mine'

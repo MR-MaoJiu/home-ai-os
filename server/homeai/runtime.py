@@ -189,9 +189,18 @@ async def _run_step(app, task_id, user_id=None):
                 if capability in {"memory.semantic.search@v1", "memory.graph.search@v1"}:
                     from .derived_memory import require_ready
                     require_ready(db, actor, manifest)
+                provider_arguments = args
+                document_source = None
+                if capability == "document.parse@v1":
+                    from .documents import prepare
+                    document_source, provider_arguments = prepare(db, actor, args, app)
+                    source_version = document_source.version
                 dispatched = True
                 async with asyncio.timeout(min(body.get("step_timeout_seconds", 120), max(0.001, task.deadline - now()))):
-                    result = await app.registry.invoke(db, actor, manifest, capability, args, invocation.id)
+                    result = await app.registry.invoke(db, actor, manifest, capability, provider_arguments, invocation.id)
+                if document_source is not None:
+                    from .documents import persist
+                    result = persist(db, actor, document_source.id, source_version, result, app)
                 if capability in {"memory.semantic.search@v1", "memory.graph.search@v1"}:
                     require_ready(db, actor, manifest)
                     if not isinstance(result, dict) or not isinstance(result.get("canonical_ids"), list):
