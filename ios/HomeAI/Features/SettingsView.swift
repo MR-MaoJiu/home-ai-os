@@ -43,6 +43,9 @@ struct SettingsView: View {
                 PhotosPicker("选择一张照片同步", selection: $selectedPhoto, matching: .images)
                 if !syncMessage.isEmpty { Text(syncMessage).font(.caption).foregroundStyle(.secondary) }
             }.disabled(!state.connected || state.busy)
+            Section("关于") {
+                Link("基于 Home AI OS · 查看源码", destination: URL(string: "https://github.com/MR-MaoJiu/home-ai-os")!)
+            }
             Section("隐私") {
                 Label("个人数据默认仅在本地处理", systemImage: "hand.raised")
                 Text("授权由 iOS 系统管理，可随时在系统设置中撤回。已上传的数据需要在数据页面单独删除。").font(.caption).foregroundStyle(.secondary)

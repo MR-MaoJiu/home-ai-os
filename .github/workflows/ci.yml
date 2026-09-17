@@ -12,6 +12,18 @@ jobs:
       - run: python scripts/check_boundaries.py
       - run: pytest -q
       - run: python -m compileall -q server providers
+  admin-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
   ios:
     runs-on: macos-15
     steps:

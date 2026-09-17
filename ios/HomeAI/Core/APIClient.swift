@@ -6,6 +6,7 @@ struct Connection: Codable, Sendable {
     var token: String
     var refreshToken: String
     var expiresAt: Date
+    var tlsKeyFingerprint: String? = nil
 }
 
 struct PairingCode: Codable, Sendable {
@@ -23,7 +24,7 @@ actor APIClient {
     init() {
         if let data = DeviceIdentity.read("connection"), let saved = try? JSONDecoder().decode(Connection.self, from: data) {
             connection = saved
-            session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: saved.fingerprint), delegateQueue: nil)
+            session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: saved.fingerprint, keyFingerprint: saved.tlsKeyFingerprint), delegateQueue: nil)
         }
     }
 
@@ -31,7 +32,8 @@ actor APIClient {
 
     func pair(_ code: PairingCode) async throws {
         guard let url = URL(string: code.url), url.scheme == "https", code.fingerprint.count == 64 else { throw APIError.message("需要 HTTPS 地址和完整服务器证书指纹") }
-        let transport = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: code.fingerprint), delegateQueue: nil)
+        let pinning = PinnedSession(fingerprint: code.fingerprint)
+        let transport = URLSession(configuration: .ephemeral, delegate: pinning, delegateQueue: nil)
         var request = URLRequest(url: url.appendingPathComponent("api/v1/pair"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -40,6 +42,7 @@ actor APIClient {
         try Self.validate(data, response)
         let result = try JSONDecoder().decode(Tokens.self, from: data)
         connection = Connection(url: code.url, fingerprint: code.fingerprint, token: result.access_token, refreshToken: result.refresh_token, expiresAt: Date().addingTimeInterval(Double(result.expires_in)))
+        connection?.tlsKeyFingerprint = pinning.acceptedKeyFingerprint
         session = transport
         try persist()
     }

@@ -1,0 +1,17 @@
+"""独立派生索引进程，避免文档批量导入阻塞聊天任务。"""
+import asyncio,logging
+from sqlalchemy import select
+from .api import create_app
+from .db import Principal
+from .vector_index import reconcile
+log=logging.getLogger('homeai.memory-worker')
+
+async def main():
+    app=create_app().state
+    while True:
+        with app.db() as db:users=[(p.id,p.household_id) for p in db.scalars(select(Principal))]
+        for user,household in users:
+            try:await reconcile(app,user,household)
+            except Exception as exc:log.warning('索引失败，保留事件重试：%s',type(exc).__name__)
+        await asyncio.sleep(5)
+if __name__=='__main__':asyncio.run(main())

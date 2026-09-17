@@ -1088,6 +1088,353 @@
           }
         }
       }
+    },
+    "/api/v1/browser/setup": {
+      "post": {
+        "tags": [
+          "网页认证"
+        ],
+        "summary": "Setup",
+        "operationId": "setup_api_v1_browser_setup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Setup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/totp/confirm": {
+      "post": {
+        "tags": [
+          "网页认证"
+        ],
+        "summary": "Confirm",
+        "operationId": "confirm_api_v1_browser_totp_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Code"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/login": {
+      "post": {
+        "tags": [
+          "网页认证"
+        ],
+        "summary": "Login",
+        "operationId": "login_api_v1_browser_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Login"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/logout": {
+      "post": {
+        "tags": [
+          "网页认证"
+        ],
+        "summary": "Logout",
+        "operationId": "logout_api_v1_browser_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/reauth": {
+      "post": {
+        "tags": [
+          "网页认证"
+        ],
+        "summary": "Reauthenticate",
+        "operationId": "reauthenticate_api_v1_browser_reauth_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Reauthenticate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/overview": {
+      "get": {
+        "tags": [
+          "管理概览"
+        ],
+        "summary": "Overview",
+        "operationId": "overview_api_v1_manage_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/tasks": {
+      "get": {
+        "tags": [
+          "管理概览"
+        ],
+        "summary": "Tasks",
+        "operationId": "tasks_api_v1_manage_tasks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/backups": {
+      "get": {
+        "tags": [
+          "管理概览"
+        ],
+        "summary": "Backups",
+        "operationId": "backups_api_v1_manage_backups_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/readiness": {
+      "get": {
+        "tags": [
+          "管理概览"
+        ],
+        "summary": "Readiness",
+        "operationId": "readiness_api_v1_manage_readiness_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/request-code": {
+      "get": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Request Code",
+        "operationId": "request_code_api_v1_remote_request_code_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/status": {
+      "get": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Status",
+        "operationId": "status_api_v1_remote_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/bind": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Bind",
+        "operationId": "bind_api_v1_remote_bind_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Binding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/disable": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Disable",
+        "operationId": "disable_api_v1_remote_disable_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1126,6 +1473,35 @@
           "skill"
         ],
         "title": "AutomationInput"
+      },
+      "Binding": {
+        "properties": {
+          "portal_url": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Portal Url",
+            "default": "https://homeai-connect.pintheworld.cn"
+          },
+          "binding_code": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 20,
+            "title": "Binding Code"
+          },
+          "local_https_port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1024.0,
+            "title": "Local Https Port",
+            "default": 58443
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "binding_code"
+        ],
+        "title": "Binding"
       },
       "Body_upload_api_v1_files_post": {
         "properties": {
@@ -1166,6 +1542,20 @@
           "content"
         ],
         "title": "CandidateInput"
+      },
+      "Code": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "Code"
       },
       "DataRecord": {
         "properties": {
@@ -1259,6 +1649,33 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "Login": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Password"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 8,
+            "title": "Code",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "Login"
       },
       "MemberInput": {
         "properties": {
@@ -1417,6 +1834,26 @@
         ],
         "title": "ProviderManifest"
       },
+      "Reauthenticate": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Password"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^\\d{6}$",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password",
+          "code"
+        ],
+        "title": "Reauthenticate"
+      },
       "SecretInput": {
         "properties": {
           "provider_id": {
@@ -1437,6 +1874,35 @@
           "value"
         ],
         "title": "SecretInput"
+      },
+      "Setup": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 20,
+            "title": "Ticket"
+          },
+          "username": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.@-]{3,80}$",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 12,
+            "title": "Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ticket",
+          "username",
+          "password"
+        ],
+        "title": "Setup"
       },
       "Skill": {
         "properties": {

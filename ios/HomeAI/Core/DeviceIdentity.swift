@@ -48,17 +48,39 @@ final class DeviceIdentity: @unchecked Sendable {
 
 final class PinnedSession: NSObject, URLSessionDelegate, @unchecked Sendable {
     let fingerprint: String
-    init(fingerprint: String) { self.fingerprint = fingerprint.lowercased() }
+    let keyFingerprint: String?
+    private let lock = NSLock()
+    private var observedKey: String?
+    var acceptedKeyFingerprint: String? { lock.withLock { observedKey } }
+    init(fingerprint: String, keyFingerprint: String? = nil) {
+        self.fingerprint = fingerprint.lowercased()
+        self.keyFingerprint = keyFingerprint
+    }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust,
               let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let certificate = chain.first,
-              DeviceIdentity.hash(SecCertificateCopyData(certificate) as Data) == fingerprint else {
+              let publicKey = SecCertificateCopyKey(certificate),
+              let rawKey = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
-        // 用户通过本机二维码确认的证书固定值是私有自签名服务器的信任锚。
+        let currentKey = DeviceIdentity.hash(rawKey)
+        let exactCertificate = DeviceIdentity.hash(SecCertificateCopyData(certificate) as Data) == fingerprint
+        let stableKey = keyFingerprint == currentKey
+        guard exactCertificate || stableKey else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        if !exactCertificate {
+            // 续期证书必须复用已信任公钥，并通过系统证书链、有效期与主机名校验。
+            guard SecTrustEvaluateWithError(trust, nil) else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+        }
+        lock.withLock { observedKey = currentKey }
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }

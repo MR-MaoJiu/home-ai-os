@@ -315,4 +315,14 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.include_router(memory_router)
     from .admin import router as admin_router
     app.include_router(admin_router)
+    from .browser_auth import router as browser_router
+    app.include_router(browser_router)
+    from .management import router as management_router
+    app.include_router(management_router)
+    from .remote import router as remote_router
+    app.include_router(remote_router)
+    from fastapi.staticfiles import StaticFiles
+    admin_dist = Path(__file__).resolve().parents[2] / "admin-web" / "dist"
+    if admin_dist.is_dir():
+        app.mount("/admin", StaticFiles(directory=admin_dist, html=True), name="admin-web")
     return app

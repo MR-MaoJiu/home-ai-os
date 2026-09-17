@@ -218,3 +218,19 @@ class DerivedJob(Owned, Base):
     status: Mapped[str] = mapped_column(String, default="PENDING")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+class BrowserAccount(Base):
+    __tablename__ = "browser_accounts"
+    username: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, unique=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    totp_secret: Mapped[str] = mapped_column(Text)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_totp_counter: Mapped[int] = mapped_column(Integer, default=-1)
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    window_start: Mapped[float] = mapped_column(default=now)

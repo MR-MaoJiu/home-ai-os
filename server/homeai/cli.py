@@ -14,6 +14,10 @@ def main():
     commands.add_parser("init-key")
     bootstrap = commands.add_parser("bootstrap")
     bootstrap.add_argument("--name", required=True)
+    recover = commands.add_parser("web-recover")
+    recover.add_argument("--user", required=True)
+    web = commands.add_parser("web-setup")
+    web.add_argument("--user", required=True)
     pair = commands.add_parser("pair")
     pair.add_argument("--user", required=True)
     member = commands.add_parser("member")
@@ -49,7 +53,7 @@ def main():
             user = db.get(Principal, args.user)
             if not user:
                 raise SystemExit("用户不存在")
-        token = credential(db, user.id, "pair", 300)
+        token = credential(db, user.id, "browser_recovery" if args.command == "web-recover" else ("browser_bootstrap" if args.command == "web-setup" else "pair"), 300)
         db.commit()
         # 配对码为短期一次性凭据，仅显示于明确调用的本机终端。
         print(json.dumps({"user_id": user.id, "household_id": user.household_id, "pairing_token": token, "expires_in": 300}, ensure_ascii=False))

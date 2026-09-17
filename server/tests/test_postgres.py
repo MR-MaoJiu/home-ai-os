@@ -50,3 +50,34 @@ async def test_real_rls_opa_outbox():
     info=await js.stream_info('HOMEAI')
     assert info.state.messages > 0
     await nc.drain()
+
+
+@pytest.mark.asyncio
+async def test_pgvector_uses_canonical_content():
+    import httpx
+    from homeai.providers import Registry
+    from homeai.contracts import ProviderManifest
+    from homeai.db import Provider
+    from homeai.vector_index import reconcile,search
+    from homeai.security import Actor
+    settings=Settings();settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
+    app=create_app(settings)
+    app.state.registry=Registry(app.state.vault,httpx.MockTransport(lambda r:httpx.Response(200,json={'data':[{'embedding':[0.1,0.2,0.3]}]})))
+    client=TestClient(app);household=str(uuid.uuid4());alice=SignedClient(client,app.state.db,household=household)
+    with app.state.db() as db:
+        manifest=ProviderManifest(id='test.embed',version='1',adapter='openai',endpoint='http://local.test/v1',model='test',capabilities={'model.embed@v1':'embed'},allowed_hosts=['local.test'])
+        old=db.get(Provider,manifest.id)
+        if old:old.manifest=manifest.model_dump_json();old.enabled=True
+        else:db.add(Provider(id=manifest.id,manifest=manifest.model_dump_json(),enabled=True))
+        db.commit()
+    rid=put(alice,{'source':'manual','source_id':str(uuid.uuid4()),'kind':'memory.fact','version':1,'payload':{'content':'原始规范事实'}})
+    await reconcile(app.state,alice.user_id,household)
+    with app.state.db() as db:
+        scope(db,alice.user_id,household)
+        results=await search(app.state,db,Actor(alice.user_id,household,alice.device_id,'adult'),'相关问题')
+        assert results[0]['id']==rid
+        assert results[0]['payload']['content']=='原始规范事实'
+    assert alice.request('DELETE','/api/v1/data/'+rid).status_code==200
+    with app.state.db() as db:
+        scope(db,alice.user_id,household)
+        assert await search(app.state,db,Actor(alice.user_id,household,alice.device_id,'adult'),'相关问题')==[]

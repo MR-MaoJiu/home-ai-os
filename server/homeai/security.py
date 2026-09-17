@@ -35,6 +35,9 @@ def credential(db, user_id: str, kind: str, seconds: int, device_id=None):
 
 
 async def authenticate(request: Request):
+    if request.cookies.get("__Host-homeai-session") and not request.headers.get("authorization"):
+        from .browser_auth import get_browser_actor
+        return get_browser_actor(request)
     token = request.headers.get("authorization", "").removeprefix("Bearer ")
     timestamp = request.headers.get("x-homeai-time", "")
     nonce = request.headers.get("x-homeai-nonce", "")

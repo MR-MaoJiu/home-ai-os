@@ -19,7 +19,7 @@ async def test_real_local_model():
     manifest={'id':'test.llama','version':'1.0.0','adapter':'openai','endpoint':'http://127.0.0.1:58080/v1','model':'Qwen3-0.6B-Q8_0.gguf','capabilities':{'model.generate@v1':'chat'},'allowed_hosts':['127.0.0.1']}
     assert actor.request('PUT','/api/v1/providers/test.llama',manifest).status_code==200
     assert actor.request('POST','/api/v1/providers/test.llama/enable').status_code==200
-    response=actor.request('POST','/api/v1/tasks',{'message':'请用一句中文介绍你能作为家庭助手做什么。/no_think','max_output_tokens':96,'idempotency_key':str(uuid.uuid4())})
+    response=actor.request('POST','/api/v1/tasks',{'capability':'model.generate@v1','message':'请用一句中文介绍你能作为家庭助手做什么。/no_think','max_output_tokens':96,'idempotency_key':str(uuid.uuid4())})
     assert response.status_code==202,response.text
     task_id=response.json()['id']
     await run_task(app.state,task_id,actor.user_id)

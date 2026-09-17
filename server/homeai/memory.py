@@ -64,6 +64,14 @@ async def search(request: Request, q: str, actor: Actor = Depends(authenticate))
     with app.db() as db:
         scope(db,actor.user_id,actor.household_id)
         await app.policy.check(actor,'memory.search@v1')
+        from .vector_index import search as vector_search
+        try:
+            semantic = await vector_search(app, db, actor, q)
+            if semantic:
+                return {'mode':'pgvector_exact','records':semantic}
+        except Exception:
+            db.rollback()
+            scope(db,actor.user_id,actor.household_id)
         # 加密内容的基础检索在授权集合内执行；无向量 Provider 时不假装是语义检索。
         rows=db.scalars(accessible(db,actor).where(Record.kind=='memory.fact').limit(1000)).all()
         results=[serialize(r,app.vault) for r in rows if q.casefold() in json.dumps(serialize(r,app.vault)['payload'],ensure_ascii=False).casefold()]

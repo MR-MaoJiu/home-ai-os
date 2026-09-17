@@ -15,3 +15,8 @@ DerivedData/
 logs/
 *.egg-info/
 .xcodebuildmcp/
+node_modules/
+admin-web/dist/
+*.tsbuildinfo
+scripts/qa_admin.py
+scripts/relay_validation.py
