@@ -106,7 +106,7 @@ def rebuild_index(request: Request, actor: Actor = Depends(authenticate)):
 
 @router.get('/derived')
 def derived_status(request: Request, actor: Actor = Depends(authenticate)):
-    from .db import Provider
+    from .db import Provider, Secret
     from .contracts import ProviderManifest
     from .derived_memory import checkpoint, job_id
     with request.app.state.db() as db:
@@ -116,9 +116,43 @@ def derived_status(request: Request, actor: Actor = Depends(authenticate)):
             manifest = ProviderManifest.model_validate_json(provider.manifest)
             if not any(cap in manifest.capabilities for cap in ('memory.semantic.index@v1', 'memory.graph.index@v1')):
                 continue
+            if manifest.cloud:
+                continue
+            if manifest.secret_id:
+                secret = db.get(Secret, manifest.secret_id)
+                if not secret or secret.owner_id != actor.user_id or secret.provider_id != provider.id:
+                    continue
             job = db.get(DerivedJob, job_id(actor.user_id, provider.id))
             status = 'DISABLED' if not provider.enabled else 'PENDING'
             if provider.enabled and job:
                 status = job.status if job.event_id == checkpoint(db, actor.user_id, manifest) else 'PENDING'
             result.append({'provider_id': provider.id, 'status': status, 'attempts': job.attempts if job else 0, 'error_type': job.error if job else None})
         return result
+
+
+@router.post('/derived/{provider_id}/rebuild')
+def rebuild_derived(provider_id: str, request: Request, actor: Actor = Depends(authenticate)):
+    from .db import Provider, Secret
+    from .contracts import ProviderManifest
+    from .derived_memory import checkpoint, job_id
+    with request.app.state.db() as db:
+        scope(db, actor.user_id, actor.household_id)
+        provider = db.get(Provider, provider_id)
+        if not provider:
+            raise HTTPException(404, 'Provider 不存在')
+        manifest = ProviderManifest.model_validate_json(provider.manifest)
+        if manifest.cloud or not any({prefix + '.index@v1', prefix + '.purge@v1'} <= manifest.capabilities.keys() for prefix in ('memory.semantic', 'memory.graph')):
+            raise HTTPException(422, '该 Provider 不是本地记忆投影')
+        if manifest.secret_id:
+            secret = db.get(Secret, manifest.secret_id)
+            if not secret or secret.owner_id != actor.user_id or secret.provider_id != provider_id:
+                raise HTTPException(403, '无权使用此 Provider 凭据')
+        identifier = job_id(actor.user_id, provider_id)
+        job = db.scalar(select(DerivedJob).where(DerivedJob.id == identifier).with_for_update())
+        if not job:
+            job = DerivedJob(id=identifier, owner_id=actor.user_id, household_id=actor.household_id, provider_id=provider_id, event_id=checkpoint(db, actor.user_id, manifest))
+            db.add(job)
+        job.status, job.error = 'PENDING', None
+        audit(db, actor, 'memory.derived.rebuild', provider_id)
+        db.commit()
+        return {'status': 'PENDING', 'provider_enabled': provider.enabled, 'requires_worker': True}

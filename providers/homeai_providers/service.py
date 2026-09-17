@@ -52,18 +52,6 @@ def cosy_model():
     return AutoModel(model_dir=str(path))
 
 
-@lru_cache
-def memory():
-    from mem0 import Memory
-    config = json.loads(Path(os.environ["MEM0_CONFIG_FILE"]).read_text())
-    # 禁止 SDK 的隐式默认云端模型；配置必须明确包含各组件。
-    if not all(k in config for k in ("llm", "embedder", "vector_store")):
-        raise RuntimeError("Mem0 必须完整配置本地组件")
-    for key in ("llm", "embedder"):
-        component = config[key]
-        if component["provider"] not in {"ollama", "huggingface", "lmstudio"}:
-            raise RuntimeError("Mem0 仅开放已明确配置的本地模型 Provider")
-    return Memory.from_config(config)
 
 
 def parse_document(call):
@@ -98,13 +86,22 @@ def synthesize_cosy(call):
     return {"audio_base64": base64.b64encode(buffer.getvalue()).decode(), "sample_rate": model.sample_rate, "format": "wav"}
 
 
+if os.environ.get("HOMEAI_ADAPTER") == "mem0":
+    from .egress_guard import install_mem0_guard
+    install_mem0_guard()
+
 app = FastAPI(title="Home AI Provider bridge", dependencies=[Depends(authenticate)])
 docling_lock = asyncio.Semaphore(1)
+memory_lock = asyncio.Semaphore(1)
 
 
 @app.get("/health")
 def health():
-    return {"status": "alive", "adapter": os.environ.get("HOMEAI_ADAPTER", "unconfigured")}
+    result = {"status": "alive", "adapter": os.environ.get("HOMEAI_ADAPTER", "unconfigured")}
+    if result["adapter"] == "mem0":
+        from .egress_guard import stats
+        result["egress"] = dict(stats)
+    return result
 
 
 @app.post("/invoke/{operation}")
@@ -125,7 +122,8 @@ async def invoke(operation: str, call: Call):
                 result.raise_for_status()
                 return result.json()
         if adapter == "mem0":
-            return await asyncio.to_thread(memory_operation, operation, call)
+            async with memory_lock:
+                return await asyncio.to_thread(memory_operation, operation, call)
         if adapter == "graphiti":
             from .graphiti_adapter import operation as graph_operation
             return await graph_operation(operation, call)
@@ -144,16 +142,5 @@ async def invoke(operation: str, call: Call):
 
 
 def memory_operation(operation, call):
-    engine = memory()
-    if operation == "search":
-        result = engine.search(str(call.arguments["query"]), user_id=call.subject_id, limit=20)
-        rows = result.get("results", []) if isinstance(result, dict) else result
-        return {"canonical_ids": [r.get("metadata", {}).get("canonical_id") for r in rows if r.get("metadata", {}).get("canonical_id")]}
-    if operation == "index":
-        # 禁止二次事实推断；索引输入必须来自 Core 规范内容。
-        return engine.add(str(call.arguments["content"]), user_id=call.subject_id, metadata={"canonical_id": call.arguments["record_id"]}, infer=False)
-    if operation == "purge":
-        # 清除当前主体整个派生索引再重建，避免残留抽取事实和摘要。
-        engine.delete_all(user_id=call.subject_id)
-        return {"purged_subject": call.subject_id, "requires_rebuild": True}
-    raise HTTPException(404, "未知记忆操作")
+    from .mem0_adapter import operation as invoke_memory
+    return invoke_memory(operation, call)

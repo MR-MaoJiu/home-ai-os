@@ -59,3 +59,18 @@ def test_registry_skips_other_members_credentials(system,alice):
             db.add(Provider(id=provider_id,manifest=manifest.model_dump_json(),enabled=True))
         db.commit()
         assert Registry(vault).resolve(db,'document.parse@v1').id=='b.mine'
+
+
+def test_mem0_python_egress_guard_rejects_external_destinations():
+    import subprocess,sys,os
+    code = '''import socket
+from homeai_providers.egress_guard import install_mem0_guard,stats
+install_mem0_guard()
+socket.getaddrinfo(b"127.0.0.1",58081)
+for operation in (lambda:socket.getaddrinfo("example.com",443),lambda:socket.socket().connect(("203.0.113.1",443))):
+    try:operation()
+    except PermissionError:pass
+    else:raise AssertionError("未阻止外部目的地")
+assert stats["blocked_connections"]==2
+'''
+    subprocess.run([sys.executable,'-c',code],env={**os.environ,'PYTHONPATH':'providers'},check=True)

@@ -66,3 +66,20 @@ def test_derived_checkpoint_rejects_changed_canonical_data(system, alice):
         scope(db, actor.user_id, actor.household_id)
         with pytest.raises(HTTPException):
             require_ready(db, actor, manifest)
+
+
+async def test_derived_worker_does_not_use_another_members_secret(system,alice):
+    from homeai.db import Provider,Secret,DerivedJob,scope
+    from homeai.contracts import ProviderManifest
+    from homeai.derived_memory import reconcile_provider,job_id
+    manifest=ProviderManifest(id='foreign.memory',version='1',adapter='http',endpoint='http://127.0.0.1:9',allowed_hosts=['127.0.0.1'],secret_id='foreign.key',capabilities={'memory.semantic.index@v1':'/invoke/index','memory.semantic.purge@v1':'/invoke/purge'})
+    with system[2]() as db:
+        db.add(Secret(id='foreign.key',owner_id='another-member',household_id='h1',provider_id=manifest.id,value='not-readable'))
+        db.add(Provider(id=manifest.id,manifest=manifest.model_dump_json(),enabled=True))
+        db.commit()
+    assert alice.request('GET','/api/v1/memory/derived').json()==[]
+    assert alice.request('POST','/api/v1/memory/derived/'+manifest.id+'/rebuild').status_code==403
+    await reconcile_provider(system[0].state,alice.user_id,'h1',manifest.id)
+    with system[2]() as db:
+        scope(db,alice.user_id,'h1')
+        assert db.get(DerivedJob,job_id(alice.user_id,manifest.id)) is None

@@ -23,7 +23,7 @@
 |---|---|---|
 | 身份与管理后台 | 本机初始化、设备签名、短期令牌、撤销；网页密码/TOTP、CSRF、重新认证 | 完整安装向导体验、家庭多成员实用验收 |
 | 数据 | 信封加密、版本冲突、共享/撤权、删除闭包、墓碑 | 分页快照一致性、后台增量同步、批次确认 |
-| 记忆 | 候选确认、规范账本、pgvector、版本检查、自动与手动重建 | 冲突事实裁决、Mem0/Graphiti 真实集成及故障演练 |
+| 记忆 | 候选确认、规范账本、pgvector、版本检查、自动与手动重建 | Mem0 已完成真实重建/检索/删除验收；冲突事实裁决、Graphiti 和更多故障演练待完成 |
 | Agent | 本地模型自主多轮规划、持久化工具步骤、Token/轮次预算、结果引用、逐步审批、取消、恢复与核对 | 云端费用预算、更丰富工具、复杂条件及补偿 |
 | 隐私 | 云能力限制、公开资料最小调用、披露记录 | 完整 NER、本地复核、占位符往返还原；私人内容上云保持拒绝 |
 | 自动化 | 多步骤 Cron 工作流、幂等提交、Outbox/JetStream 发布 | 事件消费者、Skill 条件与补偿 |
@@ -257,6 +257,37 @@ HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 .venv/bin/pytest -q
 
 当前生产启用接口主动阻止未完成沙箱验收的 Provider。所有依赖尚未按生产 OCI Digest 和签名完成锁定，因此不能将开发 Compose 作为生产部署配置使用。
 
+## 可拆卸记忆投影（Mem0）
+
+Mem0 1.0.11 是 Core 规范账本的派生索引，不负责决定事实真伪。实际运行使用本地 OpenAI 兼容接口、EmbeddingGemma 和本地 Qdrant；虽然 SDK 适配器名为 `lmstudio`，它调用的是本机 llama.cpp 的兼容接口，不要求安装 LM Studio。
+
+```sh
+python3.12 -m venv state/venvs/mem0
+state/venvs/mem0/bin/pip install -r providers/requirements-mem0.txt
+.venv/bin/python scripts/run_mem0.py
+```
+
+另开终端登记成员并启动索引 worker：
+
+```sh
+.venv/bin/python scripts/register_local_mem0.py --user <成员ID>
+.venv/bin/python -m homeai.memory_worker
+```
+
+启动前必须已有 `58080` 本地生成服务和 `58081` Embedding 服务。配置显式指定两个本地模型，不保留 SDK 默认云端配置；规范事实以 `infer=False` 入库，Mem0 不能再次推断并覆盖账本。运行器只传递必要环境，服务监听 `127.0.0.1:8101`。服务秘密、SDK 状态与向量文件位于忽略的 `state/` 目录，完整已验证依赖见 `providers/locks/mem0-macos-py312.txt`。
+
+`MEM0_TELEMETRY=false` 在导入 SDK 前设置；模型 HTTP 客户端禁用环境/系统代理，Python 出站门禁仅允许两个本地模型端口。真实验收确认本地连接计数增加，未授权连接尝试计数为零；单独测试确认外部域名和地址被拒绝。这不是操作系统沙箱，不能据此宣称任意恶意原生扩展已被隔离。
+
+SDK 历史库只驻留内存，不额外落盘私人正文。主体清除循环处理 SDK 默认 100 条分页，确认无剩余向量后清空内存历史；适配层绕过固定 SDK `reset()` 的嵌套锁死锁路径，不修改第三方源码。Qdrant 文件仍是派生明文数据，部署时需要磁盘加密及备份保护。
+
+Core 检查点未就绪时拒绝派生查询；检索只接收规范 ID，正文仍回到授权账本读取。停用时核心记忆保持可用，外部投影不再更新；恢复启用后处理积压删除并重建。管理后台“记忆索引”提供“重建我的投影”，对应 `POST /api/v1/memory/derived/{provider_id}/rebuild`；索引丢失或迁移后可以显式重新生成，不依赖碰巧出现新的数据事件。
+
+```sh
+HOMEAI_MEM0_TEST=1 .venv/bin/pytest -q server/tests/test_mem0_live.py
+```
+
+该测试实际调用 SDK、Embedding、Qdrant、PostgreSQL 和 OPA，覆盖重建、搜索回读、跨主体隔离、停用及删除传播。参考 [Mem0 本地 Embedding 配置](https://docs.mem0.ai/components/embedders/models/lmstudio)。
+
 ## 本地文档解析（Docling）
 
 实际验证版本为 Docling 2.128.0、ONNX Runtime 1.30.0、Python 3.12；与 Core 使用独立环境。已验证 DOCX、Markdown、HTML、TXT、PPTX、PDF 和 PNG 的真实文件解析，PDF/图片使用本地布局、表格及 RapidOCR 模型。七个格式测试不代表任意扫描件或复杂版式都能准确识别；Linux 和生产隔离仍须独立验收。
@@ -366,7 +397,7 @@ HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_EMBEDDING_TEST=1 .venv/bin/pytes
 
 ### 派生向量索引
 
-配置本地 `model.embed@v1` Provider 后，单独运行 `python -m homeai.memory_worker`，避免索引阻塞任务执行。PostgreSQL 使用精确向量检索，结果回到规范账本读取；缺少 Embedding Provider 或索引不可用时明确降级为授权范围内文字检索。Mem0/Graphiti 已接入规范账本驱动的清除、重建和失败重试消费者，但 SDK 与真实模型、Neo4j 的集成验收仍未通过；不能将消费者源码视为两个 Provider 已交付。
+配置本地 `model.embed@v1` Provider 后，单独运行 `python -m homeai.memory_worker`，避免索引阻塞任务执行。PostgreSQL 使用精确向量检索，结果回到规范账本读取；缺少 Embedding Provider 或索引不可用时明确降级为授权范围内文字检索。Mem0 已通过真实 SDK、本地 Embedding、Qdrant 与 Core 重建/检索/删除验收。Graphiti 消费者代码已接入，但 Neo4j 与真实模型集成仍未通过；两者状态分别记录。
 
 ## 许可与出处
 

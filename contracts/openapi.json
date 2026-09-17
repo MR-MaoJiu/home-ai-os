@@ -1176,6 +1176,46 @@
         }
       }
     },
+    "/api/v1/memory/derived/{provider_id}/rebuild": {
+      "post": {
+        "tags": [
+          "记忆"
+        ],
+        "summary": "Rebuild Derived",
+        "operationId": "rebuild_derived_api_v1_memory_derived__provider_id__rebuild_post",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/members/invite": {
       "post": {
         "tags": [

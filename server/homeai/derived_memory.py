@@ -4,7 +4,7 @@ import json
 from fastapi import HTTPException
 from sqlalchemy import select, func, text
 from .contracts import ProviderManifest
-from .db import Provider, Record, Outbox, DerivedJob, scope
+from .db import Provider, Secret, Record, Outbox, DerivedJob, scope
 from .security import Actor
 from .data import serialize
 
@@ -36,6 +36,10 @@ async def reconcile_provider(app, user_id, household_id, provider_id):
         manifest = ProviderManifest.model_validate_json(provider.manifest)
         if manifest.cloud:
             return
+        if manifest.secret_id:
+            secret = db.get(Secret, manifest.secret_id)
+            if not secret or secret.owner_id != user_id or secret.provider_id != provider_id:
+                return
         prefix = next((p for p in ('memory.semantic', 'memory.graph') if p + '.index@v1' in manifest.capabilities and p + '.purge@v1' in manifest.capabilities), None)
         if not prefix:
             return
