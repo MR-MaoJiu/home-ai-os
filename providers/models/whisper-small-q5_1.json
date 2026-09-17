@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "provider": "whisper.cpp",
+  "sdk_version": "1.9.3",
+  "source_commit": "371b5a7561823ab2bb32142d2751e35e7534727b",
+  "model_repository": "ggerganov/whisper.cpp",
+  "model_revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+  "files": [
+    {
+      "path": "ggml-small-q5_1.bin",
+      "bytes": 190085487,
+      "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+    }
+  ]
+}

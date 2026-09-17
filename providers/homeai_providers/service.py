@@ -97,6 +97,7 @@ app = FastAPI(title="Home AI Provider bridge", dependencies=[Depends(authenticat
 docling_lock = asyncio.Semaphore(1)
 memory_lock = asyncio.Semaphore(1)
 graphiti_lock = asyncio.Semaphore(1)
+speech_lock = asyncio.Semaphore(1)
 
 
 @app.get("/health")
@@ -120,11 +121,9 @@ async def invoke(operation: str, call: Call):
         if adapter == "cosyvoice" and operation == "synthesize":
             return await asyncio.to_thread(synthesize_cosy, call)
         if adapter == "whisper" and operation == "transcribe":
-            import httpx
-            async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-                result = await client.post(os.environ["WHISPER_URL"].rstrip("/") + "/inference", files={"file": ("audio.wav", binary(call.arguments), "audio/wav")}, data={"response_format": "json"})
-                result.raise_for_status()
-                return result.json()
+            from .whisper_adapter import transcribe
+            async with speech_lock:
+                return await transcribe(call, binary(call.arguments))
         if adapter == "mem0":
             async with memory_lock:
                 return await asyncio.to_thread(memory_operation, operation, call)

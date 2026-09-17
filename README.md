@@ -29,7 +29,7 @@
 | 自动化 | 多步骤 Cron 工作流、幂等提交、Outbox/JetStream 发布 | 事件消费者、Skill 条件与补偿 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
-| 文档/语音/家居/邮件 | Docling 七格式真实解析、加密附件与来源删除；其余适配器代码 | Docling Linux/生产沙箱验收；FunASR、whisper.cpp、CosyVoice、HA、邮件真实闭环 |
+| 文档/语音/家居/邮件 | Docling 七格式真实解析、whisper.cpp 中英文转写；其余适配器代码 | Linux/生产沙箱验收；FunASR、CosyVoice、HA、邮件真实闭环 |
 | iOS | 五个页面、配对、数据授权导入、录音入口、证书校验 | APNs、后台队列、App Intent、任务事件流、真机验收 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
@@ -376,6 +376,46 @@ HOMEAI_DOCLING_TEST=1 .venv/bin/pytest -q server/tests/test_docling_live.py
 测试生成有效文档文件并调用真实 Docling HTTP 服务，不返回固定 Markdown。完整回归可以同时打开 `HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_EMBEDDING_TEST=1 HOMEAI_DOCLING_TEST=1`。
 
 参考：[Docling 离线与模型预下载](https://docling-project.github.io/docling/usage/advanced_options/)、[Pipeline 配置](https://docling-project.github.io/docling/reference/pipeline_options/)。
+
+## 本地语音转写（whisper.cpp）
+
+实际验证版本为 whisper.cpp 1.9.3（提交 `371b5a7561823ab2bb32142d2751e35e7534727b`），模型为多语言 `small-q5_1`。英文官方人声样本、中文合成语音输入，以及中英文自动语言识别均经过真实模型处理；它们不是 iPhone 真机录音验收，也不是任意噪声/口音的准确性保证。
+
+```sh
+.venv/bin/python scripts/build_whisper.py
+curl -fL --retry 3 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin' -o state/models/ggml-small-q5_1.bin
+.venv/bin/python scripts/run_whisper_backend.py
+```
+
+另开终端分别运行：
+
+```sh
+.venv/bin/python scripts/run_whisper_bridge.py
+.venv/bin/python scripts/register_local_whisper.py --user <成员ID>
+```
+
+构建需要 Git、CMake 和本机 C++ 编译器；脚本检查固定源码提交并拒绝覆盖修改。后端启动先校验模型大小和 SHA256，校验清单见 `providers/models/whisper-small-q5_1.json`。权重和源码工作目录位于 `state/`，不进入 Git。
+
+C++ 后端只监听 `127.0.0.1:58085`，身份验证桥只监听 `127.0.0.1:8105`。桥接凭据为私有 0600 文件，登记时写入成员的加密 Secret。桥只允许固定本地转写地址，禁用系统代理和 HTTP 重定向，不开放后端模型加载、服务端路径或任意转换选项。开发进程仍不是生产沙箱。
+
+### 录音到文本
+
+1. iOS 通过系统麦克风授权，以 16 kHz、16 位单声道 PCM WAV 录音，最长 60 秒。
+2. 录音结束后提交 `speech.transcribe@v1` 持久化任务；正文及结果沿用设备签名、加密存储与 OPA 路径。
+3. 桥接层校验 WAV、采样格式、完整帧、0.1–60 秒时长与全零静音；不支持的格式明确拒绝。`language` 支持 `auto`、`zh`、`en`，默认自动识别。
+4. 真实 whisper.cpp 生成文本；没有清晰文本时失败，不返回占位转写。
+5. iOS 将结果放入输入框，用户可以修改并确认发送，再进入 Agent。不会仅因识别出一段话就直接执行操作。
+
+开发验收：
+
+```sh
+.venv/bin/python scripts/create_voice_test_sample.py
+HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
+```
+
+中文输入由 macOS 系统语音生成，需要本机中文声音和 ffmpeg，仅为测试输入；英文使用固定源码中的 `samples/jfk.wav` 人声样本。测试调用实际转写服务，不替换输出文本。完整系统回归命令可在前述开关基础上再加 `HOMEAI_WHISPER_TEST=1`。
+
+参考：[whisper.cpp 官方服务说明](https://github.com/ggml-org/whisper.cpp/blob/v1.9.3/examples/server/README.md)。
 
 ## 备份
 
