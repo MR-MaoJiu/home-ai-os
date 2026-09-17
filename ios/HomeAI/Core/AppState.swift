@@ -147,7 +147,7 @@ final class AppState {
                 let key = SystemReminderSync.preferenceKey(owner.namespace)
                 if UserDefaults.standard.bool(forKey: key + ".automatic"), let calendar = UserDefaults.standard.string(forKey: key), !calendar.isEmpty {
                     do {
-                        let report = try await SystemReminderSync.shared.synchronize(records: result.records, api: api, calendarID: calendar, expectedNamespace: namespace)
+                        let report = try await SystemReminderSync.shared.synchronize(records: result.records, api: api, calendarID: calendar, expectedNamespace: namespace, includeSchedule: UserDefaults.standard.bool(forKey: key + ".schedule"))
                         systemReminderStatus = report.summary
                     } catch { systemReminderStatus = "系统提醒未同步：" + error.localizedDescription }
                 }

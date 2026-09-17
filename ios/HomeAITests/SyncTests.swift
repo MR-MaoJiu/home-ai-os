@@ -75,13 +75,14 @@ final class SyncTests: XCTestCase {
         let intentNamespace = try await api.syncNamespace()
         let intentStorage = "intent-test-" + UUID().uuidString
         let intentService = ReminderIntentService(storageKey: intentStorage)
-        let intentPending = try await intentService.prepare(title: "快捷指令真实提醒", namespace: intentNamespace)
+        let dueDate = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-01T00:30:00Z"))
+        let intentPending = try await intentService.prepare(title: "快捷指令真实提醒", namespace: intentNamespace, dueDate: dueDate, notify: true)
         let intentBody = try JSONSerialization.data(withJSONObject: ["idempotency_key": intentPending.idempotencyKey,
-            "capability": "reminder.create@v1", "arguments": ["title": intentPending.title]])
+            "capability": "reminder.create@v1", "arguments": ["title": intentPending.title, "due_at": intentPending.dueAt!, "notify_at_due": true]])
         struct IntentCreated: Decodable { let id: String }
         let firstIntent = try JSONDecoder().decode(IntentCreated.self, from: await api.request("POST", "/api/v1/tasks", body: intentBody, expectedNamespace: intentNamespace))
         let restoredIntent = ReminderIntentService(storageKey: intentStorage)
-        let recoveredID = try await restoredIntent.submit(title: "快捷指令真实提醒", api: api)
+        let recoveredID = try await restoredIntent.submit(title: "快捷指令真实提醒", dueDate: dueDate, notify: true, api: api)
         XCTAssertEqual(recoveredID, firstIntent.id)
         _ = try await api.request("POST", "/_test/run/" + recoveredID)
         struct ReminderReceipt: Decodable { let record_id: String }
@@ -134,6 +135,13 @@ final class SyncTests: XCTestCase {
         XCTAssertNotEqual(repairedNamespace, intentNamespace)
         let repairedReport = try await SystemReminderSync().synchronize(records: [reminder], api: repaired, calendarID: testCalendar.calendarIdentifier, expectedNamespace: repairedNamespace, store: reminderStore)
         XCTAssertEqual(repairedReport.created, 0)
+        XCTAssertNil(systemReminder.dueDateComponents)
+        _ = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier,
+            expectedNamespace: intentNamespace, includeSchedule: true, store: reminderStore)
+        XCTAssertTrue(systemReminder.refresh())
+        let actualSchedule = try ReminderSchedule.local(systemReminder)
+        XCTAssertEqual(actualSchedule.due, dueDate)
+        XCTAssertTrue(actualSchedule.notify)
         systemReminder.isCompleted = true
         try reminderStore.save(systemReminder, commit: true)
         _ = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
@@ -158,11 +166,9 @@ final class SyncTests: XCTestCase {
         let removedReminder = try await reminderBridge.synchronize(records: [], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
         XCTAssertEqual(removedReminder.removed, 1)
         XCTAssertNil(reminderStore.calendarItem(withIdentifier: systemIDs[0]))
-        let invalidBody = try JSONSerialization.data(withJSONObject: ["idempotency_key": UUID().uuidString, "capability": "reminder.create@v1", "arguments": ["title": "无效完成标志", "completed": "not-a-boolean"]])
-        let invalidCreated = try JSONDecoder().decode(IntentCreated.self, from: await api.request("POST", "/api/v1/tasks", body: invalidBody))
-        _ = try await api.request("POST", "/_test/run/" + invalidCreated.id)
-        let invalidTask = try JSONDecoder().decode(ReminderTask.self, from: await api.request("GET", "/api/v1/tasks/" + invalidCreated.id))
-        let invalidRecordID = try XCTUnwrap(invalidTask.result?.record_id)
+        let invalidData = try JSONSerialization.data(withJSONObject: ["records": [["source": "core", "source_id": UUID().uuidString, "kind": "reminder.item", "version": 1, "payload": ["title": "无效完成标志", "completed": "not-a-boolean"]]]])
+        let invalidBatch = try JSONDecoder().decode(DataPage.self, from: await api.request("POST", "/api/v1/data/sync", body: invalidData))
+        let invalidRecordID = try XCTUnwrap(invalidBatch.records.first?.id)
         let invalidRecord = try JSONDecoder().decode(DataEntry.self, from: await api.request("GET", "/api/v1/data/" + invalidRecordID))
         let invalidReport = try await reminderBridge.synchronize(records: [invalidRecord], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
         XCTAssertEqual(invalidReport.conflicts, 1)

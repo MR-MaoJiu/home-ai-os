@@ -103,7 +103,7 @@ def dispatch(app, user_id, household, role):
                         dependencies = {record.id: record.version}
                     steps = event_arguments(skill['steps'], event)
                     task = submit(db, actor, TaskRequest(idempotency_key=f'event:{rule.id}:{event.event_id}',
-                        steps=steps, max_steps=len(steps)), app.vault,
+                        steps=steps, max_steps=len(steps), timezone=rule.timezone), app.vault,
                         automation_chain=json.loads(event.automation_chain) + [rule.id],
                         record_dependencies=dependencies)
                     delivery.task_id, delivery.status = task.id, 'DISPATCHED'

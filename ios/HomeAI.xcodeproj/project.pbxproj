@@ -13,6 +13,7 @@
 		23C1EA8A5112A8D8B3F2A6EC /* BackgroundSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34C88046675947658051AA23 /* BackgroundSyncTests.swift */; };
 		2B722EC57F0E02CE17CC9169 /* ManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59682522EF3FF4C68D504EDE /* ManagementViews.swift */; };
 		3200B4ACE967E878200789FE /* SyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F98BE893BDC6DAF21EE75D /* SyncTests.swift */; };
+		35D9A8BF2F4A29BCAB6BD6A6 /* ReminderSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02189EA2B9A614E7B60C381 /* ReminderSchedule.swift */; };
 		3ECFD7DC6007E52EFC8313C5 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE55D2FE3C69D506D916C9A3 /* ChatView.swift */; };
 		6571226787D32CC9D94130D3 /* AsyncOperationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */; };
 		67741F121857E92BB53DB322 /* IntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */; };
@@ -74,6 +75,7 @@
 		9615D81084CBED64C6522C73 /* HomeIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeIntents.swift; sourceTree = "<group>"; };
 		9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCapture.swift; sourceTree = "<group>"; };
 		A2801207D982F13C2327BEEB /* CertificateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTests.swift; sourceTree = "<group>"; };
+		B02189EA2B9A614E7B60C381 /* ReminderSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderSchedule.swift; sourceTree = "<group>"; };
 		CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemReminderSync.swift; sourceTree = "<group>"; };
 		DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
 		F29C16E91255A0E4D8BA30DC /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -176,6 +178,7 @@
 			children = (
 				870F09D02633F5C931A181DA /* ConnectorSync.swift */,
 				75E227CB9D07EC6BD64E95F2 /* LocationCapture.swift */,
+				B02189EA2B9A614E7B60C381 /* ReminderSchedule.swift */,
 				CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */,
 				9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */,
 			);
@@ -301,6 +304,7 @@
 				97D9238113B8261863C1C533 /* PairingScanner.swift in Sources */,
 				DA9AF565CA34AC8B41343DFB /* RecordSourceView.swift in Sources */,
 				90C6635A6D4A199315B7C027 /* ReminderIntentService.swift in Sources */,
+				35D9A8BF2F4A29BCAB6BD6A6 /* ReminderSchedule.swift in Sources */,
 				C58AE019E455845FE722DAD7 /* ReminderSyncSettings.swift in Sources */,
 				E4AEE4ABEC5743739C53A0AD /* SettingsView.swift in Sources */,
 				9D1E2E3606F70BE747E4DD31 /* SystemReminderSync.swift in Sources */,

@@ -76,7 +76,7 @@ struct ChatView: View {
         sending = true
         defer { sending = false; currentTask = nil }
         await state.perform {
-            let body = try JSONSerialization.data(withJSONObject: ["message": text, "idempotency_key": UUID().uuidString, "mode": "local"])
+            let body = try JSONSerialization.data(withJSONObject: ["message": text, "idempotency_key": UUID().uuidString, "mode": "local", "timezone": TimeZone.current.identifier])
             let data = try await state.api.request("POST", "/api/v1/tasks", body: body, expectedNamespace: namespace)
             let created = try JSONDecoder().decode(TaskCreated.self, from: data)
             currentTask = created.id

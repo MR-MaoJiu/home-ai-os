@@ -8,6 +8,7 @@ struct ReminderSyncPreview: Sendable {
     let sourceType: Int
     let calendarName: String
     let records: [DataEntry]
+    let includeSchedule: Bool
     func matches(namespace: String, calendarID: String) -> Bool {
         self.namespace == namespace && self.calendarID == calendarID
     }
@@ -26,6 +27,7 @@ final class SystemReminderSync {
         let title: String
         let completed: Bool
         let version: Int
+        var schedule: ReminderSchedule? = nil
     }
     struct Report: Sendable {
         var created = 0
@@ -41,11 +43,11 @@ final class SystemReminderSync {
         URL(string: "\(markerScheme)://\(namespace)/\(recordID)")!
     }
 
-    func synchronize(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String? = nil, expectedSourceID: String? = nil, expectedSourceType: Int? = nil, allowCloudExport: Bool = false, store: EKEventStore = EKEventStore()) async throws -> Report {
+    func synchronize(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String? = nil, expectedSourceID: String? = nil, expectedSourceType: Int? = nil, allowCloudExport: Bool = false, includeSchedule: Bool = false, store: EKEventStore = EKEventStore()) async throws -> Report {
         try await gate.acquire()
         do {
             try Task.checkCancellation()
-            let result = try await run(records: records, api: api, calendarID: calendarID, expectedNamespace: expectedNamespace, expectedSourceID: expectedSourceID, expectedSourceType: expectedSourceType, allowCloudExport: allowCloudExport, store: store)
+            let result = try await run(records: records, api: api, calendarID: calendarID, expectedNamespace: expectedNamespace, expectedSourceID: expectedSourceID, expectedSourceType: expectedSourceType, allowCloudExport: allowCloudExport, includeSchedule: includeSchedule, store: store)
             await gate.release()
             return result
         } catch {
@@ -54,7 +56,7 @@ final class SystemReminderSync {
         }
     }
 
-    private func run(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String?, expectedSourceID: String?, expectedSourceType: Int?, allowCloudExport: Bool, store: EKEventStore) async throws -> Report {
+    private func run(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String?, expectedSourceID: String?, expectedSourceType: Int?, allowCloudExport: Bool, includeSchedule: Bool, store: EKEventStore) async throws -> Report {
         guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess,
               let calendar = store.calendar(withIdentifier: calendarID), calendar.allowedEntityTypes.contains(.reminder), calendar.allowsContentModifications else {
             throw APIClient.APIError.message("系统提醒权限或目标列表不可用，未进行写入")
@@ -136,11 +138,32 @@ final class SystemReminderSync {
                 report.conflicts += 1
                 continue
             }
+            var mergedSchedule: ReminderSchedule?
+            var localSchedule: ReminderSchedule?
+            var remoteSchedule: ReminderSchedule?
+            if includeSchedule {
+                do {
+                    let remoteValue = try ReminderSchedule.remote(remote.payload)
+                    let localValue = matches.isEmpty ? ReminderSchedule.empty : try ReminderSchedule.local(item)
+                    let baseline = previous?.schedule ?? .empty
+                    let conflict = localValue.due != baseline.due && remoteValue.due != baseline.due && localValue.due != remoteValue.due
+                    if conflict { report.conflicts += 1; continue }
+                    let merged = ReminderSchedule(due: localValue.due != baseline.due ? localValue.due : remoteValue.due,
+                        notify: localValue.notify != baseline.notify ? localValue.notify : remoteValue.notify)
+                    guard !merged.notify || merged.due != nil else { report.conflicts += 1; continue }
+                    mergedSchedule = merged; localSchedule = localValue; remoteSchedule = remoteValue
+                } catch { report.conflicts += 1; continue }
+            }
+            let scheduleChanged = includeSchedule && mergedSchedule != remoteSchedule
             _ = try currentCalendar()
-            if mergedTitle != title || mergedCompleted != completed {
+            if mergedTitle != title || mergedCompleted != completed || scheduleChanged {
                 var payload = remote.payload
                 payload["title"] = .string(mergedTitle)
                 payload["completed"] = .bool(mergedCompleted)
+                if let schedule = mergedSchedule {
+                    payload["due_at"] = schedule.due.map { .string($0.ISO8601Format()) } ?? .null
+                    payload["notify_at_due"] = .bool(schedule.notify)
+                }
                 let upload = ConnectorSync.Upload(source: "core", source_id: sourceID, kind: "reminder.item", version: version + 1,
                     sensitivity: remote.sensitivity, cloud_policy: remote.cloud_policy ?? "LOCAL_ONLY", payload: payload)
                 let batch = ConnectorSync.Batch(batch_id: UUID().uuidString, records: [upload])
@@ -149,17 +172,18 @@ final class SystemReminderSync {
             guard try await api.syncNamespace() == namespace else { throw APIClient.APIError.message("连接已切换，停止系统提醒写入") }
             if !matches.isEmpty && (!item.refresh() || item.lastModifiedDate != localModified) { report.conflicts += 1; continue }
             let marker = Self.marker(namespace: resourceNamespace, recordID: remote.id)
-            let needsWrite = matches.isEmpty || item.title != mergedTitle || item.isCompleted != mergedCompleted || item.url != marker
+            let needsWrite = matches.isEmpty || item.title != mergedTitle || item.isCompleted != mergedCompleted || item.url != marker || (includeSchedule && mergedSchedule != localSchedule)
             if needsWrite {
                 item.calendar = try currentCalendar()
                 item.title = mergedTitle
                 item.isCompleted = mergedCompleted
                 item.url = marker
+                if let schedule = mergedSchedule { schedule.apply(to: item) }
                 try store.save(item, commit: true)
                 if matches.isEmpty { report.created += 1 } else { report.updated += 1 }
-            } else if mergedTitle != title || mergedCompleted != completed { report.updated += 1 }
+            } else if mergedTitle != title || mergedCompleted != completed || scheduleChanged { report.updated += 1 }
             let receipt = Receipt(recordID: remote.id, itemID: item.calendarItemIdentifier, calendarID: calendarID,
-                title: mergedTitle, completed: mergedCompleted, version: version + ((mergedTitle != title || mergedCompleted != completed) ? 1 : 0))
+                title: mergedTitle, completed: mergedCompleted, version: version + ((mergedTitle != title || mergedCompleted != completed || scheduleChanged) ? 1 : 0), schedule: mergedSchedule ?? previous?.schedule)
             if receipts[remote.id] != receipt {
                 receipts[remote.id] = receipt
                 try DeviceIdentity.save(JSONEncoder().encode(receipts), name: storageKey)
@@ -179,8 +203,9 @@ final class SystemReminderSync {
                 guard try await api.syncNamespace() == namespace else { throw APIClient.APIError.message("连接已切换") }
                 guard item.refresh(), item.calendar.calendarIdentifier == calendarID,
                       item.title == receipt.title, item.isCompleted == receipt.completed,
-                      (item.notes ?? "").isEmpty, item.dueDateComponents == nil, item.startDateComponents == nil,
-                      item.alarms?.isEmpty != false else { report.conflicts += 1; continue }
+                      (item.notes ?? "").isEmpty else { report.conflicts += 1; continue }
+                let expectedSchedule = receipt.schedule ?? .empty
+                guard (try? ReminderSchedule.local(item)) == expectedSchedule else { report.conflicts += 1; continue }
                 _ = try currentCalendar()
                 try store.remove(item, commit: true)
                 report.removed += 1

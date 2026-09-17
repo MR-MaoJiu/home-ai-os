@@ -79,6 +79,15 @@ class TaskRequest(Contract):
     step_timeout_seconds: int = Field(default=120, ge=1, le=300)
     max_model_tokens: int = Field(default=32768, ge=256, le=262144)
     max_read_retries: int = Field(default=1, ge=0, le=3)
+    timezone: str = Field(default="Asia/Shanghai", max_length=100)
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value):
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try: ZoneInfo(value)
+        except (ValueError, ZoneInfoNotFoundError): raise ValueError("需要有效 IANA 时区") from None
+        return value
 
     @model_validator(mode="after")
     def validate_workflow(self):

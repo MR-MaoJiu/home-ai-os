@@ -43,7 +43,7 @@ async def cycle(app, js=None):
                 if not device or device.revoked:
                     automation.enabled = False
                     continue
-                submit(db, actor, TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}", steps=skill["steps"], max_steps=len(skill["steps"])), app.vault)
+                submit(db, actor, TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}", steps=skill["steps"], max_steps=len(skill["steps"]), timezone=automation.timezone), app.vault)
                 automation.next_run = croniter(automation.cron, datetime.now(ZoneInfo(automation.timezone))).get_next(float)
             db.commit()
         from .event_automations import dispatch

@@ -3043,6 +3043,12 @@
             "minimum": 0.0,
             "title": "Max Read Retries",
             "default": 1
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Timezone",
+            "default": "Asia/Shanghai"
           }
         },
         "additionalProperties": false,

@@ -9,6 +9,7 @@ struct ReminderSyncSettings: View {
     @State private var namespace: String?
     @State private var accountNamespace: String?
     @State private var automatic = false
+    @State private var includeSchedule = false
     @State private var preview: [DataEntry] = []
     @State private var confirming = false
     @State private var pending: ReminderSyncPreview?
@@ -34,6 +35,7 @@ struct ReminderSyncSettings: View {
                     } else if target != nil {
                         Text("这个列表可能由 iCloud 或其他账号同步。每次写入前都需要预览并确认，不会自动导出私人内容。").font(.caption)
                     }
+                    Toggle("同步到期时间与到期提醒", isOn: $includeSchedule)
                     Button("预览本次同步") { Task { await state.perform {
                         guard let selectedCalendar = target else { return }
                         let generation = previewGeneration
@@ -56,13 +58,22 @@ struct ReminderSyncSettings: View {
                             throw APIClient.APIError.message("连接或目标列表已变化，请重新预览")
                         }
                         preview = candidates
-                        pending = ReminderSyncPreview(namespace: current, calendarID: calendarID, sourceID: sourceID, sourceType: sourceType, calendarName: calendarName, records: candidates)
+                        pending = ReminderSyncPreview(namespace: current, calendarID: calendarID, sourceID: sourceID, sourceType: sourceType, calendarName: calendarName, records: candidates, includeSchedule: includeSchedule)
                         confirming = true
                     } } }.disabled(target == nil || state.busy)
                 }
             }
             if !preview.isEmpty {
-                Section("本次预览") { ForEach(preview) { record in Text(record.title) } }
+                Section("本次预览") { ForEach(preview) { record in
+                    VStack(alignment: .leading) {
+                        Text(record.title)
+                        if includeSchedule {
+                            if case .string(let date) = record.payload["due_at"] { Text("到期：" + date).font(.caption) }
+                            else { Text("未设置到期时间").font(.caption) }
+                            if case .bool(true) = record.payload["notify_at_due"] { Text("请求到期时通知").font(.caption) }
+                        }
+                    }
+                } }
             }
             if !result.isEmpty || !state.systemReminderStatus.isEmpty { Section("同步结果") { Text(result.isEmpty ? state.systemReminderStatus : result) } }
             Section("编辑与删除") {
@@ -71,6 +82,7 @@ struct ReminderSyncSettings: View {
         }.navigationTitle("系统提醒同步")
         .task(id: state.connectionRevision) { await restore() }
         .onChange(of: automatic) { _, _ in savePreference() }
+        .onChange(of: includeSchedule) { _, _ in pending = nil; previewGeneration = UUID(); savePreference() }
         .confirmationDialog("同步到所选系统列表？", isPresented: $confirming, titleVisibility: .visible) {
             Button("确认本次同步") { Task { await sync() } }
             Button("取消", role: .cancel) { pending = nil }
@@ -82,7 +94,7 @@ struct ReminderSyncSettings: View {
     private func restore() async {
         let generation = UUID()
         previewGeneration = generation; pending = nil; confirming = false
-        preview = []; result = ""; namespace = nil; accountNamespace = nil; calendars = []; selected = ""; automatic = false
+        preview = []; result = ""; namespace = nil; accountNamespace = nil; calendars = []; selected = ""; automatic = false; includeSchedule = false
         guard state.connected else { return }
         do {
             let current = try await state.api.syncNamespace()
@@ -96,6 +108,7 @@ struct ReminderSyncSettings: View {
             calendars = available
             selected = UserDefaults.standard.string(forKey: SystemReminderSync.preferenceKey(owner.namespace)) ?? ""
             automatic = UserDefaults.standard.bool(forKey: SystemReminderSync.preferenceKey(owner.namespace) + ".automatic")
+            includeSchedule = UserDefaults.standard.bool(forKey: SystemReminderSync.preferenceKey(owner.namespace) + ".schedule")
         } catch {
             if generation == previewGeneration && !Task.isCancelled { result = error.localizedDescription }
         }
@@ -115,6 +128,7 @@ struct ReminderSyncSettings: View {
     }
     private func savePreference() {
         guard let namespace = accountNamespace else { return }
+        UserDefaults.standard.set(includeSchedule, forKey: SystemReminderSync.preferenceKey(namespace) + ".schedule")
         UserDefaults.standard.set(selected, forKey: SystemReminderSync.preferenceKey(namespace))
         UserDefaults.standard.set(automatic && target?.source.sourceType == .local, forKey: SystemReminderSync.preferenceKey(namespace) + ".automatic")
     }
@@ -128,7 +142,7 @@ struct ReminderSyncSettings: View {
                 throw APIClient.APIError.message("连接或目标账号已变化，请重新预览")
             }
             let report = try await SystemReminderSync.shared.synchronize(records: plan.records, api: state.api,
-                calendarID: plan.calendarID, expectedNamespace: plan.namespace, expectedSourceID: plan.sourceID, expectedSourceType: plan.sourceType, allowCloudExport: true, store: store)
+                calendarID: plan.calendarID, expectedNamespace: plan.namespace, expectedSourceID: plan.sourceID, expectedSourceType: plan.sourceType, allowCloudExport: true, includeSchedule: plan.includeSchedule, store: store)
             result = report.summary
         }
     }

@@ -224,6 +224,12 @@
       "minimum": 0,
       "title": "Max Read Retries",
       "type": "integer"
+    },
+    "timezone": {
+      "default": "Asia/Shanghai",
+      "maxLength": 100,
+      "title": "Timezone",
+      "type": "string"
     }
   },
   "required": [

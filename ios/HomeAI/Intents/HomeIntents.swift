@@ -18,10 +18,12 @@ struct CreateHomeReminderIntent: AppIntent {
     static let openAppWhenRun = true
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
     @Parameter(title: "提醒内容") var text: String
-    static var parameterSummary: some ParameterSummary { Summary("创建家庭提醒：\(\.$text)") }
+    @Parameter(title: "到期时间") var dueDate: Date?
+    @Parameter(title: "到期时通知", default: false) var notifyAtDue: Bool
+    static var parameterSummary: some ParameterSummary { Summary("创建家庭提醒：\(\.$text)") { \.$dueDate; \.$notifyAtDue } }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let identifier = try await ReminderIntentService.shared.submit(title: text)
+        let identifier = try await ReminderIntentService.shared.submit(title: text, dueDate: dueDate, notify: notifyAtDue)
         await MainActor.run { IntentRouter.shared.destination = .activity }
         return .result(value: identifier, dialog: "家庭提醒任务已提交，请在活动页面查看执行结果。")
     }
