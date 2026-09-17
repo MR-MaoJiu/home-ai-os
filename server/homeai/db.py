@@ -1,0 +1,220 @@
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import create_engine, String, Text, Integer, Boolean, UniqueConstraint, event, text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
+
+
+def uid() -> str:
+    return str(uuid.uuid4())
+
+
+def now() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Principal(Base):
+    __tablename__ = "principals"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    household_id: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String, default="adult")
+
+
+class Device(Base):
+    __tablename__ = "devices"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    public_key: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(String)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Credential(Base):
+    __tablename__ = "credentials"
+    digest: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String)
+    device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    kind: Mapped[str] = mapped_column(String)
+    expires_at: Mapped[float]
+
+
+class Nonce(Base):
+    __tablename__ = "request_nonces"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    expires_at: Mapped[float]
+
+
+class Owned:
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    household_id: Mapped[str] = mapped_column(String, index=True)
+    owner_id: Mapped[str] = mapped_column(String, index=True)
+
+
+class Record(Owned, Base):
+    __tablename__ = "data_records"
+    __table_args__ = (UniqueConstraint("owner_id", "source", "source_id"),)
+    source: Mapped[str] = mapped_column(String)
+    source_id: Mapped[str] = mapped_column(String)
+    kind: Mapped[str] = mapped_column(String)
+    sensitivity: Mapped[str] = mapped_column(String)
+    cloud_policy: Mapped[str] = mapped_column(String, default="LOCAL_ONLY")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    payload: Mapped[str] = mapped_column(Text)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[float] = mapped_column(default=now)
+
+
+class Revision(Owned, Base):
+    __tablename__ = "record_versions"
+    record_id: Mapped[str] = mapped_column(String, index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[str] = mapped_column(Text)
+
+
+class Grant(Owned, Base):
+    __tablename__ = "grants"
+    record_id: Mapped[str] = mapped_column(String, index=True)
+    grantee_id: Mapped[str] = mapped_column(String, index=True)
+
+
+class Task(Owned, Base):
+    __tablename__ = "tasks"
+    __table_args__ = (UniqueConstraint("owner_id", "idempotency_key"),)
+    idempotency_key: Mapped[str] = mapped_column(String)
+    request_hash: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="RECEIVED")
+    request: Mapped[str] = mapped_column(Text)
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[float] = mapped_column(default=now)
+    deadline: Mapped[float]
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Invocation(Owned, Base):
+    __tablename__ = "tool_calls"
+    __table_args__ = (UniqueConstraint("task_id", "step"),)
+    task_id: Mapped[str] = mapped_column(String, index=True)
+    step: Mapped[int] = mapped_column(Integer)
+    capability: Mapped[str] = mapped_column(String)
+    arguments: Mapped[str] = mapped_column(Text)
+    arguments_hash: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Approval(Owned, Base):
+    __tablename__ = "approvals"
+    invocation_id: Mapped[str] = mapped_column(String, unique=True)
+    arguments_hash: Mapped[str] = mapped_column(String)
+    expires_at: Mapped[float]
+    decision: Mapped[str] = mapped_column(String, default="PENDING")
+
+
+class Audit(Owned, Base):
+    __tablename__ = "audit_entries"
+    action: Mapped[str] = mapped_column(String)
+    resource_id: Mapped[str] = mapped_column(String)
+    details: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[float] = mapped_column(default=now)
+
+
+class Outbox(Base):
+    __tablename__ = "event_outbox"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String, unique=True, default=uid)
+    household_id: Mapped[str] = mapped_column(String)
+    owner_id: Mapped[str] = mapped_column(String)
+    kind: Mapped[str] = mapped_column(String)
+    resource_id: Mapped[str] = mapped_column(String)
+    published: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[float] = mapped_column(default=now)
+
+
+class Consumption(Base):
+    __tablename__ = "event_consumptions"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[float] = mapped_column(default=now)
+
+
+class Provider(Base):
+    __tablename__ = "providers"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    manifest: Mapped[str] = mapped_column(Text)
+    previous_manifest: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    health: Mapped[str] = mapped_column(String, default="offline")
+
+
+class Automation(Owned, Base):
+    __tablename__ = "automations"
+    name: Mapped[str] = mapped_column(String)
+    cron: Mapped[str] = mapped_column(String)
+    timezone: Mapped[str] = mapped_column(String, default="Asia/Shanghai")
+    skill: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    next_run: Mapped[float]
+
+
+class Secret(Owned, Base):
+    __tablename__ = "secrets"
+    provider_id: Mapped[str] = mapped_column(String)
+    value: Mapped[str] = mapped_column(Text)
+
+
+class Disclosure(Owned, Base):
+    __tablename__ = "cloud_disclosures"
+    task_id: Mapped[str] = mapped_column(String)
+    provider_id: Mapped[str] = mapped_column(String)
+    categories: Mapped[str] = mapped_column(Text)
+    bytes_sent: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, default="ATTEMPTED")
+    created_at: Mapped[float] = mapped_column(default=now)
+
+
+def database(url: str, test: bool = False):
+    if url.startswith("sqlite") and not test:
+        raise RuntimeError("SQLite 仅允许测试；实际运行必须使用 PostgreSQL")
+    engine = create_engine(url, **({"connect_args": {"check_same_thread": False}} if test else {"pool_pre_ping": True}))
+    factory = sessionmaker(engine, expire_on_commit=False)
+    return engine, factory
+
+
+def scope(db, user_id: str, household_id: str):
+    db.info.update(user_id=user_id, household_id=household_id)
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('homeai.user_id', :u, true), set_config('homeai.household_id', :h, true)"), {"u": user_id, "h": household_id})
+
+
+@event.listens_for(Session, "after_begin")
+def restore_scope(session, transaction, connection):
+    if connection.dialect.name == "postgresql" and "user_id" in session.info:
+        connection.execute(text("SELECT set_config('homeai.user_id', :u, true), set_config('homeai.household_id', :h, true)"), {"u": session.info["user_id"], "h": session.info["household_id"]})
+
+class MemoryCandidate(Owned, Base):
+    __tablename__ = "memory_candidates"
+    source_ids: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    created_at: Mapped[float] = mapped_column(default=now)
+
+
+class MemoryVector(Owned, Base):
+    __tablename__ = "memory_vectors"
+    record_id: Mapped[str] = mapped_column(String, unique=True)
+    model: Mapped[str] = mapped_column(String)
+    # JSON 兼容单元测试，生产迁移创建 vector 列并由 SQL 操作。
+    embedding: Mapped[str] = mapped_column(Text)
+
+
+class DerivedJob(Owned, Base):
+    __tablename__ = "memory_deletion_jobs"
+    provider_id: Mapped[str] = mapped_column(String)
+    event_id: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)

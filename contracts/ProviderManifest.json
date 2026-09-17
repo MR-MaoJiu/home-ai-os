@@ -1,0 +1,109 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9_.-]{1,80}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "adapter": {
+      "enum": [
+        "openai",
+        "homeassistant",
+        "searxng",
+        "http",
+        "mcp"
+      ],
+      "title": "Adapter",
+      "type": "string"
+    },
+    "endpoint": {
+      "title": "Endpoint",
+      "type": "string"
+    },
+    "cloud": {
+      "default": false,
+      "title": "Cloud",
+      "type": "boolean"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
+    "capabilities": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "object"
+    },
+    "timeout_seconds": {
+      "default": 60,
+      "maximum": 300,
+      "minimum": 1,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    },
+    "image_digest": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Image Digest"
+    },
+    "secret_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Secret Id"
+    },
+    "allowed_hosts": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Allowed Hosts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "adapter",
+    "endpoint",
+    "capabilities",
+    "allowed_hosts"
+  ],
+  "title": "ProviderManifest",
+  "type": "object"
+}

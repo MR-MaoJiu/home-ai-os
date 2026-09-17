@@ -1,0 +1,17 @@
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+state/
+.build/
+build/
+DerivedData/
+*.xcuserstate
+.cocoindex_code/
+logs/
+*.egg-info/
+.xcodebuildmcp/

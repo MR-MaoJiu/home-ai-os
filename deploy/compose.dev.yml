@@ -1,0 +1,27 @@
+name: homeai-dev
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: homeai_migrator
+      POSTGRES_PASSWORD: ${HOMEAI_DB_ADMIN_PASSWORD:?设置迁移用户密码}
+      POSTGRES_DB: homeai
+    ports: ["127.0.0.1:55432:5432"]
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homeai_migrator -d homeai"]
+      interval: 5s
+      retries: 20
+  nats:
+    image: nats:2.11-alpine
+    command: ["-js", "-sd", "/data"]
+    ports: ["127.0.0.1:54222:4222"]
+    volumes: ["nats:/data"]
+  opa:
+    image: openpolicyagent/opa:1.4.2-static
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    ports: ["127.0.0.1:58181:8181"]
+    volumes: ["./policies:/policies:ro"]
+volumes:
+  postgres:
+  nats:

@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "mem0",
+  "version": "1.0.0",
+  "adapter": "http",
+  "endpoint": "http://127.0.0.1:8101",
+  "cloud": false,
+  "model": null,
+  "capabilities": {
+    "memory.semantic.search@v1": "/invoke/search",
+    "memory.semantic.index@v1": "/invoke/index",
+    "memory.semantic.purge@v1": "/invoke/purge"
+  },
+  "timeout_seconds": 60,
+  "image_digest": null,
+  "secret_id": null,
+  "allowed_hosts": [
+    "127.0.0.1"
+  ]
+}

@@ -1,0 +1,38 @@
+name: HomeAI
+options:
+  bundleIdPrefix: dev.homeai
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  HomeAI:
+    type: application
+    platform: iOS
+    sources: [HomeAI]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.homeai.ios
+        INFOPLIST_KEY_CFBundleDisplayName: Home AI
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: 连接你的家庭 AI 服务器
+        INFOPLIST_KEY_NSCameraUsageDescription: 扫描家庭服务器配对二维码
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: 录制语音并交给家庭服务器处理
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: 将你授权的日历同步到家庭服务器
+        INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: 将你授权的提醒同步到家庭服务器
+        INFOPLIST_KEY_NSContactsUsageDescription: 将你授权的联系人同步到家庭服务器
+        INFOPLIST_KEY_NSHealthShareUsageDescription: 将你授权的健康数据同步到家庭服务器
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: 管理你明确授权的健康数据
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: 读取你选择的照片并同步到家庭服务器
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: 将本次位置分享给家庭服务器
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    entitlements:
+      path: HomeAI/HomeAI.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+    scheme:
+      testTargets: []

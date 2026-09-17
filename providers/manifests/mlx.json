@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "id": "mlx",
+  "version": "1.0.0",
+  "adapter": "openai",
+  "endpoint": "http://127.0.0.1:8081/v1",
+  "cloud": false,
+  "model": "configured-model",
+  "capabilities": {
+    "model.generate@v1": "chat"
+  },
+  "timeout_seconds": 60,
+  "image_digest": null,
+  "secret_id": null,
+  "allowed_hosts": [
+    "127.0.0.1"
+  ]
+}

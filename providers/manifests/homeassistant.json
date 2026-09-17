@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "id": "homeassistant",
+  "version": "1.0.0",
+  "adapter": "homeassistant",
+  "endpoint": "http://127.0.0.1:8123",
+  "cloud": false,
+  "model": null,
+  "capabilities": {
+    "home.states@v1": "states",
+    "home.execute@v1": "execute"
+  },
+  "timeout_seconds": 60,
+  "image_digest": null,
+  "secret_id": null,
+  "allowed_hosts": [
+    "127.0.0.1"
+  ]
+}

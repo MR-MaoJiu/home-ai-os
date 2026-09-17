@@ -1,0 +1,62 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "source": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Source",
+      "type": "string"
+    },
+    "source_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Source Id",
+      "type": "string"
+    },
+    "kind": {
+      "pattern": "^[a-z][a-z0-9_.]{1,80}$",
+      "title": "Kind",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "sensitivity": {
+      "default": "PRIVATE",
+      "enum": [
+        "PUBLIC",
+        "HOUSEHOLD",
+        "PRIVATE",
+        "SENSITIVE",
+        "SECRET"
+      ],
+      "title": "Sensitivity",
+      "type": "string"
+    },
+    "cloud_policy": {
+      "default": "LOCAL_ONLY",
+      "enum": [
+        "LOCAL_ONLY",
+        "REDACT_AND_ALLOW"
+      ],
+      "title": "Cloud Policy",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    }
+  },
+  "required": [
+    "source",
+    "source_id",
+    "kind",
+    "version",
+    "payload"
+  ],
+  "title": "DataRecord",
+  "type": "object"
+}

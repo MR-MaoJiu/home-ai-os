@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "id": "cosyvoice",
+  "version": "1.0.0",
+  "adapter": "http",
+  "endpoint": "http://127.0.0.1:8106",
+  "cloud": false,
+  "model": null,
+  "capabilities": {
+    "speech.synthesize@v1": "/invoke/synthesize"
+  },
+  "timeout_seconds": 60,
+  "image_digest": null,
+  "secret_id": null,
+  "allowed_hosts": [
+    "127.0.0.1"
+  ]
+}

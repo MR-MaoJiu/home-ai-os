@@ -1,0 +1,40 @@
+Home AI OS Attribution License 1.0
+SPDX-License-Identifier: LicenseRef-Home-AI-OS-Attribution-1.0
+
+Copyright (c) 2026 MR-MaoJiu and Home AI OS contributors
+Project: https://github.com/MR-MaoJiu/home-ai-os
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+1. The above copyright notice, project URL, and this permission notice shall
+be included in all copies or substantial portions of the Software.
+
+2. If you distribute a product derived from substantial portions of the
+Software, or make such a product available to third parties as a hosted
+service, you must provide a reasonably accessible attribution reading
+"Based on Home AI OS" or "基于 Home AI OS", together with a clickable link to
+https://github.com/MR-MaoJiu/home-ai-os, in the product's About page, publicly
+accessible documentation, or command-line About information. For a medium
+that does not support clickable links, the complete URL must be displayed.
+Private use without distribution or provision to third parties does not
+require a user-interface attribution.
+
+3. This license does not grant rights to use contributors' names or trademarks
+to imply endorsement. Third-party components remain subject to their own
+licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+This is a custom license. It is not the unmodified MIT License and is not
+represented as an OSI-approved license.
