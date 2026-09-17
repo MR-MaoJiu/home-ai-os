@@ -32,7 +32,7 @@ export function TaskHistory({tasks,onChanged}:{tasks:Task[]|null;onChanged:()=>v
  }
  return <section><h2>最近任务</h2>{error&&<p className="message error" role="alert">{error}</p>}
   {!tasks?.length?<p className="empty">暂无任务</p>:tasks.map(task=><div className="row" key={task.id}><span>{task.id.slice(0,8)}</span><span>{task.status}</span><span>{task.error}</span><button disabled={busy} onClick={()=>inspect(task)}>查看步骤</button></div>)}
-  {selected&&<div><h3>任务 {selected.id.slice(0,8)} · {selected.status}</h3><p>已完成步骤会保留；取消和重启不会自动撤销已经发生的外部操作。</p>
+  {selected&&<div><h3>任务 {selected.id.slice(0,8)} · {selected.status}</h3>{selected.error&&<p className="message error">{selected.error}</p>}<p>已完成步骤会保留；取消和重启不会自动撤销已经发生的外部操作。</p>
    <button disabled={busy} onClick={()=>inspect(selected)}>刷新步骤</button>
    {selected.execution?.agent&&<p>本地 Agent · 已规划 {selected.execution.planned_steps}/{selected.execution.max_steps} 步 · 模型 {selected.execution.model_rounds} 轮 · Token 计入 {selected.execution.model_token_charge}/{selected.execution.max_model_tokens}（包含未知消耗的保守预留）</p>}
    {['RECEIVED','APPROVED','AWAITING_APPROVAL','EXECUTING'].includes(selected.status)&&<button disabled={busy} onClick={cancel}>取消后续执行</button>}

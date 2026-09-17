@@ -2,7 +2,7 @@
 import json
 import os
 from sqlalchemy import select, delete
-from .db import Record, MemoryCandidate, MemoryVector, Revision, Grant, Task, Invocation, now
+from .db import Record, MemoryCandidate, MemoryVector, KnowledgeChunk, Revision, Grant, Task, Invocation, now
 from .data import emit, audit
 
 
@@ -38,7 +38,7 @@ def delete_tree(db, actor, record, vault, state_dir):
         item.deleted,item.payload,item.updated_at=True,'',now()
         notify_recipients(db,actor,'record.deleted',item.id)
         db.flush()
-        for table in (MemoryVector,Revision,Grant):
+        for table in (MemoryVector,KnowledgeChunk,Revision,Grant):
             db.execute(delete(table).where(table.record_id==item.id))
         emit(db,actor,'record.deleted',item.id)
         audit(db,actor,'data.delete',item.id)

@@ -22,7 +22,10 @@ class Reconciliation(Contract):
 def steps(task_id: str, request: Request, actor: Actor = Depends(authenticate)):
     app = request.app.state
     with app.db() as db:
-        own(db, Task, task_id, actor)
+        task = own(db, Task, task_id, actor)
+        from .result_access import check_dependencies
+        try: check_dependencies(db, actor, app.vault.open(task.request, actor.user_id + ':task:' + task.id))
+        except HTTPException: return []
         rows = db.scalars(select(Invocation).where(Invocation.task_id == task_id).order_by(Invocation.step))
         return [{'id': row.id, 'step': row.step, 'capability': row.capability, 'status': row.status, 'result': app.vault.open(row.result, actor.user_id + ':invocation-result:' + row.id) if row.result else None} for row in rows]
 
@@ -50,6 +53,8 @@ def reconcile(task_id: str, body: Reconciliation, request: Request, actor: Actor
             task.status = 'CANCELED' if task.cancel_requested else ('RECEIVED' if payload.get('_agent') or invocation.step + 1 < count else 'SUCCEEDED')
             task.result = app.vault.seal(result, actor.user_id + ':task-result:' + task.id)
         else:
+            from .result_access import check_dependencies
+            check_dependencies(db, actor, app.vault.open(task.request, actor.user_id + ':task:' + task.id))
             if task.deadline <= now() or task.cancel_requested:
                 raise HTTPException(409, '任务已过期，禁止重新发起外部操作')
             invocation.status = 'PENDING'

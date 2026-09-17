@@ -13,12 +13,18 @@ final class SyncTests: XCTestCase {
     }
 
     @MainActor
+    func testAnswerSourcesOnlyAcceptCanonicalIdentifiers() {
+        let result = JSONValue.object(["sources": .array([.object(["record_id": .string("../secrets"), "title": .string("不应成为链接"), "version": .number(1)])])])
+        XCTAssertTrue(ChatView.sources(result).isEmpty)
+    }
+
+    @MainActor
     func testLivePagedSyncAndCursorRecovery() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let path = environment["HOMEAI_SYNC_PAIR_FILE"] ?? environment["TEST_RUNNER_HOMEAI_SYNC_PAIR_FILE"] else {
             throw XCTSkip("需要临时真实服务配对文件；不使用网络模拟结果")
         }
-        struct Fixture: Decodable { let pairing: PairingCode; let count: Int }
+        struct Fixture: Decodable { let pairing: PairingCode; let count: Int; let documents: Bool? }
         let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
         let api = APIClient(persistConnection: false)
         try await api.pair(fixture.pairing)
@@ -47,6 +53,23 @@ final class SyncTests: XCTestCase {
         let recovered = try await DeviceDataSync().synchronize(api: api)
         XCTAssertEqual(recovered.records.count, fixture.count - 1)
         XCTAssertFalse(recovered.records.contains { $0.id == removed })
+        if fixture.documents == true {
+            let taskID = try await api.uploadDocument(name: "备份计划.md", contents: Data("# 备份计划\n周日晚上八点进行家庭备份。".utf8))
+            _ = try await api.request("POST", "/_test/run/" + taskID)
+            struct Parsed: Decodable { let source_id: String; let markdown: String }
+            struct ParsedTask: Decodable { let status: String; let result: Parsed? }
+            let task = try JSONDecoder().decode(ParsedTask.self, from: await api.request("GET", "/api/v1/tasks/" + taskID))
+            XCTAssertEqual(task.status, "SUCCEEDED")
+            let parsed = try XCTUnwrap(task.result)
+            XCTAssertTrue(parsed.markdown.contains("八点"))
+            let query = try JSONSerialization.data(withJSONObject: ["query": "家庭备份时间"])
+            struct Match: Decodable { let excerpt: String }
+            struct Search: Decodable { let mode: String; let matches: [Match] }
+            let found = try JSONDecoder().decode(Search.self, from: await api.request("POST", "/api/v1/knowledge/search", body: query))
+            XCTAssertEqual(found.mode, "pgvector_chunks")
+            XCTAssertTrue(found.matches.contains { $0.excerpt.contains("八点") })
+            _ = try await api.request("DELETE", "/api/v1/data/" + parsed.source_id)
+        }
         struct Me: Decodable { let device_id: String }
         let identity = try JSONDecoder().decode(Me.self, from: await api.request("GET", "/api/v1/me"))
         _ = try await api.request("DELETE", "/api/v1/devices/" + identity.device_id)

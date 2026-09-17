@@ -89,3 +89,20 @@ def test_nonfinite_signed_timestamp_is_rejected(alice):
         proof='\n'.join([timestamp,headers['x-homeai-nonce'],'GET','/api/v1/me',digest(b''),digest(alice.token.encode())])
         headers['x-homeai-signature']=alice.sign(proof.encode())
         assert alice.client.get('/api/v1/me',headers=headers).status_code==401
+
+
+def test_legacy_file_migration_preserves_classification_and_download(system,alice):
+    import base64
+    from homeai.crypto import digest
+    from test_docling_live import upload
+    data=b'original legacy document'
+    rid=put(alice,{'source':'files','source_id':digest(data),'kind':'document.import','version':4,'sensitivity':'SECRET','payload':{'name':'legacy.txt','content_base64':base64.b64encode(data).decode()}})
+    assert alice.request('GET','/api/v1/files/'+rid+'/content').content==data
+    migrated=upload(alice,'legacy.txt',data)
+    assert migrated==rid
+    record=alice.request('GET','/api/v1/data/'+rid).json()
+    assert record['version']==5 and record['sensitivity']=='SECRET' and record['kind']=='document.file'
+    assert 'content_base64' not in record['payload']
+    response=alice.request('GET','/api/v1/files/'+rid+'/content')
+    assert response.content==data and response.headers['cache-control']=='no-store'
+    assert alice.request('POST','/api/v1/files/'+rid+'/parse').status_code==403

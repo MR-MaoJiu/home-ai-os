@@ -4,12 +4,13 @@ from fastapi import HTTPException
 from .policy import CAPABILITIES
 
 TOOLS = [
+    {"type":"function","function":{"name":"search_documents","description":"检索已解析且当前已授权的文档，回答文件内容问题前使用此工具，无匹配时说明未找到，不编造文件内容","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
     {"type":"function","function":{"name":"search_memories","description":"检索当前用户已授权的记忆","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
     {"type":"function","function":{"name":"search_calendar","description":"检索当前用户已授权的日程","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
     {"type":"function","function":{"name":"create_reminder","description":"每次调用只创建一条家庭服务器提醒。多个事项必须分别调用，不能合并标题。不表示已写入手机系统","parameters":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":False}}},
     {"type":"function","function":{"name":"read_home_states","description":"查询已接入 Home Assistant 的设备状态","parameters":{"type":"object","properties":{},"additionalProperties":False}}},
 ]
-MAPPING={'search_memories':'memory.search@v1','search_calendar':'calendar.search@v1','create_reminder':'reminder.create@v1','read_home_states':'home.states@v1'}
+MAPPING={'search_documents':'knowledge.search@v1','search_memories':'memory.search@v1','search_calendar':'calendar.search@v1','create_reminder':'reminder.create@v1','read_home_states':'home.states@v1'}
 
 
 def decode_proposal(result):

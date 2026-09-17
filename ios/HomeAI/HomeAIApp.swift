@@ -28,7 +28,7 @@ struct RootView: View {
     var body: some View {
         @Bindable var state = state
         TabView {
-            Tab("AI", systemImage: "sparkles") { NavigationStack { ChatView() } }
+            Tab("AI", systemImage: "sparkles") { NavigationStack { ChatView().id(state.connectionRevision) } }
             Tab("活动", systemImage: "clock.arrow.circlepath") { NavigationStack { ActivityView() } }
             Tab("自动化", systemImage: "bolt") { NavigationStack { AutomationsView() } }
             Tab("数据", systemImage: "externaldrive") { NavigationStack { DataView() } }

@@ -41,9 +41,12 @@ async def advance(app, task_id, user_id):
                 raise HTTPException(409, '模型规划轮次预算已用尽')
             if len(body['steps']) >= body['max_steps'] and body.get('_final_round_used'):
                 raise HTTPException(409, '工具步骤预算已用尽')
+            from .result_access import check_dependencies
+            check_dependencies(db, actor, body)
             records = [read_record(db, actor, rid) for rid in body['record_ids']]
             if any(record.sensitivity == 'SECRET' for record in records):
                 raise HTTPException(403, '秘密不能进入模型')
+            body.setdefault('_record_dependencies', {}).update({record.id: record.version for record in records})
             context = [serialize(record, app.vault)['payload'] for record in records]
             used_records = set(body['record_ids'])
             messages = [
@@ -57,6 +60,10 @@ async def advance(app, task_id, user_id):
                     if not row.result:
                         raise HTTPException(409, '工具结果已删除，禁止继续使用旧上下文')
                     result = app.vault.open(row.result, user_id + ':invocation-result:' + row.id)
+                    if row.capability == 'knowledge.search@v1':
+                        from .knowledge import rehydrate
+                        result = rehydrate(db, actor, result, app.vault)
+                        used_records.update(match['record_id'] for match in result['matches'])
                     # 检索结果按记录 ID 回到账本重新授权，撤权后不能重新送给模型。
                     candidates = result.get('records') if isinstance(result, dict) else result if isinstance(result, list) else None
                     if isinstance(candidates, list):
@@ -110,6 +117,7 @@ async def advance(app, task_id, user_id):
                 record = read_record(db, actor, rid)
                 if record.sensitivity == 'SECRET':
                     raise HTTPException(403, '模型调用期间资料密级发生变化')
+            check_dependencies(db, actor, body)
             usage = response.get('usage', {}).get('total_tokens')
             if type(usage) is int and 0 <= usage <= reserve:
                 body['_model_token_charge'] -= reserve - usage
@@ -142,6 +150,12 @@ async def advance(app, task_id, user_id):
                     task.status = 'RECEIVED'
                 else:
                     body.pop('_draft_answer', None)
+                    response['sources'] = []
+                    for rid in sorted(used_records):
+                        source = read_record(db, actor, rid)
+                        metadata = serialize(source, app.vault)['payload']
+                        title = metadata.get('name') or metadata.get('title') or '资料'
+                        response['sources'].append({'record_id':rid,'version':source.version,'title':title[:200] if isinstance(title,str) else '资料'})
                     task.result = app.vault.seal(response, user_id + ':task-result:' + task.id)
                     task.status = 'SUCCEEDED'
             task.request = app.vault.seal(body, user_id + ':task:' + task.id)

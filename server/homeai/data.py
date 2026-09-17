@@ -21,7 +21,7 @@ def accessible(db, actor, include_deleted=False):
 
 
 def read_record(db, actor, record_id):
-    item = db.scalar(accessible(db, actor).where(Record.id == record_id))
+    item = db.scalar(accessible(db, actor).where(Record.id == record_id).execution_options(populate_existing=True))
     if not item:
         raise HTTPException(404, "数据不存在或未授权")
     return item

@@ -462,6 +462,43 @@
         }
       }
     },
+    "/api/v1/files/{record_id}/content": {
+      "get": {
+        "summary": "File Content",
+        "operationId": "file_content_api_v1_files__record_id__content_get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/files/{record_id}/parse": {
       "post": {
         "summary": "Parse File",
@@ -1188,6 +1225,66 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/search": {
+      "post": {
+        "tags": [
+          "文档检索"
+        ],
+        "summary": "Search Documents",
+        "operationId": "search_documents_api_v1_knowledge_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/rebuild": {
+      "post": {
+        "tags": [
+          "文档检索"
+        ],
+        "summary": "Rebuild",
+        "operationId": "rebuild_api_v1_knowledge_rebuild_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -2120,6 +2217,77 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "KnowledgeMatch": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "End"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Title"
+          },
+          "excerpt": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Excerpt"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "record_id",
+          "version",
+          "start",
+          "end",
+          "title",
+          "excerpt"
+        ],
+        "title": "KnowledgeMatch"
+      },
+      "KnowledgeResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "pgvector_chunks",
+              "authorized_literal"
+            ],
+            "title": "Mode"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeMatch"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Matches"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "matches"
+        ],
+        "title": "KnowledgeResponse"
+      },
       "Login": {
         "properties": {
           "username": {
@@ -2366,6 +2534,22 @@
           "evidence"
         ],
         "title": "Reconciliation"
+      },
+      "SearchQuery": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Query"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchQuery"
       },
       "SecretInput": {
         "properties": {

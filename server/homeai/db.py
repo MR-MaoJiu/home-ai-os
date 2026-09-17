@@ -261,3 +261,14 @@ class SyncReceipt(Owned, Base):
     batch_id: Mapped[str] = mapped_column(String)
     request_hash: Mapped[str] = mapped_column(String)
     payload: Mapped[str] = mapped_column(Text)
+
+
+class KnowledgeChunk(Owned, Base):
+    __tablename__ = 'knowledge_chunks'
+    __table_args__ = (UniqueConstraint('record_id', 'version', 'model', 'position'),)
+    record_id: Mapped[str] = mapped_column(String, index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    model: Mapped[str] = mapped_column(String)
+    position: Mapped[int] = mapped_column(Integer)
+    start: Mapped[int] = mapped_column(Integer)
+    end: Mapped[int] = mapped_column(Integer)

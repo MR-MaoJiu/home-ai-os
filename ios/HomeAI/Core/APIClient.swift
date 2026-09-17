@@ -93,7 +93,7 @@ actor APIClient {
         if persistConnection { try DeviceIdentity.save(JSONEncoder().encode(connection), name: "connection") }
     }
 
-    func request(_ method: String, _ path: String, body: Data? = nil, expectedNamespace: String? = nil) async throws -> Data {
+    func request(_ method: String, _ path: String, body: Data? = nil, expectedNamespace: String? = nil, contentType: String = "application/json") async throws -> Data {
         if let expectedNamespace {
             guard let saved = connection, let device = saved.deviceID,
                   DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":" + device).utf8)) == expectedNamespace else {
@@ -105,9 +105,23 @@ actor APIClient {
         if saved.expiresAt.timeIntervalSinceNow < 60 && path != "/api/v1/session/renew" {
             saved = try await renewalGate.withPermit { try await self.renewIfNeeded(generation: started) }
         }
-        let data = try await send(method, path, body: body, token: saved.token, base: base, session: session, expectedGeneration: started)
+        let data = try await send(method, path, body: body, token: saved.token, base: base, session: session, expectedGeneration: started, contentType: contentType)
         guard started == generation else { throw APIError.message("连接已切换，请重试") }
         return data
+    }
+
+    func uploadDocument(name: String, contents: Data) async throws -> String {
+        guard contents.count <= 20 * 1024 * 1024 else { throw APIError.message("文件超过 20 MB") }
+        let namespace = try await syncNamespace()
+        let boundary = "HomeAI-" + UUID().uuidString
+        let filename = String((name as NSString).lastPathComponent.prefix(200)).replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
+        var body = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8)
+        body.append(contents)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        struct Identifier: Decodable { let id: String }
+        let record = try JSONDecoder().decode(Identifier.self, from: await request("POST", "/api/v1/files", body: body, expectedNamespace: namespace, contentType: "multipart/form-data; boundary=\(boundary)"))
+        let task = try JSONDecoder().decode(Identifier.self, from: await request("POST", "/api/v1/files/\(record.id)/parse", expectedNamespace: namespace))
+        return task.id
     }
 
     private func renewIfNeeded(generation started: UUID) async throws -> Connection {
@@ -124,7 +138,7 @@ actor APIClient {
         return saved
     }
 
-    private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession, expectedGeneration: UUID) async throws -> Data {
+    private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession, expectedGeneration: UUID, contentType: String = "application/json") async throws -> Data {
         guard let url = URL(string: path, relativeTo: base) else { throw APIError.message("无效请求地址") }
         let timestamp = String(Date().timeIntervalSince1970)
         let nonce = UUID().uuidString
@@ -133,7 +147,7 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         request.setValue(timestamp, forHTTPHeaderField: "X-HomeAI-Time")
         request.setValue(nonce, forHTTPHeaderField: "X-HomeAI-Nonce")

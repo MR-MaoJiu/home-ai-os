@@ -10,6 +10,7 @@ final class AppState {
     var backgroundSyncStatus = ""
     private var backgroundRun: (UUID, Task<Void, Never>)?
     var connected = false
+    var connectionRevision = UUID()
     var error: String?
     var busy = false
     var activity: [ActivityEntry] = []
@@ -101,6 +102,7 @@ struct DataEntry: Codable, Identifiable, Sendable {
     let id: String
     let kind: String
     let sensitivity: String
+    let version: Int?
     let payload: [String: JSONValue]
     var title: String { payload["title"]?.description ?? payload["name"]?.description ?? kind }
 }

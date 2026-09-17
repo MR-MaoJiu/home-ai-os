@@ -79,6 +79,8 @@ async def _run_step(app, task_id, user_id=None):
         db.commit()
         dispatched = False
         try:
+            from .result_access import check_dependencies, capture_result_dependencies
+            check_dependencies(db, actor, body)
             step_body = steps[step_number] if steps else body
             capability = step_body.get("capability") or "model.generate@v1"
             risk, effect = CAPABILITIES[capability]
@@ -88,6 +90,7 @@ async def _run_step(app, task_id, user_id=None):
                 records = [read_record(db, actor, rid) for rid in body["record_ids"]]
                 if any(r.sensitivity == "SECRET" for r in records):
                     raise HTTPException(403, "秘密不能进入任何模型")
+                body.setdefault('_record_dependencies', {}).update({r.id: r.version for r in records})
                 context = [serialize(r, app.vault)["payload"] for r in records]
                 message = body["message"]
                 if steps:
@@ -158,6 +161,10 @@ async def _run_step(app, task_id, user_id=None):
                 kind = {"calendar.create@v1": "calendar.event", "reminder.create@v1": "reminder.item", "memory.commit@v1": "memory.fact"}[capability]
                 record = ingest(db, actor, DataRecord(source="core", source_id=invocation.id, kind=kind, version=1, payload=args), app.vault)
                 result = {"record_id": record.id, "status": "stored", "device_sync": "pending"}
+            elif capability == "knowledge.search@v1":
+                from .knowledge import search as search_documents
+                async with asyncio.timeout(min(body.get("step_timeout_seconds", 120), max(0.001, task.deadline - now()))):
+                    result = await search_documents(app, db, actor, args.get("query", ""))
             elif capability in {"memory.search@v1", "calendar.search@v1"}:
                 from .data import accessible
                 query = str(args.get("query", ""))
@@ -217,6 +224,8 @@ async def _run_step(app, task_id, user_id=None):
             db.refresh(device)
             for referenced_id in body.get("record_ids", []):
                 read_record(db, actor, referenced_id)
+            capture_result_dependencies(db, actor, body, capability, result)
+            task.request = app.vault.seal(body, user.id + ':task:' + task.id)
             invocation.result = app.vault.seal(result, user.id + ":invocation-result:" + invocation.id)
             invocation.status = "SUCCEEDED"
             task.status = "CANCELED" if task.cancel_requested or device.revoked else ("RECEIVED" if body.get("_agent") or (steps and step_number + 1 < len(steps)) else "SUCCEEDED")

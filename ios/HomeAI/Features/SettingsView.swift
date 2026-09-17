@@ -31,6 +31,7 @@ struct SettingsView: View {
                     state.automations = []
                     state.syncStatus = ""
                     state.connected = true
+                    state.connectionRevision = UUID()
                     token = ""
                 } } }.disabled(state.busy)
             }

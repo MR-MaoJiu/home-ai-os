@@ -3,6 +3,7 @@ from fastapi import HTTPException
 
 # 风险完全由核心注册表定义，Provider 不得通过 Manifest 降级。
 CAPABILITIES = {
+    "knowledge.search@v1": (1, False),
     "memory.search@v1": (1, False), "memory.commit@v1": (2, True),
     "model.generate@v1": (1, False), "model.embed@v1": (1, False), "model.rerank@v1": (1, False),
     "document.parse@v1": (1, False), "speech.transcribe@v1": (1, False), "speech.synthesize@v1": (1, False),

@@ -185,7 +185,27 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
         if len(content) > settings.max_upload_bytes:
             raise HTTPException(413, "附件超过限制")
         with app.state.db() as db:
-            record = ingest(db, actor, DataRecord(source="files", source_id=digest(content), kind="document.file", version=1, payload={"name": Path(file.filename or "附件").name, "size": len(content), "sha256": digest(content)}), v)
+            from .sync_order import lock_changes
+            scope(db, actor.user_id, actor.household_id)
+            lock_changes(db)
+            identifier = digest(content)
+            existing = db.scalar(select(Record).where(Record.owner_id == actor.user_id, Record.source == "files", Record.source_id == identifier).with_for_update())
+            version, sensitivity, cloud_policy = 1, "PRIVATE", "LOCAL_ONLY"
+            metadata = {"name": Path(file.filename or "附件").name, "size": len(content), "sha256": identifier}
+            if existing:
+                if existing.deleted: raise HTTPException(409, "已删除来源不能自动恢复")
+                previous = serialize(existing, v)['payload']
+                sensitivity, cloud_policy = existing.sensitivity, existing.cloud_policy
+                if existing.kind == 'document.import':
+                    try: legacy = base64.b64decode(previous.get('content_base64', ''), validate=True)
+                    except Exception: raise HTTPException(409, '旧文件内容无效，不能自动迁移') from None
+                    if digest(legacy) != identifier: raise HTTPException(409, '旧文件来源与内容不一致')
+                    version = existing.version + 1
+                elif existing.kind == 'document.file':
+                    metadata['name'] = previous['name'] if isinstance(previous.get('name'), str) else metadata['name']
+                    version = existing.version if metadata == previous else existing.version + 1
+                else: raise HTTPException(409, '来源标识已用于其他数据类型')
+            record = ingest(db, actor, DataRecord(source="files", source_id=identifier, kind="document.file", version=version, sensitivity=sensitivity, cloud_policy=cloud_policy, payload=metadata), v)
             directory = settings.state_dir / "blobs"
             directory.mkdir(parents=True, exist_ok=True)
             target = directory / record.id
@@ -193,6 +213,27 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             target.chmod(0o600)
             db.commit()
             return serialize(record, v)
+
+    @app.get("/api/v1/files/{record_id}/content")
+    def file_content(record_id: str, actor: Actor = auth):
+        from fastapi.responses import Response
+        from urllib.parse import quote
+        with app.state.db() as db:
+            record = read_record(db, actor, record_id)
+            metadata = serialize(record, v)['payload']
+            if record.kind == 'document.import':
+                encoded = metadata.get('content_base64', '')
+            elif record.kind == 'document.file':
+                path = settings.state_dir / 'blobs' / record.id
+                if not path.is_file() or path.is_symlink(): raise HTTPException(404, '文件不可用')
+                encoded = v.open(path.read_text(), record.owner_id + ':blob:' + record.id)
+            else: raise HTTPException(422, '此记录不是文件')
+            try: contents = base64.b64decode(encoded, validate=True)
+            except Exception: raise HTTPException(422, '文件内容无效') from None
+            if len(contents) > settings.max_upload_bytes: raise HTTPException(413, '文件超过限制')
+            filename = metadata.get('name', 'attachment')
+            filename = filename[:200] if isinstance(filename, str) else 'attachment'
+            return Response(contents, media_type='application/octet-stream', headers={'Content-Disposition': "attachment; filename*=UTF-8''" + quote(filename, safe=''), 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
 
     @app.post("/api/v1/files/{record_id}/parse", status_code=202)
     def parse_file(record_id: str, actor: Actor = auth):
@@ -204,7 +245,12 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             prefix = "parse:" + record.id + ":" + str(record.version)
             previous = db.scalar(select(Task).where(Task.owner_id == actor.user_id, Task.idempotency_key.startswith(prefix + ":")).order_by(Task.created_at.desc()).limit(1))
             if previous and previous.status not in {"FAILED", "CANCELED"}:
-                return {"id": previous.id, "status": previous.status}
+                reusable = True
+                if previous.status == 'SUCCEEDED':
+                    from .result_access import check_dependencies
+                    try: check_dependencies(db, actor, v.open(previous.request, actor.user_id + ':task:' + previous.id))
+                    except HTTPException: reusable = False
+                if reusable: return {"id": previous.id, "status": previous.status}
             task = submit(db, actor, TaskRequest(idempotency_key=prefix + ":" + uid(), capability="document.parse@v1", record_ids=[record.id], arguments={"record_id": record.id}, step_timeout_seconds=300), v)
             db.commit()
             return {"id": task.id, "status": task.status}
@@ -216,14 +262,18 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             db.commit()
             return {"id": task.id, "status": task.status}
 
-    def task_view(task):
+    def task_view(task, db, actor):
         payload = v.open(task.request, task.owner_id + ":task:" + task.id)
-        return {"id": task.id, "status": task.status, "error": task.error, "result": v.open(task.result, task.owner_id + ":task-result:" + task.id) if task.result else None, "execution": {"agent": bool(payload.get("_agent")), "planned_steps": len(payload.get("steps", [])), "max_steps": payload.get("max_steps", 8), "model_rounds": payload.get("_model_rounds", 0), "model_token_charge": payload.get("_model_token_charge", 0), "max_model_tokens": payload.get("max_model_tokens"), "deadline": task.deadline}}
+        from .result_access import check_dependencies
+        redacted = False
+        try: check_dependencies(db, actor, payload)
+        except HTTPException: redacted = True
+        return {"id": task.id, "status": task.status, "error": "来源授权或版本已变化，旧结果已隐藏" if redacted else task.error, "result_redacted": redacted, "result": v.open(task.result, task.owner_id + ":task-result:" + task.id) if task.result and not redacted else None, "execution": {"agent": bool(payload.get("_agent")), "planned_steps": len(payload.get("steps", [])), "max_steps": payload.get("max_steps", 8), "model_rounds": payload.get("_model_rounds", 0), "model_token_charge": payload.get("_model_token_charge", 0), "max_model_tokens": payload.get("max_model_tokens"), "deadline": task.deadline}}
 
     @app.get("/api/v1/tasks/{task_id}")
     def get_task(task_id: str, actor: Actor = auth):
         with app.state.db() as db:
-            return task_view(own(db, Task, task_id, actor))
+            return task_view(own(db, Task, task_id, actor), db, actor)
 
     @app.post("/api/v1/tasks/{task_id}/cancel")
     def cancel(task_id: str, actor: Actor = auth):
@@ -233,7 +283,7 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             if task.status in {"RECEIVED", "AWAITING_APPROVAL", "APPROVED"}:
                 task.status = "CANCELED"
             db.commit()
-            return task_view(task)
+            return task_view(task, db, actor)
 
     @app.get("/api/v1/approvals")
     def approvals(actor: Actor = auth):
@@ -243,6 +293,10 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             result = []
             for row in rows:
                 inv = db.get(Invocation, row.invocation_id)
+                task = db.get(Task, inv.task_id)
+                from .result_access import check_dependencies
+                try: check_dependencies(db, actor, v.open(task.request, actor.user_id + ':task:' + task.id))
+                except HTTPException: continue
                 result.append({"id": row.id, "capability": inv.capability, "arguments": v.open(inv.arguments, actor.user_id + ":invocation:" + inv.id), "expires_at": row.expires_at})
             return result
 
@@ -258,6 +312,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
                 raise HTTPException(409, "审批已处理或过期")
             if task.status != "AWAITING_APPROVAL" or task.cancel_requested:
                 raise HTTPException(409, "任务不再等待审批")
+            if body.decision == "APPROVED":
+                from .result_access import check_dependencies
+                check_dependencies(db, actor, v.open(task.request, actor.user_id + ':task:' + task.id))
             approval.decision = body.decision
             task.status = "APPROVED" if body.decision == "APPROVED" else "CANCELED"
             if body.decision == "REJECTED":
@@ -356,6 +413,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
 
     from .device_sync import router as device_sync_router
     app.include_router(device_sync_router)
+
+    from .knowledge import router as knowledge_router
+    app.include_router(knowledge_router)
 
     from .memory import router as memory_router
     app.include_router(memory_router)

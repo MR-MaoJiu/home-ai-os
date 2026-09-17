@@ -152,7 +152,7 @@ sequenceDiagram
 
 规划轮次最多为 `max_steps + 2`，工具预算耗尽后只允许一次无工具总结。`max_model_tokens` 默认 32768，发请求前按上下文 UTF-8 字节数、协议余量和输出上限保守预留，拿到有效 usage 后才返还差额；请求失败或进程退出时不擅自返还未知消耗。`GET /api/v1/tasks/{id}` 的 `execution` 展示轮次、已规划步骤与已计入的 Token 数。
 
-当前自主工具清单为记忆检索、日程检索、家庭服务器提醒创建和家居状态读取。自主规划仅使用本地模型，不自动切换云端。工具返回的记录 ID 会回规范账本重新鉴权，已删除或撤权的结果不能继续送给模型；秘密密级仍拒绝进入模型。云端金额预算、更多工具、条件分支及补偿尚待完成。
+当前自主工具清单为文档检索、记忆检索、日程检索、家庭服务器提醒创建和家居状态读取。自主规划仅使用本地模型，不自动切换云端。工具返回的记录 ID 会回规范账本重新鉴权，已删除或撤权的结果不能继续送给模型；秘密密级仍拒绝进入模型。云端金额预算、更多工具、条件分支及补偿尚待完成。
 
 ```json
 {
@@ -451,6 +451,42 @@ HOMEAI_DOCLING_TEST=1 .venv/bin/pytest -q server/tests/test_docling_live.py
 测试生成有效文档文件并调用真实 Docling HTTP 服务，不返回固定 Markdown。完整回归可以同时打开 `HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_EMBEDDING_TEST=1 HOMEAI_DOCLING_TEST=1`。
 
 参考：[Docling 离线与模型预下载](https://docling-project.github.io/docling/usage/advanced_options/)、[Pipeline 配置](https://docling-project.github.io/docling/reference/pipeline_options/)。
+
+## 文档检索与有依据的回答
+
+文档解析完成后，独立索引 worker 将 `document.parsed` 正文分块并调用真实本地 Embedding。块按字符与 UTF-8 字节预算限制并保留重叠；数据库只保存范围、版本、模型签名和向量，不再复制明文正文。模型或分块策略变化后重建，秘密密级及检测到秘密模式的正文不进入索引。
+
+```mermaid
+flowchart LR
+    File[原文件] --> Parse[真实 Docling 解析]
+    Parse --> Ledger[加密规范正文]
+    Ledger --> Index[分块 + 本地 Embedding]
+    Index --> Vector[(pgvector + RLS)]
+    Question[用户问题] --> Search[knowledge.search]
+    Vector --> Search
+    Search --> Check[回到账本检查权限与版本]
+    Check --> Excerpt[有界正文片段]
+    Excerpt --> Agent[本地 Agent 回答]
+    Agent --> Sources[Core 生成来源列表]
+```
+
+Agent 新增 `search_documents` 工具，检索结果给出最多五个有界片段。真实向量检索返回 `pgvector_chunks`；索引未就绪或不可用时可降级为授权范围内的文字匹配，并明确标记 `authorized_literal`。文字降级最多扫描 1000 条文档，不能当作完整语义索引的等价替代；大规模吞吐与召回质量仍需验收。
+
+接口为 `POST /api/v1/knowledge/search`，请求体 `{"query":"问题"}`，避免查询正文出现在 URL 日志中；`POST /api/v1/knowledge/rebuild` 只重建自己的派生索引。正文记录按自身授权控制，共享原文件元数据不等同于自动共享解析正文。检索前、回读片段时和模型调用后均检查当前权限与来源版本。
+
+任务保存来源版本依赖。授权撤回、删除或版本变化后，旧任务结果和步骤不再返回原片段，审批与重试也不能继续使用失效依据。模型输出之外的 `sources` 由 Core 根据实际读到的规范记录生成；iOS 展示可打开的来源，点击时再次从服务器读取授权内容，来源更新时明确提示当前版本不同。
+
+iOS 文件导入现在实际上传加密附件并创建解析任务，不再仅保存一段 Base64 数据。旧 `document.import` 文件再次上传时，会校验内容并保留记录 ID 和已有密级进行版本迁移；删除墓碑不自动恢复。`GET /api/v1/files/{id}/content` 提供授权原文件下载，禁止浏览器缓存及 MIME 嗅探。
+
+当前检索采用精确向量排序，并非已经完成大规模 ANN/Reranker 优化。解析成功也不代表所有分块立即完成；索引由 worker 持续推进。升级需要执行迁移 `0005` 并重启 API、任务与索引 worker。
+
+验收命令：
+
+```sh
+HOMEAI_KNOWLEDGE_TEST=1 HOMEAI_MODEL_TEST=1 .venv/bin/pytest -q server/tests/test_knowledge_live.py
+```
+
+真实测试贯通 Docling、Embedding、PostgreSQL 和 4B Agent，要求回答源文档时间、带规范来源、共享可见且撤权后任务缓存隐藏。原生测试使用 `create_sync_test_fixture.py --with-documents`，验证实际签名 Multipart 上传、解析和向量检索，不替换服务响应。
 
 ## 本地语音转写（whisper.cpp）
 

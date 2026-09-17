@@ -74,10 +74,13 @@ struct DataView: View {
                 let url = try result.get()
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let bytes = try Data(contentsOf: url)
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                let bytes = try handle.read(upToCount: 20 * 1024 * 1024 + 1) ?? Data()
                 guard bytes.count <= 20 * 1024 * 1024 else { throw APIClient.APIError.message("文件超过 20 MB") }
-                try await ConnectorSync(api: state.api).uploadRecord(source: "files", sourceID: DeviceIdentity.hash(bytes), kind: "document.import", payload: ["name": .string(url.lastPathComponent), "content_base64": .string(bytes.base64EncodedString())])
+                let task = try await state.api.uploadDocument(name: url.lastPathComponent, contents: bytes)
                 try await state.loadData()
+                state.syncStatus = "文档解析已提交（\(task.prefix(8))），完成后可直接在 AI 页面提问"
             } }
         }
         .task { await reload() }.refreshable { await reload() }
