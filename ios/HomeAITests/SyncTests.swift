@@ -102,6 +102,17 @@ final class SyncTests: XCTestCase {
         try reminderStore.saveCalendar(testCalendar, commit: true)
         defer { try? reminderStore.removeCalendar(testCalendar, commit: true) }
         let reminderBridge = SystemReminderSync()
+        do {
+            _ = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier,
+                expectedNamespace: intentNamespace, expectedSourceID: "changed-account", allowCloudExport: true, store: reminderStore)
+            XCTFail("目标账号变化后必须拒绝旧确认")
+        } catch APIClient.APIError.message { }
+        do {
+            _ = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier,
+                expectedNamespace: intentNamespace, expectedSourceID: testCalendar.source.sourceIdentifier,
+                expectedSourceType: EKSourceType.calDAV.rawValue, allowCloudExport: true, store: reminderStore)
+            XCTFail("账号类型变化后必须拒绝旧确认")
+        } catch APIClient.APIError.message { }
         let exported = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)
         XCTAssertEqual(exported.created, 1)
         let repeated = try await reminderBridge.synchronize(records: [reminder], api: api, calendarID: testCalendar.calendarIdentifier, expectedNamespace: intentNamespace, store: reminderStore)

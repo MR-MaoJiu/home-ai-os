@@ -1,6 +1,18 @@
 import Foundation
 import EventKit
 
+struct ReminderSyncPreview: Sendable {
+    let namespace: String
+    let calendarID: String
+    let sourceID: String
+    let sourceType: Int
+    let calendarName: String
+    let records: [DataEntry]
+    func matches(namespace: String, calendarID: String) -> Bool {
+        self.namespace == namespace && self.calendarID == calendarID
+    }
+}
+
 /// 仅处理本设备明确选择的列表与当前成员自己的 Core 提醒。
 @MainActor
 final class SystemReminderSync {
@@ -29,11 +41,11 @@ final class SystemReminderSync {
         URL(string: "\(markerScheme)://\(namespace)/\(recordID)")!
     }
 
-    func synchronize(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String? = nil, allowCloudExport: Bool = false, store: EKEventStore = EKEventStore()) async throws -> Report {
+    func synchronize(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String? = nil, expectedSourceID: String? = nil, expectedSourceType: Int? = nil, allowCloudExport: Bool = false, store: EKEventStore = EKEventStore()) async throws -> Report {
         try await gate.acquire()
         do {
             try Task.checkCancellation()
-            let result = try await run(records: records, api: api, calendarID: calendarID, expectedNamespace: expectedNamespace, allowCloudExport: allowCloudExport, store: store)
+            let result = try await run(records: records, api: api, calendarID: calendarID, expectedNamespace: expectedNamespace, expectedSourceID: expectedSourceID, expectedSourceType: expectedSourceType, allowCloudExport: allowCloudExport, store: store)
             await gate.release()
             return result
         } catch {
@@ -42,10 +54,22 @@ final class SystemReminderSync {
         }
     }
 
-    private func run(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String?, allowCloudExport: Bool, store: EKEventStore) async throws -> Report {
+    private func run(records: [DataEntry], api: APIClient, calendarID: String, expectedNamespace: String?, expectedSourceID: String?, expectedSourceType: Int?, allowCloudExport: Bool, store: EKEventStore) async throws -> Report {
         guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess,
               let calendar = store.calendar(withIdentifier: calendarID), calendar.allowedEntityTypes.contains(.reminder), calendar.allowsContentModifications else {
             throw APIClient.APIError.message("系统提醒权限或目标列表不可用，未进行写入")
+        }
+        if let expectedSourceID, calendar.source.sourceIdentifier != expectedSourceID { throw APIClient.APIError.message("目标账号已变化，请重新确认") }
+        let originalSource = calendar.source.sourceIdentifier
+        let originalType = calendar.source.sourceType.rawValue
+        if let expectedSourceType, expectedSourceType != originalType { throw APIClient.APIError.message("目标账号类型已变化，请重新确认") }
+        func currentCalendar() throws -> EKCalendar {
+            guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess,
+                  let current = store.calendar(withIdentifier: calendarID), current.allowsContentModifications,
+                  current.source.sourceIdentifier == originalSource, current.source.sourceType.rawValue == originalType else {
+                throw APIClient.APIError.message("系统列表权限或账号发生变化，停止同步")
+            }
+            return current
         }
         let namespace = try await api.syncNamespace()
         if let expectedNamespace, expectedNamespace != namespace { throw APIClient.APIError.message("配对已切换，请重新预览") }
@@ -112,6 +136,7 @@ final class SystemReminderSync {
                 report.conflicts += 1
                 continue
             }
+            _ = try currentCalendar()
             if mergedTitle != title || mergedCompleted != completed {
                 var payload = remote.payload
                 payload["title"] = .string(mergedTitle)
@@ -126,7 +151,7 @@ final class SystemReminderSync {
             let marker = Self.marker(namespace: resourceNamespace, recordID: remote.id)
             let needsWrite = matches.isEmpty || item.title != mergedTitle || item.isCompleted != mergedCompleted || item.url != marker
             if needsWrite {
-                item.calendar = calendar
+                item.calendar = try currentCalendar()
                 item.title = mergedTitle
                 item.isCompleted = mergedCompleted
                 item.url = marker
@@ -156,6 +181,7 @@ final class SystemReminderSync {
                       item.title == receipt.title, item.isCompleted == receipt.completed,
                       (item.notes ?? "").isEmpty, item.dueDateComponents == nil, item.startDateComponents == nil,
                       item.alarms?.isEmpty != false else { report.conflicts += 1; continue }
+                _ = try currentCalendar()
                 try store.remove(item, commit: true)
                 report.removed += 1
             }
