@@ -57,6 +57,18 @@ final class PinnedSession: NSObject, URLSessionTaskDelegate, @unchecked Sendable
         self.keyFingerprint = keyFingerprint
     }
 
+    static func pinnedCertificateIsValid(_ certificate: SecCertificate, at date: Date = Date()) -> Bool {
+        var checkedTrust: SecTrust?
+        guard SecTrustCreateWithCertificates([certificate] as CFArray, SecPolicyCreateBasicX509(), &checkedTrust) == errSecSuccess,
+              let checkedTrust else { return false }
+        // 仅验证已经匹配固定值的证书；信任锚只存在于本次校验，不修改系统信任。
+        SecTrustSetAnchorCertificates(checkedTrust, [certificate] as CFArray)
+        SecTrustSetAnchorCertificatesOnly(checkedTrust, true)
+        SecTrustSetNetworkFetchAllowed(checkedTrust, false)
+        SecTrustSetVerifyDate(checkedTrust, date as CFDate)
+        return SecTrustEvaluateWithError(checkedTrust, nil)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
         // 不向重定向目标转发会话与设备签名，避免跨来源或降级到 HTTP。
         completionHandler(nil)
@@ -74,7 +86,7 @@ final class PinnedSession: NSObject, URLSessionTaskDelegate, @unchecked Sendable
         let currentKey = DeviceIdentity.hash(rawKey)
         let exactCertificate = DeviceIdentity.hash(SecCertificateCopyData(certificate) as Data) == fingerprint
         let stableKey = keyFingerprint == currentKey
-        guard exactCertificate || stableKey else {
+        guard (exactCertificate || stableKey) && Self.pinnedCertificateIsValid(certificate) else {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }

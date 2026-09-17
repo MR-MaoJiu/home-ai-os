@@ -35,4 +35,14 @@ targets:
       properties:
         com.apple.developer.healthkit: true
     scheme:
-      testTargets: []
+      testTargets: [HomeAITests]
+
+  HomeAITests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [HomeAITests]
+    dependencies:
+      - target: HomeAI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.homeai.ios.tests

@@ -31,3 +31,13 @@ jobs:
       - run: brew install xcodegen
       - run: xcodegen generate --spec ios/project.yml
       - run: xcodebuild -project ios/HomeAI.xcodeproj -scheme HomeAI -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Select simulator
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, subprocess
+          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))['devices']
+          candidates = [d for runtime, entries in devices.items() if 'iOS-' in runtime and int(runtime.split('iOS-')[1].split('-')[0]) >= 18 for d in entries if d['name'].startswith('iPhone') and d.get('isAvailable')]
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('HOMEAI_SIMULATOR_ID=' + candidates[0]['udid'] + '\n')
+          PYCODE
+      - run: xcodebuild -project ios/HomeAI.xcodeproj -scheme HomeAI -destination "platform=iOS Simulator,id=$HOMEAI_SIMULATOR_ID" CODE_SIGNING_ALLOWED=NO test
