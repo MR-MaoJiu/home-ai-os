@@ -2476,6 +2476,73 @@
         ],
         "title": "PairRequest"
       },
+      "Predicate": {
+        "properties": {
+          "step": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 0.0,
+            "title": "Step"
+          },
+          "path": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Path"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "exists",
+              "not_exists",
+              "not_empty",
+              "equals",
+              "not_equals",
+              "gt",
+              "gte",
+              "lt",
+              "lte"
+            ],
+            "title": "Operator"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "step",
+          "operator"
+        ],
+        "title": "Predicate"
+      },
       "ProviderManifest": {
         "properties": {
           "schema_version": {
@@ -2770,6 +2837,16 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Arguments"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -2778,6 +2855,34 @@
           "capability"
         ],
         "title": "Step"
+      },
+      "StepCondition": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ],
+            "title": "Mode",
+            "default": "all"
+          },
+          "predicates": {
+            "items": {
+              "$ref": "#/components/schemas/Predicate"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Predicates"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "predicates"
+        ],
+        "title": "StepCondition"
       },
       "SyncBatch": {
         "properties": {

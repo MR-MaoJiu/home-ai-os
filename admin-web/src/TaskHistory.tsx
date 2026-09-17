@@ -36,7 +36,7 @@ export function TaskHistory({tasks,onChanged}:{tasks:Task[]|null;onChanged:()=>v
    <button disabled={busy} onClick={()=>inspect(selected)}>刷新步骤</button>
    {selected.execution?.agent&&<p>本地 Agent · 已规划 {selected.execution.planned_steps}/{selected.execution.max_steps} 步 · 模型 {selected.execution.model_rounds} 轮 · Token 计入 {selected.execution.model_token_charge}/{selected.execution.max_model_tokens}（包含未知消耗的保守预留）</p>}
    {['RECEIVED','APPROVED','AWAITING_APPROVAL','EXECUTING'].includes(selected.status)&&<button disabled={busy} onClick={cancel}>取消后续执行</button>}
-   {steps.map(step=><details key={step.id}><summary>步骤 {step.step+1} · {step.capability} · {step.status}</summary><pre>{JSON.stringify(step.result,null,2)}</pre></details>)}
+   {steps.map(step=><details key={step.id}><summary>步骤 {step.step+1} · {step.capability} · {step.status==='SKIPPED'?'条件不满足，已跳过':step.status}</summary>{step.status==='SKIPPED'?<p>此步骤没有调用工具，也没有生成执行结果。</p>:<pre>{JSON.stringify(step.result,null,2)}</pre>}</details>)}
    {selected.status==='NEEDS_RECONCILIATION'&&<form onSubmit={reconcile}><h3>外部结果人工核对</h3><p>请先查阅外部系统记录。确认未执行后，高风险操作仍需重新审批；过期或已取消的任务不能重新执行。</p>
     <label>核对结论<select name="decision"><option value="ABORT">停止，不再继续</option><option value="COMPLETED">外部已完成，记录结果</option><option value="NOT_EXECUTED">确定未执行，重新进入执行流程</option></select></label>
     <label>核对依据<textarea name="evidence" minLength={10} maxLength={2000} required placeholder="记录外部系统中的状态与核对依据，不要填入密码或 Token"/></label>

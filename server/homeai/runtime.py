@@ -15,6 +15,10 @@ from .privacy import ensure_model_safe, cloud_context, redact
 def submit(db, actor, request, vault, *, automation_chain=None, record_dependencies=None):
     scope(db, actor.user_id, actor.household_id)
     payload = request.model_dump()
+    # 新增可选条件不改变旧版无条件工作流的幂等摘要。
+    for step in payload.get("steps", []):
+        if step.get("when") is None:
+            step.pop("when", None)
     request_hash = digest(canonical(payload))
     old = db.scalar(select(Task).where(Task.owner_id == actor.user_id, Task.idempotency_key == request.idempotency_key))
     if old:
@@ -61,7 +65,8 @@ async def _run_step(app, task_id, user_id=None):
         steps = body.get("steps") or []
         invocations = list(db.scalars(select(Invocation).where(Invocation.task_id == task.id).order_by(Invocation.step)))
         completed = {item.step: item for item in invocations if item.status == "SUCCEEDED"}
-        step_number = next((index for index in range(len(steps) or 1) if index not in completed), None)
+        finished = {item.step for item in invocations if item.status in {"SUCCEEDED", "SKIPPED"}}
+        step_number = next((index for index in range(len(steps) or 1) if index not in finished), None)
         if step_number is None:
             task.status = "SUCCEEDED"
             db.commit()
@@ -89,6 +94,27 @@ async def _run_step(app, task_id, user_id=None):
             step_body = steps[step_number] if steps else body
             capability = step_body.get("capability") or "model.generate@v1"
             risk, effect = CAPABILITIES[capability]
+            if step_body.get("when"):
+                from .conditions import evaluate
+                if not evaluate(step_body["when"], completed, app.vault, actor.user_id):
+                    if invocation:
+                        raise HTTPException(409, "已开始的步骤不能变为条件跳过")
+                    invocation = Invocation(id=uid(), household_id=user.household_id, owner_id=user.id,
+                        task_id=task.id, step=step_number, capability=capability,
+                        arguments_hash=digest(canonical(step_body)), arguments="", status="SKIPPED")
+                    invocation.arguments = app.vault.seal(step_body, user.id + ":invocation:" + invocation.id)
+                    db.add(invocation)
+                    db.refresh(task)
+                    db.refresh(device)
+                    task.status = "CANCELED" if task.cancel_requested or device.revoked else ("RECEIVED" if step_number + 1 < len(steps) else "SUCCEEDED")
+                    if task.deadline <= now() and task.status != "CANCELED":
+                        task.status, task.error = "FAILED", "任务截止时间已到"
+                    task.result = app.vault.seal({"status": "skipped", "step": step_number,
+                        "reason": "condition_not_met"}, user.id + ":task-result:" + task.id)
+                    audit(db, actor, "capability.skipped", invocation.id, {"capability": capability})
+                    emit(db, actor, "task.updated", task.id)
+                    db.commit()
+                    return
             args = resolve_arguments(step_body.get("arguments", {}), completed, app.vault, actor.user_id)
             planned_response = None
             if capability == "model.generate@v1":

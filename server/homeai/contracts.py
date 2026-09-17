@@ -1,5 +1,5 @@
 from typing import Literal, Any
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StrictBool, StrictFloat, field_validator, model_validator
 
 
 class Contract(BaseModel):
@@ -28,9 +28,41 @@ class SyncBatch(Contract):
     records: list[DataRecord] = Field(max_length=100)
 
 
+class Predicate(Contract):
+    step: int = Field(ge=0, le=15, strict=True)
+    path: list[StrictStr | StrictInt] = Field(default_factory=list, max_length=20)
+    operator: Literal["exists", "not_exists", "not_empty", "equals", "not_equals", "gt", "gte", "lt", "lte"]
+    value: StrictStr | StrictInt | StrictFloat | StrictBool | None = None
+
+    @model_validator(mode="after")
+    def validate_comparison(self):
+        import math
+        if isinstance(self.value, float) and not math.isfinite(self.value):
+            raise ValueError("比较值必须为有限数值")
+        if isinstance(self.value, str) and len(self.value) > 2000:
+            raise ValueError("比较文本过长")
+        if self.operator in {"gt", "gte", "lt", "lte"} and type(self.value) not in {int, float}:
+            raise ValueError("大小比较只接受数值")
+        if any(type(key) is int and key < 0 for key in self.path):
+            raise ValueError("数组路径不能使用负下标")
+        return self
+
+
+class StepCondition(Contract):
+    mode: Literal["all", "any"] = "all"
+    predicates: list[Predicate] = Field(min_length=1, max_length=16)
+
+
+def validate_conditions(steps):
+    for index, step in enumerate(steps):
+        if step.when and any(predicate.step >= index for predicate in step.when.predicates):
+            raise ValueError("条件只能引用本工作流中的前序步骤")
+
+
 class Step(Contract):
     capability: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    when: StepCondition | None = None
 
 
 class TaskRequest(Contract):
@@ -54,6 +86,7 @@ class TaskRequest(Contract):
             raise ValueError("多步骤工作流必须使用本地模式且不能同时指定单个能力")
         if len(self.steps) > self.max_steps:
             raise ValueError("工作流超过步骤预算")
+        validate_conditions(self.steps)
         return self
 
 
@@ -64,6 +97,11 @@ class Decision(Contract):
 class Skill(Contract):
     name: str = Field(min_length=1, max_length=100)
     steps: list[Step] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def validate_steps(self):
+        validate_conditions(self.steps)
+        return self
 
 
 class AutomationInput(Contract):
