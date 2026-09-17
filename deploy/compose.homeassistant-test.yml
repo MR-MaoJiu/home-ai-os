@@ -1,0 +1,12 @@
+name: homeai-homeassistant-test
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant@sha256:a1bc133af84ee6505fe2c266d9805b7c75b780dfdc188edfee3b11e8f3cd8efe
+    ports: ["127.0.0.1:58123:8123"]
+    volumes:
+      - ../state/homeassistant-test:/config
+    environment:
+      TZ: Asia/Shanghai
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256

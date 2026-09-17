@@ -138,7 +138,7 @@ async def test_read_retry_budget_against_unreachable_service(workflow):
         socket_probe.bind(('127.0.0.1', 0))
         port = socket_probe.getsockname()[1]
     provider_id = 'a.workflow.' + uuid.uuid4().hex
-    manifest = ProviderManifest(id=provider_id, version='1', adapter='homeassistant', endpoint=f'http://127.0.0.1:{port}', allowed_hosts=['127.0.0.1'], capabilities={'home.states@v1': 'states'})
+    manifest = ProviderManifest(id=provider_id, version='1', adapter='homeassistant', endpoint=f'http://127.0.0.1:{port}', allowed_hosts=['127.0.0.1'], capabilities={'home.states@v1': 'states'}, home_entities=['light.protocol_test'])
     with app.db() as db:
         db.add(Provider(id=provider_id, manifest=manifest.model_dump_json(), enabled=True))
         db.commit()

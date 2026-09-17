@@ -29,7 +29,7 @@
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
-| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、HA、真实外部邮箱账户 |
+| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、家居事件订阅/物理设备、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流 | APNs、后台真机调度验收、App Intent、逐 Token 文本流、真机验收 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
@@ -664,6 +664,39 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
 中文输入由 macOS 系统语音生成，需要本机中文声音和 ffmpeg，仅为测试输入；英文使用固定源码中的 `samples/jfk.wav` 人声样本。测试调用实际转写服务，不替换输出文本。完整系统回归命令可在前述开关基础上再加 `HOMEAI_WHISPER_TEST=1`。
 
 参考：[whisper.cpp 官方服务说明](https://github.com/ggml-org/whisper.cpp/blob/v1.9.3/examples/server/README.md)。
+
+## Home Assistant：实体授权与受控操作
+
+Home Assistant Provider 现在默认不授权任何实体。Manifest 必须显式配置 `home_entities`（最多 50 个、不允许通配符），读取只向这些实体的独立 REST 路径发请求，不先获取全家的所有状态。返回属性经过固定字段投影，不把无关配置、令牌或其他联动实体交给模型。
+
+操作仍需逐次审批，仅开放 `light`、`switch`、`climate` 的开/关与 `climate.set_temperature`（16–30 的有限数值）。不开放门锁、车库门、任意服务调用或设备组广播。需要结合真实接线确认开关用途，不能因为外部系统将危险设备命名为 switch 就推断操作安全。
+
+家居控制审批同时绑定参数与 Provider 配置。实体清单、端点、版本或凭据引用变化后，原审批不能继续执行；发送前重新读取 Provider，配置变化则明确失败。服务返回成功表示 Home Assistant 完成该服务调用，不替代实际物理设备反馈验收。
+
+### 接入自己的实例
+
+先在 Home Assistant 生成适当权限的访问令牌，保存为本机 `0600` 文件，再明确列出授权实体：
+
+```bash
+.venv/bin/python scripts/register_homeassistant.py --user Core成员ID --url https://homeassistant.example.com --token-file state/homeassistant.token --entity light.living_room --entity switch.desk
+```
+
+登记工具只核查服务版本和实体读取，不会切换设备。令牌加密保存到该成员的 Secret，其他成员不能借用。跨机器连接应使用 HTTPS 或受保护 VPN；脚本不会关闭证书验证。旧配置缺少 `home_entities` 时会拒绝读取/操作，需要显式补齐，不能靠升级自动获得全部实体权限。
+
+`home.states@v1` 可用空参数读取授权清单，或用 `entity_ids` 指定其子集。`home.execute@v1` 接受 `domain`、`service`、`entity_id`；温控操作另需 `temperature`。不支持任意附加参数。
+
+### 独立真实服务验收
+
+```bash
+.venv/bin/python scripts/init_homeassistant_test.py
+docker compose -f deploy/compose.homeassistant-test.yml up -d
+.venv/bin/python scripts/authorize_homeassistant_test.py
+HOMEAI_INTEGRATION=1 HOMEAI_HOMEASSISTANT_TEST=1 .venv/bin/pytest -q server/tests/test_homeassistant_live.py
+```
+
+使用固定 Home Assistant `2026.9.2` 镜像摘要、独立配置和仅本机端口 `58123`。初始化只为新建协议验收实例创建账户，并保存私有凭据，不替换已有账户或完成用户的真实家庭配置。辅助模板开关实际调用 Home Assistant 的 input_boolean 服务；没有写死 REST 成功响应或伪造设备状态。
+
+已验证真实状态读取、审批前不动作、批准后状态变化、未授权实体拒绝，以及配置改变使旧审批失效。**这些是 Home Assistant 服务与软件辅助实体的通过证据，不是物理设备验收**。持续事件订阅、重连后的状态对账、真实家居设备和生产隔离仍待完成。API 依据见 [Home Assistant 官方 REST 文档](https://developers.home-assistant.io/docs/api/rest/)。
 
 ## 邮件 Provider：IMAP / SMTP
 

@@ -133,6 +133,16 @@ class ProviderManifest(Contract):
     image_digest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
     secret_id: str | None = None
     allowed_hosts: list[str] = Field(min_length=1)
+    home_entities: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("home_entities")
+    @classmethod
+    def home_entity_ids(cls, values):
+        import re
+        if len(set(values)) != len(values) or any(len(value) > 150 or not re.fullmatch(r"[a-z][a-z0-9_]*\.[a-z0-9_]+", value) for value in values):
+            raise ValueError("家居实体必须是明确且不重复的 domain.entity_id，禁止通配符")
+        return values
+
 
     @field_validator("endpoint")
     @classmethod

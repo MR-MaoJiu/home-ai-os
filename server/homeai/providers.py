@@ -13,7 +13,7 @@ class Registry:
 
     def resolve(self, db, capability, cloud=False):
         matches = []
-        for row in db.scalars(select(Provider).where(Provider.enabled.is_(True)).order_by(Provider.id)):
+        for row in db.scalars(select(Provider).where(Provider.enabled.is_(True)).order_by(Provider.id).execution_options(populate_existing=True)):
             manifest = ProviderManifest.model_validate_json(row.manifest)
             if capability in manifest.capabilities and manifest.cloud == cloud:
                 if manifest.secret_id:
@@ -59,22 +59,26 @@ class Registry:
                     path, payload = "/rerank", {"model": manifest.model, "query": arguments["query"], "documents": arguments["documents"]}
                 r = await client.post(manifest.endpoint + path, json=payload, headers=headers)
             elif manifest.adapter == "homeassistant":
+                from .home_control import validate, project_state
+                validated = validate(manifest, capability, arguments)
                 if capability == "home.states@v1":
-                    r = await client.get(manifest.endpoint + "/api/states", headers=headers)
-                else:
-                    domain, service = arguments.get("domain"), arguments.get("service")
-                    if (domain, service) not in {(d, s) for d in ("light", "switch", "climate") for s in ("turn_on", "turn_off")} | {("climate", "set_temperature")}:
-                        raise HTTPException(403, "未授权的家居操作")
-                    entity = arguments.get("entity_id", "")
-                    if not entity.startswith(domain + ".") or "/" in entity:
-                        raise HTTPException(422, "设备标识无效")
-                    payload = {"entity_id": entity}
-                    if service == "set_temperature":
-                        temperature = float(arguments["temperature"])
-                        if not 16 <= temperature <= 30:
-                            raise HTTPException(422, "温度超出允许范围")
-                        payload["temperature"] = temperature
-                    r = await client.post(manifest.endpoint + f"/api/services/{domain}/{service}", json=payload, headers=headers)
+                    states = []
+                    for entity in validated:
+                        response = await client.get(manifest.endpoint + "/api/states/" + entity)
+                        response.raise_for_status()
+                        if len(response.content) > 256 * 1024:
+                            raise HTTPException(502, "家居状态返回过大")
+                        states.append(project_state(response.json(), {entity}))
+                    return states
+                domain, service, payload = validated
+                response = await client.post(manifest.endpoint + f"/api/services/{domain}/{service}", json=payload)
+                response.raise_for_status()
+                if len(response.content) > 256 * 1024 or not isinstance(response.json(), list):
+                    raise HTTPException(502, "家居操作响应无效")
+                # 服务调用可能返回其他联动实体；不向模型披露未授权结果。
+                return {'status': 'service_completed', 'entity_id': payload['entity_id'],
+                    'states': [project_state(item, set(manifest.home_entities)) for item in response.json()
+                               if isinstance(item, dict) and item.get('entity_id') in manifest.home_entities]}
             elif manifest.adapter == "searxng":
                 from .privacy import validate_search
                 query = validate_search(arguments)['query']

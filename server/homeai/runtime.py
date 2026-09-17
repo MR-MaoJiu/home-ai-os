@@ -127,6 +127,11 @@ async def _run_step(app, task_id, user_id=None):
                     record = read_record(db, actor, identifier)
                     if record.sensitivity != "PUBLIC" or record.cloud_policy != "REDACT_AND_ALLOW":
                         raise HTTPException(403, "联网搜索不能携带未授权出站的来源数据")
+            home_binding = None
+            if capability in {"home.states@v1", "home.execute@v1"}:
+                from .home_control import validate as validate_home
+                home_binding = app.registry.resolve(db, capability, cloud=False)
+                validate_home(home_binding, capability, args)
             planned_response = None
             if capability == "model.generate@v1":
                 records = [read_record(db, actor, rid) for rid in body["record_ids"]]
@@ -167,7 +172,7 @@ async def _run_step(app, task_id, user_id=None):
                     body["capability"], body["arguments"] = capability, args
                     task.request = app.vault.seal(body, user.id + ":task:" + task.id)
                     planned_response = None
-            argument_hash = digest(canonical(args))
+            argument_hash = digest(canonical({"arguments": args, "provider": home_binding.model_dump()} if home_binding and effect else args))
             invocation = db.scalar(select(Invocation).where(Invocation.task_id == task.id, Invocation.step == step_number))
             if not invocation:
                 invocation = Invocation(id=uid(), household_id=user.household_id, owner_id=user.id, task_id=task.id, step=step_number, capability=capability, arguments_hash=argument_hash, arguments="")
@@ -175,7 +180,7 @@ async def _run_step(app, task_id, user_id=None):
                 db.add(invocation)
                 db.flush()
             elif invocation.arguments_hash != argument_hash or invocation.capability != capability:
-                raise HTTPException(409, "执行参数与原审批不一致")
+                raise HTTPException(409, "家居配置或执行参数与原审批不一致，请重新提交" if home_binding else "执行参数与原审批不一致")
             approval = db.scalar(select(Approval).where(Approval.invocation_id == invocation.id))
             approved = bool(approval and approval.decision == "APPROVED" and approval.expires_at > now() and approval.arguments_hash == argument_hash and approval.owner_id == actor.user_id)
             if risk >= 3 and not approved:
@@ -230,6 +235,8 @@ async def _run_step(app, task_id, user_id=None):
                 result = planned_response
             else:
                 manifest = app.registry.resolve(db, capability, cloud=body["mode"] == "cloud")
+                if home_binding and manifest != home_binding:
+                    raise HTTPException(409, "家居 Provider 配置已变化，请重新提交操作")
                 if capability == "web.search@v1":
                     db.add(Disclosure(household_id=user.household_id, owner_id=user.id, task_id=task.id,
                         provider_id=manifest.id, categories='["web_search_query"]', bytes_sent=len(canonical(args))))

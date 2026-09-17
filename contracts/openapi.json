@@ -2647,6 +2647,14 @@
             "type": "array",
             "minItems": 1,
             "title": "Allowed Hosts"
+          },
+          "home_entities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Home Entities"
           }
         },
         "additionalProperties": false,
