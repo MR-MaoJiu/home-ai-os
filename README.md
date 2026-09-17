@@ -681,7 +681,25 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
 | 去重 | 独立 SQLite 发送账本绑定成员、调用 ID 和参数摘要；重启后重复调用返回已接受结果，不重复发送 |
 | 结果不明 | 发送中断或异常保留 SENDING/UNCERTAIN，阻止自动重发；Core 保持人工核对状态 |
 
-`accepted_by_smtp` 表示邮件服务器接受，不能据此宣称公网收件人已收到。只有同一发送账本中的 ACCEPTED 才可安全返回缓存成功；结果不明不能靠清空账本“修复”。账本需要随 Provider 数据备份，避免丢失去重依据。当前还没有邮件账本的人工解锁接口，Core 的通用“确认未执行”不会绕过 Provider 的不确定状态保护；这部分恢复流程仍需继续实现。
+`accepted_by_smtp` 表示邮件服务器接受，不能据此宣称公网收件人已收到。只有同一发送账本中的 ACCEPTED 才可安全返回缓存成功；结果不明不能靠清空账本“修复”。账本需要随 Provider 数据备份，避免丢失去重依据。已提供本机账本核对工具；Core 的通用“确认未执行”仍不会绕过 Provider 的不确定状态保护。必须先按下述流程处理本机账本。
+
+### 邮件结果不明的人工恢复
+
+先在真实邮箱系统查验 Message-ID、SMTP 队列/日志或退信，不能仅因为界面超时就认定没有发送。任务详情会显示邮件步骤的调用 ID；也可从 `GET /api/v1/tasks/{id}/steps` 获取。
+
+```bash
+.venv/bin/python scripts/mail_delivery.py inspect --config state/mail/account.json --invocation 调用ID
+# 将实际核对依据保存为本机文件，使用 inspect 返回的 request_hash：
+.venv/bin/python scripts/mail_delivery.py resolve --config state/mail/account.json --invocation 调用ID --decision NOT_EXECUTED --expected-hash 参数摘要 --expected-revision 核对版本 --evidence-file state/mail/核对依据.txt
+```
+
+可选结论为 `COMPLETED`、`NOT_EXECUTED`、`ABORT`。工具只处理指定成员、调用、参数摘要和核对版本匹配的不确定记录，保存依据摘要与时间；不连接邮箱、不发送邮件。依据原文件由操作者安全保留，账本不复制其正文。
+
+核对与发送使用同一跨进程文件锁，原发送仍在执行时拒绝核对。已确认 SMTP 接受、已人工处理或已终止记录不能再次解锁；重复核对不会重复放行；发送和核对推进版本号，旧命令不能解锁后续失败的另一次尝试。确认已完成会标记 `MANUAL_ACCEPTED`，以后返回 `confirmed_by_operator`，不会冒称收到新的 SMTP 成功响应。
+
+确认未执行后账本变为 `RETRY_ALLOWED`。再回到 Core 任务详情选择“确定未执行”，重新完成审批；执行器仍检查设备、任务截止时间和来源授权，只允许原参数。发送开始即重新持久化为 SENDING，再次失败需要新的核对。过期、取消的任务不会因为本机账本解锁而恢复执行。
+
+这不是自动判断送达，也不提供绕过人工核对的网络接口。已用真实 SMTP 认证失败验证受控恢复；公网投递后回执丢失、退信与真实账户仍需对应环境验收。
 
 ### 配置真实邮箱
 
@@ -692,7 +710,7 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
   "MAIL_SUBJECT_ID": "已存在的 Core 成员 ID",
   "MAIL_USER": "邮箱登录账号",
   "MAIL_PASSWORD": "邮箱密码或专用授权码",
-  "MAIL_STATE_DIR": "state/mail/delivery-state",
+  "MAIL_STATE_DIR": "/absolute/private/mail-delivery-state",
   "IMAP_HOST": "imap.example.com",
   "IMAP_PORT": "993",
   "IMAP_SECURITY": "tls",
@@ -711,7 +729,7 @@ HOMEAI_WHISPER_TEST=1 .venv/bin/pytest -q server/tests/test_whisper_live.py
 .venv/bin/python scripts/register_local_mail.py --config state/mail/account.json
 ```
 
-默认桥接端口 `8107`；多个成员使用各自配置、账本与端口，登记时传相同的 `--port`。发送可通过任务 API 提交 `mail.send@v1`，参数为 `to`、`subject`、`text`；真实执行仍等待用户批准。HTML-only 邮件返回 `no_plain_text_part`，不伪造正文；附件正文解析和富文本邮件客户端不在当前已完成能力中。
+发送账本必须配置绝对路径，避免更换启动工作目录后意外生成新账本；示例中的路径需替换为本机实际私有目录。默认桥接端口 `8107`；多个成员使用各自配置、账本与端口，登记时传相同的 `--port`。发送可通过任务 API 提交 `mail.send@v1`，参数为 `to`、`subject`、`text`；真实执行仍等待用户批准。HTML-only 邮件返回 `no_plain_text_part`，不伪造正文；附件正文解析和富文本邮件客户端不在当前已完成能力中。
 
 ### 本机真实协议验收
 

@@ -69,7 +69,10 @@ def ledger():
     if path.stat().st_mode & 0o077:
         raise HTTPException(503, '发送账本权限必须为 0600')
     db = sqlite3.connect(path, timeout=10)
+    db.execute('BEGIN IMMEDIATE')
     db.execute('CREATE TABLE IF NOT EXISTS deliveries (subject TEXT, invocation TEXT, request_hash TEXT NOT NULL, status TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(subject,invocation))')
+    if 'revision' not in {row[1] for row in db.execute('PRAGMA table_info(deliveries)')}:
+        db.execute('ALTER TABLE deliveries ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
     db.commit()
     return db
 
@@ -87,18 +90,30 @@ def send(call):
     request_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     identifier = hashlib.sha256((call.subject_id + ':' + call.invocation_id).encode()).hexdigest()
     message_id = '<' + identifier + '@homeai.local>'
+    from .mail_recovery import delivery_lock
+    with delivery_lock(call.subject_id, call.invocation_id):
+        return send_locked(call, payload, request_hash, message_id)
+
+
+def send_locked(call, payload, request_hash, message_id):
+    sender, recipient, subject, body = (payload[key] for key in ('from', 'to', 'subject', 'text'))
     db = ledger()
     try:
         db.execute('BEGIN IMMEDIATE')
         prior = db.execute('SELECT request_hash,status,message_id FROM deliveries WHERE subject=? AND invocation=?', (call.subject_id, call.invocation_id)).fetchone()
         if prior:
-            db.rollback()
             if prior[0] != request_hash:
                 raise HTTPException(409, '发送标识已绑定其他参数')
-            if prior[1] == 'ACCEPTED':
-                return {'status': 'accepted_by_smtp', 'message_id': prior[2], 'deduplicated': True}
-            raise HTTPException(409, '之前发送结果不明，禁止自动重复发送，请在邮件系统核对')
-        db.execute('INSERT INTO deliveries VALUES (?,?,?,?,?)', (call.subject_id, call.invocation_id, request_hash, 'SENDING', message_id))
+            if prior[1] in {'ACCEPTED', 'MANUAL_ACCEPTED'}:
+                db.rollback()
+                return {'status': 'accepted_by_smtp' if prior[1] == 'ACCEPTED' else 'confirmed_by_operator',
+                        'message_id': prior[2], 'deduplicated': True,
+                        'confirmation_source': 'smtp_response' if prior[1] == 'ACCEPTED' else 'local_operator'}
+            if prior[1] != 'RETRY_ALLOWED':
+                raise HTTPException(409, '之前发送结果不明，禁止自动重复发送，请在邮件系统核对')
+            db.execute('UPDATE deliveries SET status=?,revision=revision+1 WHERE subject=? AND invocation=?', ('SENDING', call.subject_id, call.invocation_id))
+        else:
+            db.execute('INSERT INTO deliveries(subject,invocation,request_hash,status,message_id) VALUES (?,?,?,?,?)', (call.subject_id, call.invocation_id, request_hash, 'SENDING', message_id))
         db.commit()
         message = EmailMessage()
         message['From'], message['To'], message['Subject'], message['Message-ID'] = sender, recipient, subject, message_id
@@ -110,10 +125,10 @@ def send(call):
             refused = smtp.send_message(message, from_addr=sender, to_addrs=[recipient])
             if refused:
                 raise RuntimeError('SMTP 拒绝收件人')
-            db.execute('UPDATE deliveries SET status=? WHERE subject=? AND invocation=?', ('ACCEPTED', call.subject_id, call.invocation_id))
+            db.execute('UPDATE deliveries SET status=?,revision=revision+1 WHERE subject=? AND invocation=?', ('ACCEPTED', call.subject_id, call.invocation_id))
             db.commit()
         except Exception:
-            db.execute('UPDATE deliveries SET status=? WHERE subject=? AND invocation=?', ('UNCERTAIN', call.subject_id, call.invocation_id))
+            db.execute('UPDATE deliveries SET status=?,revision=revision+1 WHERE subject=? AND invocation=?', ('UNCERTAIN', call.subject_id, call.invocation_id))
             db.commit()
             raise
         finally:

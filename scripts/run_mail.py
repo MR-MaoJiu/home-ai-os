@@ -17,6 +17,8 @@ if set(config) - allowed or not {'MAIL_SUBJECT_ID', 'MAIL_USER', 'MAIL_PASSWORD'
     raise SystemExit('邮件配置字段缺失或包含不允许的字段')
 if any(not isinstance(value, str) or not value for value in config.values()):
     raise SystemExit('邮件配置值必须为非空字符串')
+if not Path(config['MAIL_STATE_DIR']).is_absolute():
+    raise SystemExit('MAIL_STATE_DIR 必须为绝对路径，避免工作目录变化丢失去重账本')
 if not 1024 <= args.port <= 65535:
     raise SystemExit('Provider 端口无效')
 if any(config.get(name, 'tls') not in {'tls', 'starttls'} for name in ('IMAP_SECURITY', 'SMTP_SECURITY')):
