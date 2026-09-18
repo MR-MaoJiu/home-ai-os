@@ -1,11 +1,11 @@
 {
   "schema_version": "1.0",
   "id": "mlx",
-  "version": "1.0.0",
+  "version": "0.31.3",
   "adapter": "openai",
-  "endpoint": "http://127.0.0.1:8081/v1",
+  "endpoint": "http://127.0.0.1:58086/v1",
   "cloud": false,
-  "model": "configured-model",
+  "model": "default_model",
   "capabilities": {
     "model.generate@v1": "chat"
   },

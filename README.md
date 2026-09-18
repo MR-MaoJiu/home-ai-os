@@ -28,7 +28,7 @@
 | 隐私 | 云能力限制、公开资料最小调用、披露记录 | 完整 NER、本地复核、占位符往返还原；私人内容上云保持拒绝 |
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
-| 模型 | llama.cpp 本地生成；OpenAI 兼容协议 | MLX/vLLM 独立真实验证、云账户集成、Reranker |
+| 模型 | llama.cpp、MLX 固定权重本地生成与真实工具调用；OpenAI 兼容协议 | vLLM 硬件验收、云账户集成、独立 Reranker、视觉模型 |
 | 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、家居自动化因果关联/物理设备、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流、App Intent 提醒提交、活动跳转、系统提醒受控写入 | APNs、后台调度及 Siri/快捷指令真机验收、逐 Token 文本流 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
@@ -1041,3 +1041,53 @@ HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_EMBEDDING_TEST=1 .venv/bin/pytes
 自有代码采用 **Home AI OS Attribution License 1.0**（`LicenseRef-Home-AI-OS-Attribution-1.0`）。允许个人使用、商用、修改、闭源衍生与自行托管。对外发布的衍生产品或托管服务必须保留版权声明，并在关于页、文档或 CLI 关于信息中显示“基于 Home AI OS”及本项目链接。
 
 这是自定义宽松许可，不是标准 MIT，也不宣称获得 OSI 认证。完整权利和条件以 [LICENSE](LICENSE) 为准；第三方组件适用各自许可。
+
+
+## Apple Silicon 上的 MLX 可选运行时
+
+MLX 使用独立 Python 3.12 环境，固定 `mlx-lm 0.31.3`、`mlx/ mlx-metal 0.32.2`。本次锁文件对应 macOS 26+ ARM64 wheel；其他平台不自动替换版本或改用云模型。完整安装版本位于 `providers/locks/mlx-macos-py312.txt`，不改变 Core 的 Python 依赖。
+
+模型为 [mlx-community/Qwen3-4B-4bit](https://huggingface.co/mlx-community/Qwen3-4B-4bit)，固定修订 `4dcb3d101c2a062e5c1d4bb173588c54ea6c4d25`。模型遵循其上游 Apache-2.0 许可；[MLX LM](https://github.com/ml-explore/mlx-lm) 使用其自身 MIT 许可。项目许可不替代第三方模型/依赖许可。权重仅保存在忽略目录，不提交到源码仓库。
+
+```sh
+python3.12 -m venv state/venvs/mlx
+state/venvs/mlx/bin/pip install -r providers/locks/mlx-macos-py312.txt
+HF_HUB_DISABLE_IMPLICIT_TOKEN=1 state/venvs/mlx/bin/hf download mlx-community/Qwen3-4B-4bit --revision 4dcb3d101c2a062e5c1d4bb173588c54ea6c4d25 --local-dir state/models/mlx-qwen3-4b --max-workers 2
+.venv/bin/python scripts/run_mlx.py
+```
+
+首次下载需要网络；启动时先校验清单中全部 9 个权重、分词器和配置文件的大小及 SHA-256。缺失或变化直接退出，不自动接受新权重。推理进程使用过滤后的环境、离线模型设置、关闭遥测和隐式 Hub 凭据；不继承 Core 数据库、主密钥或云模型密钥。监听仅为 `127.0.0.1:58086`。
+
+在另一终端运行登记：
+
+```sh
+.venv/bin/python scripts/register_mlx.py
+HOMEAI_MLX_TEST=1 .venv/bin/pytest -q server/tests/test_mlx_live.py
+HOMEAI_INTEGRATION=1 HOMEAI_MODEL_TEST=1 HOMEAI_AGENT_TEST_URL=http://127.0.0.1:58086/v1 HOMEAI_AGENT_TEST_MODEL=default_model .venv/bin/pytest -q server/tests/test_reminder_time.py::test_agent_uses_explicit_scheduled_reminder_tool
+```
+
+登记会执行真实短文本生成，成功才写入 Provider；登记结果默认停用，重复登记也会停用该 Provider。它不会替换既有模型。当前 Core 在满足能力、云/本地及凭据权限条件后，按 Provider ID 排序选择首个启用项；如需切换到 MLX，应在管理后台核对并停用其他生成 Provider，再启用 `mlx`。没有健康探测失败后自动切云的逻辑。
+
+请求流程为：设备或浏览器认证 → 持久化任务 → worker 获取执行锁 → OPA 和数据权限检查 → Registry 选择 `model.generate@v1` → OpenAI 兼容适配 → 本机 MLX → 真实生成结果 → 加密任务结果与状态事件。工具调用仍是模型建议，后续步骤继续经过 Core 的参数校验、审批及幂等执行，不由 MLX 直接操作家庭数据。
+
+适配层拒绝任意模型路径、LoRA 适配器及草稿模型；请求体最大 64 KiB，输出上限 4096 Token，并限制生成并发和提示缓存数量。已验证中文生成、Core 任务完成、无效参数拒绝和真实定时提醒工具执行。当前仅声明生成能力，不能据此声称 MLX Embedding/Reranker 已实现。
+
+MLX 官方 HTTP 服务属于开发服务，本地回环监听、过滤环境和离线设置不等于操作系统沙箱。它没有多用户网络鉴权，不应直接映射到 LAN/公网；生产须继续经过隔离验收。16 GB Mac 同时运行多个模型可能发生内存压力；此处测试不代表持续负载或生产容量测试。
+
+## 尚未交付的工作与验收依赖
+
+下列事项仍是实际待办，不会通过示例响应或静态成功状态标记完成：
+
+| 待办 | 实现或验收边界 |
+|---|---|
+| 完整隐私出站 | NER、本地复核、占位符映射及往返还原仍需实现并验证；私人内容上云继续拒绝 |
+| Agent/Skill | 云费用预算、补偿工作流、更多自主工具及复杂失败恢复仍需完成 |
+| 其他模型能力 | CosyVoice、独立 Reranker、视觉模型真实接入；vLLM 需兼容服务器硬件 |
+| 家居自动化 | 观察事件到自动化的因果关联、防回环与物理设备操作验收 |
+| iOS 系统能力 | APNs、后台文件传输、真机权限/调度、Siri 与实际通知送达；需要签名团队及 iPhone |
+| 生产插件 | Linux rootless/gVisor、受限网络、签名/SBOM、升级失败回滚与卸载清除的完整验收 |
+| 远程证书 | 家庭端 ACME 自动申请续期、过期失败处理、长期断网与配额恢复 |
+| 生产运维 | 每日备份/保留/异机副本、密钥恢复、持续写入一致性、目标机器 RPO/RTO |
+| 外部账户 | 真实邮件、Home Assistant 物理实体、APNs、云模型和平台 SMTP 等按用途安全配置 |
+
+本地 AI 不依赖官方平台账户或付费状态。Home AI Connect 的运营配置与实现继续保存在独立闭源项目；本仓库中的集成验证不能代替其真实收款开通、邮件送达、正式账号和家庭远程部署验收。
