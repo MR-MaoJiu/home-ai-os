@@ -59,7 +59,7 @@ def application_status(request:Request,actor=Depends(authenticate)):
     owner(actor);app=request.app.state;path=app.settings.state_dir/'service-application.enc'
     if not path.exists():return {'status':'NONE'}
     value=app.vault.open(path.read_text(),'service-application');binding_scope(value,actor)
-    return {'status':'EXPIRED' if value['expires']<=time.time() else value.get('status','WAITING'),'request_code':value['code'],'portal_url':value['portal_url'],'expires':value['expires']}
+    return {'status':value.get('status') or ('EXPIRED' if value['expires']<=time.time() else 'WAITING'),'request_code':value['code'],'portal_url':value['portal_url'],'expires':value['expires']}
 
 async def poll_application(app):
     path=app.settings.state_dir/'service-application.enc'
@@ -74,5 +74,8 @@ async def poll_application(app):
     current=app.vault.open(path.read_text(),'service-application')
     if current['id']!=value['id']:return
     config={**capabilities,'household_id':value['household_id'],'instance_id':result['instance_id'],'credential':result['credential'],'enabled':True}
+    # 开通服务即采用该平台下发的网络配置，不要求用户再选来源。
+    network={'mode':'platform','stun_urls':[],'household_id':value['household_id']}
+    private_write(app.settings.state_dir/'remote-network.enc',app.vault.seal(network,'remote-network'))
     private_write(app.settings.state_dir/'remote-config.enc',app.vault.seal(config,'remote-config'))
     value['status']='APPROVED';private_write(path,app.vault.seal(value,'service-application'))
