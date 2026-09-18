@@ -29,7 +29,7 @@
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
 | 模型 | llama.cpp、MLX 固定权重本地生成与真实工具调用；本地中英文 Reranker；OpenAI 兼容协议 | vLLM 硬件验收、云账户集成、视觉模型 |
-| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、家居自动化因果关联/物理设备、真实外部邮箱账户 |
+| 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、CosyVoice 内置音色合成、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；客户端合成播放、家居自动化因果关联/物理设备、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流、App Intent 提醒提交、活动跳转、系统提醒受控写入 | APNs、后台调度及 Siri/快捷指令真机验收、逐 Token 文本流 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
@@ -1082,7 +1082,7 @@ MLX 官方 HTTP 服务属于开发服务，本地回环监听、过滤环境和�
 |---|---|
 | 完整隐私出站 | NER、本地复核、占位符映射及往返还原仍需实现并验证；私人内容上云继续拒绝 |
 | Agent/Skill | 云费用预算、补偿工作流、更多自主工具及复杂失败恢复仍需完成 |
-| 其他模型能力 | CosyVoice、视觉模型真实接入；vLLM 需兼容服务器硬件 |
+| 其他模型能力 | 视觉模型真实接入；vLLM 需兼容服务器硬件；CosyVoice 长文本质量及客户端播放整合 |
 | 家居自动化 | 观察事件到自动化的因果关联、防回环与物理设备操作验收 |
 | iOS 系统能力 | APNs、后台文件传输、真机权限/调度、Siri 与实际通知送达；需要签名团队及 iPhone |
 | 生产插件 | Linux rootless/gVisor、受限网络、签名/SBOM、升级失败回滚与卸载清除的完整验收 |
@@ -1144,3 +1144,67 @@ HOMEAI_RERANKER_TEST=1 HOMEAI_INTEGRATION=1 HOMEAI_KNOWLEDGE_TEST=1 .venv/bin/py
 ```
 
 已通过真实中英文相关性、未认证请求拒绝、Core pgvector 重排、跨成员不可见、共享撤回、删除、停用和真实 HTTP 故障降级，以及原有 Docling 文档流程回归。生产沙箱、长文排序质量评估、大规模负载及多成员容量规划仍待验收。
+
+
+## CosyVoice 内置音色与离线语音合成
+
+`speech.voices@v1` 返回真实模型中的音色列表；`speech.synthesize@v1` 接受 `text` 与 `speaker`，返回实际生成的单声道 16 位 PCM WAV。首版选用 [CosyVoice-300M-SFT](https://huggingface.co/FunAudioLLM/CosyVoice-300M-SFT) 的内置音色路径，禁止参考音频、提示音频、声音转换和声音克隆参数。当前模型包含中文女/男、英文女/男、日语男、粤语女和韩语女；本轮内容回读仅验收中文女、英文女，不把列出其他音色等同于质量验收。
+
+### 固定依赖与资源
+
+| 资源 | 固定版本 |
+|---|---|
+| [官方 CosyVoice 源码](https://github.com/QwenAudio/CosyVoice) | `074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc` |
+| Matcha-TTS 子模块 | `dd9105b34bf2be2230f4aa1e4769fb586a3c824e` |
+| CosyVoice-300M-SFT 权重 | `fbb71de2afe387ed854eebd80b9f3d078c6b9869` |
+| WeText 文本规范化资源 | `030bb1febce0bd0168549a03e181cd9c1d70c799` |
+| Python 环境 | 独立 Python 3.12，完整版本见 `providers/locks/cosyvoice-macos-py312.txt` |
+
+CosyVoice 源码和模型、WeText 按各自 Apache-2.0 许可使用，Matcha-TTS 按其 MIT 许可使用；这些许可独立于本项目许可。源代码及模型只下载到 `state/`，本仓库保存版本与校验清单。上游 YAML 会构造 Python 模型对象，因此只允许启动器已校验的固定文件，不能通过用户上传或 HTTP 请求指定 YAML、模型目录或 Python 代码。上游权重加载使用 `weights_only=True`；这不代替来源和 SHA-256 验证。
+
+### 从零准备
+
+在项目根目录执行，固定源码下载目录应不存在；已有目录先核对版本，不覆盖自己的修改：
+
+```sh
+python3.12 -m venv state/venvs/cosyvoice
+state/venvs/cosyvoice/bin/pip install -r providers/locks/cosyvoice-macos-py312.txt
+git clone https://github.com/QwenAudio/CosyVoice.git state/vendor/CosyVoice
+git -C state/vendor/CosyVoice checkout --detach 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+git -C state/vendor/CosyVoice submodule update --init --depth 1
+HF_HUB_DISABLE_IMPLICIT_TOKEN=1 state/venvs/cosyvoice/bin/hf download FunAudioLLM/CosyVoice-300M-SFT cosyvoice.yaml llm.pt flow.pt hift.pt spk2info.pt campplus.onnx speech_tokenizer_v1.onnx README.md --revision fbb71de2afe387ed854eebd80b9f3d078c6b9869 --local-dir state/models/cosyvoice-sft
+.venv/bin/python scripts/prepare_cosyvoice_normalizer.py
+.venv/bin/python scripts/run_cosyvoice.py
+```
+
+规范化准备脚本直接下载四个固定 FST 实体并校验，避免把 Git LFS 指针当成模型。启动器验证七个语音模型/配置文件和 97 个推理源码、分词资源、许可证与 FST 文件；任何缺失或变化都拒绝启动，不自动放宽校验。
+
+在另一终端登记实际家庭成员：
+
+```sh
+.venv/bin/python scripts/register_local_cosyvoice.py --user <成员ID>
+```
+
+登记先进行真实短句合成，再把桥接令牌写入成员所属加密 Secret。服务监听 `127.0.0.1:8106`，请求需要认证；令牌文件权限为 `0600`，不会写入公开配置或回显。API 和任务 worker 升级后需重启，使新增音色枚举能力进入 Core 风险注册表。
+
+### 实际调用与数据流程
+
+客户端以原有设备签名或浏览器会话提交 `/api/v1/tasks`，`capability` 为 `speech.voices@v1`、`arguments` 为空对象时获取内置音色；以 `speech.synthesize@v1` 和下列参数提交朗读：
+
+```json
+{"text":"你好，欢迎使用家庭助手。","speaker":"中文女"}
+```
+
+Core 持久化任务 → worker 检查身份、策略和超时 → 成员对应的本地 Provider → 官方 WeText 离线文本规范化 → CosyVoice SFT 实际推理 → PCM WAV → 加密任务结果。轮询任务或接收状态事件后，客户端读取 `audio_base64`、`sample_rate`、`format`、`channels`、`duration_seconds` 和 `speaker`。音频结果受原有任务访问权限保护，不能通过平台账户直接读取。
+
+文本上限 300 字符，拒绝额外克隆参数与模型控制标记；生成音频最长 45 秒，超过时明确失败，不静默截取。使用 CPU、单请求合成和固定内置音色；首次加载比后续请求慢，客户端应按任务状态等待，避免盲目重复提交。服务使用过滤后的环境、离线模型设置和 Python 网络出站门禁；文本规范化资源解析固定为已校验本地目录。上游会记录原始文本，因此桥接进程在导入模型前关闭 Python 日志，Core 仍保留不含正文的任务审计。
+
+### 验收与边界
+
+```sh
+HOMEAI_COSYVOICE_TEST=1 HOMEAI_INTEGRATION=1 .venv/bin/pytest -q server/tests/test_cosyvoice_live.py
+```
+
+验收需要真实 CosyVoice、FunASR、ffmpeg、PostgreSQL 和 OPA。合成 WAV 后先检查采样、声道与非空音频，再用 ffmpeg 转为 ASR 要求的 16 kHz PCM，最后由真实 FunASR 回读并检查内容。中文、英文回读、认证、非法克隆参数拒绝、音色列表与 Core 持久化任务四项通过，没有预制音频或固定转写结果。
+
+iOS/网页中的合成音色设置、播放控件和完整对话朗读整合仍待完成；其他音色、长文本、数字/混合语言的系统质量评估、真机播放与生产隔离仍待验收。Python 出站门禁和回环监听不能代替 gVisor/网络沙箱，不应直接暴露该开发服务。

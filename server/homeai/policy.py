@@ -7,6 +7,7 @@ CAPABILITIES = {
     "memory.search@v1": (1, False), "memory.commit@v1": (2, True),
     "model.generate@v1": (1, False), "model.embed@v1": (1, False), "model.rerank@v1": (1, False),
     "document.parse@v1": (1, False), "speech.transcribe@v1": (1, False), "speech.synthesize@v1": (1, False),
+    "speech.voices@v1": (1, False),
     "memory.semantic.search@v1": (1, False), "memory.semantic.index@v1": (2, True), "memory.semantic.purge@v1": (2, True),
     "memory.graph.search@v1": (1, False), "memory.graph.index@v1": (2, True), "memory.graph.purge@v1": (2, True),
     "home.states@v1": (1, False), "home.execute@v1": (3, True),

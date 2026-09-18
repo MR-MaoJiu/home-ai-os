@@ -1,0 +1,2 @@
+# Apple Silicon 开发环境的完整固定版本。
+-r locks/cosyvoice-macos-py312.txt

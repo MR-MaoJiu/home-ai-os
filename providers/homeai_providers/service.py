@@ -34,17 +34,6 @@ def binary(arguments, key="content_base64"):
     return data
 
 
-@lru_cache
-def cosy_model():
-    from cosyvoice.cli.cosyvoice import AutoModel
-    path = Path(os.environ["COSYVOICE_MODEL_PATH"])
-    if not path.is_dir():
-        raise RuntimeError("需要预置本地模型")
-    return AutoModel(model_dir=str(path))
-
-
-
-
 def parse_document(call):
     from .docling_adapter import parse
     return parse(call, binary(call.arguments))
@@ -55,25 +44,6 @@ def transcribe_funasr(call):
     return transcribe(call, binary(call.arguments))
 
 
-def synthesize_cosy(call):
-    import torch
-    import torchaudio
-    model = cosy_model()
-    speaker = call.arguments.get("speaker")
-    speakers = model.list_available_spks()
-    if speaker not in speakers:
-        raise HTTPException(422, "仅允许模型内置声音，不开放声音克隆")
-    text = str(call.arguments.get("text", ""))
-    if not 1 <= len(text) <= 2000:
-        raise HTTPException(422, "语音文本长度无效")
-    chunks = [item["tts_speech"] for item in model.inference_sft(text, speaker, stream=False)]
-    if not chunks:
-        raise RuntimeError("没有生成音频")
-    buffer = io.BytesIO()
-    torchaudio.save(buffer, torch.cat(chunks, dim=1).cpu(), model.sample_rate, format="wav")
-    return {"audio_base64": base64.b64encode(buffer.getvalue()).decode(), "sample_rate": model.sample_rate, "format": "wav"}
-
-
 if os.environ.get("HOMEAI_ADAPTER") == "mem0":
     from .egress_guard import install_mem0_guard
     install_mem0_guard()
@@ -81,7 +51,7 @@ if os.environ.get("HOMEAI_ADAPTER") == "graphiti":
     from .egress_guard import install_graphiti_guard
     install_graphiti_guard()
 
-if os.environ.get("HOMEAI_ADAPTER") in {"funasr", "reranker"}:
+if os.environ.get("HOMEAI_ADAPTER") in {"funasr", "reranker", "cosyvoice"}:
     from .egress_guard import install_guard
     install_guard(set(), os.environ["HOMEAI_ADAPTER"])
 
@@ -98,7 +68,7 @@ def health():
     result = {"status": "alive", "adapter": os.environ.get("HOMEAI_ADAPTER", "unconfigured")}
     if result["adapter"] == "mail":
         result["subject_id"] = os.environ.get("MAIL_SUBJECT_ID")
-    if result["adapter"] in {"mem0", "graphiti", "funasr", "reranker"}:
+    if result["adapter"] in {"mem0", "graphiti", "funasr", "reranker", "cosyvoice"}:
         from .egress_guard import stats
         result["egress"] = dict(stats)
     return result
@@ -118,8 +88,10 @@ async def invoke(operation: str, call: Call):
         if adapter == "funasr" and operation == "transcribe":
             async with speech_lock:
                 return await asyncio.to_thread(transcribe_funasr, call)
-        if adapter == "cosyvoice" and operation == "synthesize":
-            return await asyncio.to_thread(synthesize_cosy, call)
+        if adapter == "cosyvoice" and operation in {"synthesize", "voices"}:
+            from .cosyvoice_adapter import synthesize, voices
+            async with speech_lock:
+                return await asyncio.to_thread(synthesize, call) if operation == "synthesize" else await asyncio.to_thread(voices)
         if adapter == "whisper" and operation == "transcribe":
             from .whisper_adapter import transcribe
             async with speech_lock:

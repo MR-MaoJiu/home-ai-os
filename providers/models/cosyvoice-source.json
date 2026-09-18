@@ -1,0 +1,493 @@
+{
+  "provider": "cosyvoice",
+  "source_revision": "074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc",
+  "matcha_revision": "dd9105b34bf2be2230f4aa1e4769fb586a3c824e",
+  "wetext_revision": "030bb1febce0bd0168549a03e181cd9c1d70c799",
+  "files": [
+    {
+      "path": "CosyVoice/LICENSE",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/bin/average_model.py",
+      "bytes": 3202,
+      "sha256": "f362de1a5bd087cc451c0fd3f5f2490c14ed0e127f533ba4249705463ca373d6"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/bin/export_jit.py",
+      "bytes": 3839,
+      "sha256": "7e44d6827c269f49b51c1fb8c5f424048a19f2b350d11485f36dfcf58965ee85"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/bin/export_onnx.py",
+      "bytes": 4486,
+      "sha256": "8ff4fef25eda1e7b664eda3f1c5f1ad14b5572bf68ca0185b48e96b910df74c2"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/bin/train.py",
+      "bytes": 8153,
+      "sha256": "664eb4891150686b27446e1087caf66c0f3e4be552f835a43b0fbc13ce9aa757"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/cli/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/cli/cosyvoice.py",
+      "bytes": 14356,
+      "sha256": "4b2a605f129d172cd031286a14a591396c2e8ed0bf53258acc7445525fdaa65b"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/cli/frontend.py",
+      "bytes": 12553,
+      "sha256": "8d3dcb5880d76346f053f19344eac48adcff2aca70687293aadf4e1f33fadac3"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/cli/model.py",
+      "bytes": 28138,
+      "sha256": "421ba52dd956505667668e0aec7fdcbcd85d733b52725b2d595bc32bcbb53ef9"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/dataset/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/dataset/dataset.py",
+      "bytes": 5063,
+      "sha256": "b9fb7857690dc0fb61e599bf5ef22337802ab87cf8313d06b0ad08440ad186a5"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/dataset/processor.py",
+      "bytes": 16749,
+      "sha256": "27c8009a8da606dfd7b541fa28b34faba6d8bd9ff586a4c72b4738b2ad0aaa9a"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/flow/DiT/dit.py",
+      "bytes": 5688,
+      "sha256": "5d14492e3ed68f5446853b0defd447bc401b12803b027a7b9584a3f3527633bf"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/flow/DiT/modules.py",
+      "bytes": 20551,
+      "sha256": "8c97f2af995e9ce06288be35b5119b243bb6a1aec687ef23032f20314f3f18cf"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/flow/decoder.py",
+      "bytes": 19866,
+      "sha256": "ef5eceb9db7f63ddda1d5bca6bfa6b28b8ea11656c4b1f9c109d28f656cbbf29"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/flow/flow.py",
+      "bytes": 19736,
+      "sha256": "bb61c86b4cef2d000f397e7d99ca9096372046d433efbdbdfc29d5d5321e2111"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/flow/flow_matching.py",
+      "bytes": 10552,
+      "sha256": "d871c37176a673bde2a1bcd7c1f1e5083afdde246d05fe5d5203fcc9a23cf98e"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/flow/length_regulator.py",
+      "bytes": 3137,
+      "sha256": "b2bbdabda04850df0c934562df95b237ca20fa7e8fe89d04d9b827a99d67411b"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/hifigan/discriminator.py",
+      "bytes": 8617,
+      "sha256": "3db5b1b5584c600c996ee8c53ea021370a8ad9c62e3f5a28d5cf25f03ab9f9cf"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/hifigan/f0_predictor.py",
+      "bytes": 3757,
+      "sha256": "494630d73dad5e667c5042dae41acb673c4511b28c17e8ce343bbffa2fa3d512"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/hifigan/generator.py",
+      "bytes": 30487,
+      "sha256": "dd1c9f1ab5024bbcb4cec089b46e80844dbd00b5faf717a1906e166987200806"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/hifigan/hifigan.py",
+      "bytes": 3240,
+      "sha256": "e900da2f5e7ec302db9a6ea6d2b71990eabd8823e07e59419b7d8c52df7dc0d6"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/llm/llm.py",
+      "bytes": 35971,
+      "sha256": "c3799f4b2a00baaf1784bda86c5c7f22d4f9199b45e1fb9edd247b996d101ffa"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/tokenizer/assets/multilingual_zh_ja_yue_char_del.tiktoken",
+      "bytes": 907395,
+      "sha256": "747979631e813193436aabcff7c1c235d37de8097b71c563ec8b63b7a515c718"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/tokenizer/tokenizer.py",
+      "bytes": 11253,
+      "sha256": "b852d0047f46f77cfec3335cf53214c9b3e1939e61049e9cb53fac403e32d4fe"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/activation.py",
+      "bytes": 3089,
+      "sha256": "a4a96caea9f7b05111286de5ea760bdfdf9c4e53448f53420857dc04a50440c2"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/attention.py",
+      "bytes": 14389,
+      "sha256": "41d269b2d5e3a3952c0a538f46480aff8570767eb88e80452f367436cef628b1"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/convolution.py",
+      "bytes": 9772,
+      "sha256": "bc248837af9458d7fdfa620a072d5f9e5a2851c420e1275fdda34c294e3a75c7"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/decoder.py",
+      "bytes": 16580,
+      "sha256": "db042c727e0e653ac924733b1fb15e69792ffd80c9d3cf62248374555d58a1cc"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/decoder_layer.py",
+      "bytes": 4807,
+      "sha256": "b95662ab72ec6b0b0f50c3a15fbecf16facb786d323b4aca1d063b9c21c0d64e"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/embedding.py",
+      "bytes": 11777,
+      "sha256": "b50c30be5c66c39c95e0db1015814c545fcd062a936c0ea7ad4c01508b2595dc"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/encoder.py",
+      "bytes": 21434,
+      "sha256": "27f9d7499720372fbe6774d090b89ff063c7ecf88f93a4d75b27bb1adb2918a5"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/encoder_layer.py",
+      "bytes": 9602,
+      "sha256": "1920582be2c9b7cf7835e7b539118ec1eb9da8f2c711c6257f8598b3792951b9"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/label_smoothing_loss.py",
+      "bytes": 3459,
+      "sha256": "db8804cf1c20e1afbf6c33de4836589b1947d881797d02d507c2a8a8d4f40fdd"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/positionwise_feed_forward.py",
+      "bytes": 4219,
+      "sha256": "6e8038e3bcc8ca086ddca508fb9b9d40bf3ab98bebabcf5c94935d032329d0f8"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/subsampling.py",
+      "bytes": 12666,
+      "sha256": "31fc0347a851abc1205dfd4cf68099c0c416589c3e99a07b250e8630cece19d0"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/transformer/upsample_encoder.py",
+      "bytes": 14229,
+      "sha256": "fe1d2c689fac401c0ef38a0639921b1cd2849fe1d10596980e480f88dc06a682"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/class_utils.py",
+      "bytes": 3588,
+      "sha256": "f81a5509b5b4aecdb226b45ab43fa81d4cecb1bd88e48cd3bcda353891697b11"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/common.py",
+      "bytes": 9323,
+      "sha256": "69aab9fe9cc80173f72a608e1b632611174f8c8e5032e4d9ce24fef18c8574bd"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/executor.py",
+      "bytes": 8842,
+      "sha256": "37b7f34fea19f6839484d5550e418cef214d452f12f7ca3f718f56824ac40a6c"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/file_utils.py",
+      "bytes": 4887,
+      "sha256": "aeb9792d4a828f51e42339139cc97753ea931ab246df2f5f5d2703043fb5db72"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/frontend_utils.py",
+      "bytes": 4273,
+      "sha256": "0d0ca94e0cf519e2d17f72cd1dcab6cb07aea0de48e7e792826362284ea18d30"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/losses.py",
+      "bytes": 2121,
+      "sha256": "5cd0f7fd78ce5622c19bb9116516b705699e48c08f217b9b8aa1127f2bf95c10"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/mask.py",
+      "bytes": 9728,
+      "sha256": "852c6e4b14201a238ab076396db599c157b2ee5a5a2aacf0f277ddce8c648976"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/onnx.py",
+      "bytes": 2867,
+      "sha256": "1e4951180be1b8a606999e854db49aafa641cd8e3a9944122d3cc23df00a2157"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/scheduler.py",
+      "bytes": 24920,
+      "sha256": "9447eab84fcb71eaf6546db35156b49fe53182f244744a1dc93ebab28fa1ea34"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/utils/train_utils.py",
+      "bytes": 16626,
+      "sha256": "ab8b999fc3ef805b8e2f8981a395f25ffbcd781acde325b91e809a5e7cc7b425"
+    },
+    {
+      "path": "CosyVoice/cosyvoice/vllm/cosyvoice2.py",
+      "bytes": 4541,
+      "sha256": "96810ffb9b8b649bcacccf9685bbe91ba0efaf7e4ae7594d9961af86a701f033"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/LICENSE",
+      "bytes": 1069,
+      "sha256": "874d84104bdc7b301f369b2f2e66b31f07826a67495af909655f3699c857620d"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/app.py",
+      "bytes": 13992,
+      "sha256": "6c1386d553392fc5fae1a17cac7e2275dbb8e5d8def659a4cabe6e6c0abfe3ee"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/cli.py",
+      "bytes": 15519,
+      "sha256": "230fd22138b842b6066ff1d99f104d67f8af9d9ff3bd74892446f243872569df"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/data/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/data/components/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/data/text_mel_datamodule.py",
+      "bytes": 7555,
+      "sha256": "4a271b2ce6112c977b2f9ab10016269c0c6f19c7bea933d721715b3df5469927"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/LICENSE",
+      "bytes": 1068,
+      "sha256": "3bdaba54bcaa1fb1ab4c167f9a8e456f88f96c6718b8026925e9384b1f2ee6d5"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/config.py",
+      "bytes": 779,
+      "sha256": "7314bf6132bf5283b6ba66bf51ef10445b4d03a95d484b7510bdfabb6f8d8027"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/denoiser.py",
+      "bytes": 2644,
+      "sha256": "4368ee2366b7413a9c7ba7eebea5909d286857aef59155b626c432a2ac30bcb2"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/env.py",
+      "bytes": 429,
+      "sha256": "42d8439aa4d6580228dad488f9aad5b5e455c672949e6f669239505675db9837"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/meldataset.py",
+      "bytes": 6786,
+      "sha256": "e0fb3435703762fd285763f209d1dca6d738959e37b69f7bf26dc13363585b17"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/models.py",
+      "bytes": 11668,
+      "sha256": "2e7ec9ed8cde378877ded04a4078653dca0d7e65feffe9300644d9218258e6af"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/hifigan/xutils.py",
+      "bytes": 1396,
+      "sha256": "68db58bb54b241a1ad6cdfcd9d27cb1a14e2fabff2def60a3087fb11819a0ce0"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/baselightningmodule.py",
+      "bytes": 7003,
+      "sha256": "e39683d7157a02e9d9eff3ba454ebe07439a50c30d3bf8052945a9aecdc47c27"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/components/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/components/decoder.py",
+      "bytes": 14459,
+      "sha256": "7ea94a61cd3c96703aa107fdcd1b82de2f2f6ade20a3c5f434b6005318176a6b"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/components/flow_matching.py",
+      "bytes": 4657,
+      "sha256": "a6f2b2eeca2600749d575dda8624d864d904227e2a9f764a6cb2b89290445e6c"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/components/text_encoder.py",
+      "bytes": 14845,
+      "sha256": "4044329d407b3da06c76527e7b54d40407bdacbd8b0679a4e5b024affbc24de9"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/components/transformer.py",
+      "bytes": 13237,
+      "sha256": "66ff2092d974a99b251b9d8e5c08bbcecceaedfaf41e2bd8af2b4bc7a56dcbea"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/models/matcha_tts.py",
+      "bytes": 10059,
+      "sha256": "cdba70f67a06c11fdf1bdc812b1c6d321987827c52ecf3c4d7f7edf4a2be8cfa"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/onnx/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/onnx/export.py",
+      "bytes": 5386,
+      "sha256": "55402f8916f287d5a15dac4b3d08dd40bc1a54afd964d81a58f30503650a8787"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/onnx/infer.py",
+      "bytes": 6293,
+      "sha256": "002823b5f31dbf3b94e1799a94d2eb79b9a4043d96f152dc2e2f1b9579e35265"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/text/__init__.py",
+      "bytes": 1696,
+      "sha256": "e9dc59b06676e45be4e3f6fbdb27c0ecd55c3489c224b4a3a6f37d31cebab812"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/text/cleaners.py",
+      "bytes": 3560,
+      "sha256": "b78fb0b0c0507494fa275da61e25cc136ded9a93a2f29995f8691e8c355c35ff"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/text/numbers.py",
+      "bytes": 2249,
+      "sha256": "370a7e1e6a9aaacb4010b56aaa532effb6e3e2a896433317166c39ea706ad61d"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/text/symbols.py",
+      "bytes": 635,
+      "sha256": "870efc23c26d06692b8b91e20d4402d398b637d305931589a07ba32312453f57"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/train.py",
+      "bytes": 4613,
+      "sha256": "78a159164692be675f30d84e01cbe9eb7929f96be3ffd204e3b980a78b071b18"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/__init__.py",
+      "bytes": 326,
+      "sha256": "60db3dd6b8f37947154acdda663bfdb6199ae3623cd4992ccbd445de7aaebcea"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/audio.py",
+      "bytes": 2282,
+      "sha256": "2f741064bfcc9485d19a42356496d8ae24dec80c3d6ef5ca7f4e8abfbf9c61ca"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/generate_data_statistics.py",
+      "bytes": 3269,
+      "sha256": "13967d4e96ba6455df48b2d0700c2183b618a8180b643908a81a06a0e6611230"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/instantiators.py",
+      "bytes": 1828,
+      "sha256": "431a8e9d155a6c249ebaba4f3835ea87725267e13b9bc8ca4acc72d56bd35fe2"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/logging_utils.py",
+      "bytes": 1711,
+      "sha256": "825388fc91bcfd804a1d6c03e5144a2a409ecf737b0c9947dbb573e3cc8012d5"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/model.py",
+      "bytes": 2935,
+      "sha256": "51588a1da57cf7f21e68a245c30d711d5fd14d7aafd18bdf416ab03ad9f343e2"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/monotonic_align/__init__.py",
+      "bytes": 646,
+      "sha256": "fecfc8355eef2ff37d9a162d6400c0935d42b1218ff24ca49f47c4cb233bdedb"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/monotonic_align/setup.py",
+      "bytes": 207,
+      "sha256": "6dfd1dd1cbc645a0020b6daaab4b2a819101061cf8ab30e532a0713b24ca0b68"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/pylogger.py",
+      "bytes": 720,
+      "sha256": "61b0bc626e4766b25c0c122c40eea34a7bb263908b650475dc4fe8012f526194"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/rich_utils.py",
+      "bytes": 3279,
+      "sha256": "3a3e63ae4cf9b356f74492fa9bff045e3f392d8d3bf4558294c2337ff1b0bdc7"
+    },
+    {
+      "path": "CosyVoice/third_party/Matcha-TTS/matcha/utils/utils.py",
+      "bytes": 7159,
+      "sha256": "f9768a89bbea7fa9970a818f90d705281f189eafdb2bafd2f3e9ed521491d561"
+    },
+    {
+      "path": "wetext/zh/tn/tagger.fst",
+      "bytes": 527178,
+      "sha256": "cf341314c51f7ce59049f3b2c42f0ce8fd71e6d08d4d6969613aad384a5e2ae8"
+    },
+    {
+      "path": "wetext/zh/tn/verbalizer.fst",
+      "bytes": 1069758,
+      "sha256": "5a13cd679dd54637d12d2bd1bd33ee2165d91c867e14468c93195af02256e5da"
+    },
+    {
+      "path": "wetext/en/tn/tagger.fst",
+      "bytes": 5645674,
+      "sha256": "245e2dc9174cdd007a8e9e50f3339773d1adbbc7535b71cf67478dc1683cc3ec"
+    },
+    {
+      "path": "wetext/en/tn/verbalizer.fst",
+      "bytes": 6398822,
+      "sha256": "03155c88f317b2795969e264c19f87faf98b9853d5ac631e419bacdc3b3ee15a"
+    }
+  ]
+}
