@@ -11,6 +11,7 @@ from homeai.data import ingest
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--with-documents",action="store_true")
 parser.add_argument("--with-speech",action="store_true")
+parser.add_argument("--with-vision",action="store_true")
 args=parser.parse_args()
 settings=Settings();settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
 app=create_app(settings).state
@@ -31,6 +32,11 @@ with app.db() as db:
         secret_id=uid();provider_id='native.cosyvoice.'+user.id
         db.add(Secret(id=secret_id,owner_id=user.id,household_id=user.household_id,provider_id=provider_id,value=app.vault.seal(Path('state/provider-secrets/cosyvoice.token').read_text().strip(),user.id+':secret:'+secret_id)))
         manifest=ProviderManifest(id=provider_id,version='fbb71de2afe387ed854eebd80b9f3d078c6b9869',adapter='http',endpoint='http://127.0.0.1:8106',allowed_hosts=['127.0.0.1'],secret_id=secret_id,timeout_seconds=300,capabilities={'speech.voices@v1':'/invoke/voices','speech.synthesize@v1':'/invoke/synthesize'})
+        db.add(Provider(id=provider_id,manifest=manifest.model_dump_json(),enabled=True))
+    if args.with_vision:
+        secret_id=uid();provider_id='native.vision.'+user.id
+        db.add(Secret(id=secret_id,owner_id=user.id,household_id=user.household_id,provider_id=provider_id,value=app.vault.seal(Path('state/provider-secrets/vision.token').read_text().strip(),user.id+':secret:'+secret_id)))
+        manifest=ProviderManifest(id=provider_id,version='bb307c036e8a1ed7b663bbd0c35b41c4c9294cfd',adapter='http',endpoint='http://127.0.0.1:8110',allowed_hosts=['127.0.0.1'],secret_id=secret_id,timeout_seconds=180,capabilities={'photo.analyze@v1':'/invoke/analyze'})
         db.add(Provider(id=provider_id,manifest=manifest.model_dump_json(),enabled=True))
     token=credential(db,user.id,'pair',600)
     db.commit()

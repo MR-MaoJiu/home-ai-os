@@ -28,7 +28,7 @@
 | 隐私 | 云能力限制、公开资料最小调用、披露记录 | 完整 NER、本地复核、占位符往返还原；私人内容上云保持拒绝 |
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
-| 模型 | llama.cpp、MLX 固定权重本地生成与真实工具调用；本地中英文 Reranker；OpenAI 兼容协议 | vLLM 硬件验收、云账户集成、视觉模型 |
+| 模型 | llama.cpp、MLX 固定权重本地生成与真实工具调用；本地中英文 Reranker、Qwen2-VL 照片分析；OpenAI 兼容协议 | vLLM 硬件验收、云账户集成、视觉模型质量评估 |
 | 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、CosyVoice 内置音色合成、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；真机语音播放、家居自动化因果关联/物理设备、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流、App Intent 提醒提交、活动跳转、系统提醒受控写入 | APNs、后台调度及 Siri/快捷指令真机验收、逐 Token 文本流 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
@@ -1082,7 +1082,7 @@ MLX 官方 HTTP 服务属于开发服务，本地回环监听、过滤环境和�
 |---|---|
 | 完整隐私出站 | NER、本地复核、占位符映射及往返还原仍需实现并验证；私人内容上云继续拒绝 |
 | Agent/Skill | 云费用预算、补偿工作流、更多自主工具及复杂失败恢复仍需完成 |
-| 其他模型能力 | 视觉模型真实接入；vLLM 需兼容服务器硬件；CosyVoice 长文本质量及真机播放 |
+| 其他模型能力 | 视觉模型长期质量与性能验收；vLLM 需兼容服务器硬件；CosyVoice 长文本质量及真机播放 |
 | 家居自动化 | 观察事件到自动化的因果关联、防回环与物理设备操作验收 |
 | iOS 系统能力 | APNs、后台文件传输、真机权限/调度、Siri 与实际通知送达；需要签名团队及 iPhone |
 | 生产插件 | Linux rootless/gVisor、受限网络、签名/SBOM、升级失败回滚与卸载清除的完整验收 |
@@ -1229,3 +1229,57 @@ iOS/网页音色查询与播放控件、iOS 聊天回答手动朗读已实现并
 原生模拟器通过真实 HTTPS 配对、音色查询、CosyVoice 合成、实际 AVAudioPlayer 播放与停止；等待期间取消后不会因迟到结果恢复播放，来源删除与错误连接身份被拒绝。专用测试 API 固定使用 `homeai_test`，临时 `/_test/run-speech` 只执行当前主体的语音任务，不会出现在生产 API。
 
 真实 Chrome 浏览器通过登录、音色获取、合成、实际播放与停止，页面错误为零，并检查了截图布局。iPhone 真机、蓝牙/耳机切换、电话打断、锁屏与长期弱网仍待验收；当前不提供后台持续朗读或自动连续播放。
+
+
+## 本地照片分析
+
+照片分析已使用真实 `Qwen2-VL-2B-Instruct` 与 llama.cpp 接通，客户端只提交已授权照片的记录 ID，不能指定图片 URL、宿主文件路径或原始模型消息。模型用于描述可见内容，不用于判定人物身份、敏感属性或医疗结论；分析文本是模型输出，不会自动成为确认事实。
+
+### 模型、许可与安装
+
+固定量化仓库为 [ggml-org/Qwen2-VL-2B-Instruct-GGUF](https://huggingface.co/ggml-org/Qwen2-VL-2B-Instruct-GGUF)，修订 `bb307c036e8a1ed7b663bbd0c35b41c4c9294cfd`。已经核对[原始模型 LICENSE](https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct/blob/main/LICENSE)为 Apache-2.0，不仅依赖量化仓库标签。量化权重与投影器的大小、SHA-256 在 `providers/models/vision-qwen2.json`，运行器要求已经验证的 llama.cpp `b8460 (b1c70e2e5)`。
+
+```sh
+python3.12 -m venv state/venvs/vision
+state/venvs/vision/bin/pip install -r providers/locks/vision-macos-py312.txt
+# 使用已安装的 Hugging Face CLI 下载固定模型。
+hf download ggml-org/Qwen2-VL-2B-Instruct-GGUF Qwen2-VL-2B-Instruct-Q4_K_M.gguf mmproj-Qwen2-VL-2B-Instruct-Q8_0.gguf --revision bb307c036e8a1ed7b663bbd0c35b41c4c9294cfd --local-dir state/models/vision-qwen2
+.venv/bin/python scripts/run_vision_model.py
+```
+
+另开终端运行桥接和登记：
+
+```sh
+.venv/bin/python scripts/run_vision.py
+.venv/bin/python scripts/register_local_vision.py --user <成员ID>
+```
+
+模型仅监听 `127.0.0.1:58087`，关闭模型网页入口和正文日志。桥接监听 `127.0.0.1:8110`，要求服务令牌，只允许连接固定本机模型端口；不继承 Core 数据库和主密钥。登记核对桥接类型和实际模型 ID，令牌只写入成员加密 Secret。生产沙箱尚未完成，这两个端口不应对 LAN/公网开放。
+
+### 照片与任务流程
+
+1. iOS 设置中选择照片，ImageIO 以缩略解码转换为最长边 1536 像素的 JPEG，重新编码而不复制 GPS、设备标识、拍摄注释等来源元数据。系统可能生成尺寸和色彩空间等技术字段。
+2. 沿用 `photo.selected` 规范记录同步、版本与加密存储；旧照片不会被静默重写，重新选择时按原有来源身份同步新内容。
+3. 数据 → 对应照片 → 使用本地模型分析照片，预览当前照片并填写问题。客户端提交 `photo.analyze@v1` 任务，例如：
+
+```json
+{"capability":"photo.analyze@v1","arguments":{"record_id":"已同步照片的记录ID","question":"描述照片中可见的自然景物。"},"step_timeout_seconds":180,"idempotency_key":"本次请求唯一值"}
+```
+
+4. Core 在当前主体/RLS 作用域读取照片，拒绝未授权、删除、SECRET、错误类型、外部 URL 或自定义消息。任务绑定照片版本，执行前与模型返回后再次检查。
+5. 独立桥接只接受单帧 JPEG/PNG/WebP，输入最多 10 MB、2000 万像素；应用方向信息、转 RGB、去除来源元数据并缩放，再以本地 Data URI 交给固定视觉模型。模型不负责下载 URL。
+6. 结果包含 `text`、`source_id`、`source_version` 和 `model_output=true`，加密保存在任务中。来源后续删除、撤权、变化或成为 SECRET 时，旧任务结果不再返回。照片分析没有自动云端故障回退。
+
+iOS 页面离开或进入后台时停止等待；服务器可能仍继续计算，可以在活动/任务状态查看，不会因超时自动重发。当前支持单张静态照片，视频、连续相册扫描、面部识别和自动执行图片中的指令不在该入口中。
+
+### 真实验收与已知限制
+
+服务端使用 llama.cpp 官方仓库中的公开山谷照片，实际输出山峰、峡谷、河流和植被；测试同时覆盖拒绝外部 URL、无效图片、跨成员访问、SECRET 与来源删除后的旧结果屏蔽。原生测试完成实际照片转换 → HTTPS 同步 → Core 任务 → 真实视觉模型 → 结果读取，并在转换前加入测试 GPS/设备标识/注释，验证这些字段被移除。
+
+```sh
+HOMEAI_VISION_TEST=1 HOMEAI_INTEGRATION=1 .venv/bin/pytest -q server/tests/test_vision_live.py
+```
+
+该测试需要将 [官方样本](https://github.com/ggml-org/llama.cpp/blob/b1c70e2e5/tools/server/webui/tests/stories/fixtures/assets/1.jpg) 下载到 `state/vision/official-sample.jpg`；本次文件 SHA-256 为 `ddbdb9cdb5f109c567d2aafd076288cd57187e7a97d94898c72591dbfe28235c`。样本不随本仓库分发，不向用户相册添加任何测试数据。
+
+候选模型曾把截图中的页面标题误认成产品名，因此不将通过样例视为任意图片的准确率保证。照片缩放和图像 Token 上限会影响小字、复杂图表和细节。真机有限照片权限、真实 HEIC/Live Photo 全面兼容、长期质量、批量性能和 Linux 隔离仍待验收。

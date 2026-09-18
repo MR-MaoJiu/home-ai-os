@@ -1,0 +1,17 @@
+{
+  "provider": "vision",
+  "repository": "ggml-org/Qwen2-VL-2B-Instruct-GGUF",
+  "model_revision": "bb307c036e8a1ed7b663bbd0c35b41c4c9294cfd",
+  "files": [
+    {
+      "path": "Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
+      "bytes": 986046944,
+      "sha256": "5745685d2e607a82a0696c1118e56a2a1ae0901da450fd9cd4f161c6b62867d7"
+    },
+    {
+      "path": "mmproj-Qwen2-VL-2B-Instruct-Q8_0.gguf",
+      "bytes": 709883360,
+      "sha256": "a0ad91f00a7a80dcf84d719a61b00ee2e07b71794f4ee2dfa81a254621a8c418"
+    }
+  ]
+}

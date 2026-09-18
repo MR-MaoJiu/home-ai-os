@@ -110,7 +110,10 @@ struct DataView: View {
                         List {
                             LabeledContent("类型", value: record.kind)
                             LabeledContent("敏感等级", value: record.sensitivity)
-                            ForEach(record.payload.keys.sorted(), id: \.self) { key in
+                            if record.kind == "photo.selected", record.sensitivity != "SECRET" {
+                                NavigationLink("使用本地模型分析照片") { PhotoAnalysisView(recordID: record.id) }
+                            }
+                            ForEach(record.payload.keys.filter { $0 != "content_base64" }.sorted(), id: \.self) { key in
                                 VStack(alignment: .leading) { Text(key).foregroundStyle(.secondary); Text(record.payload[key]?.description ?? "").textSelection(.enabled) }
                             }
                         }.navigationTitle(record.title)

@@ -120,6 +120,12 @@ async def _run_step(app, task_id, user_id=None):
                     db.commit()
                     return
             args = resolve_arguments(step_body.get("arguments", {}), completed, app.vault, actor.user_id)
+            photo_binding = None
+            if capability == "photo.analyze@v1":
+                from .photos import prepare as prepare_photo
+                photo, _ = prepare_photo(db, actor, args, app)
+                photo_binding = (photo.id, photo.version)
+                body.setdefault('_record_dependencies', {})[photo.id] = photo.version
             if capability == "reminder.create@v1":
                 from .reminders import normalize as normalize_reminder
                 args = normalize_reminder(args)
@@ -264,6 +270,11 @@ async def _run_step(app, task_id, user_id=None):
                     require_ready(db, actor, manifest)
                 provider_arguments = args
                 document_source = None
+                if photo_binding is not None:
+                    from .photos import prepare as prepare_photo
+                    photo, provider_arguments = prepare_photo(db, actor, args, app)
+                    if (photo.id, photo.version) != photo_binding:
+                        raise HTTPException(409, "照片已变化，请重新提交")
                 if capability == "document.parse@v1":
                     from .documents import prepare
                     document_source, provider_arguments = prepare(db, actor, args, app)
@@ -271,6 +282,9 @@ async def _run_step(app, task_id, user_id=None):
                 dispatched = True
                 async with asyncio.timeout(min(body.get("step_timeout_seconds", 120), max(0.001, task.deadline - now()))):
                     result = await app.registry.invoke(db, actor, manifest, capability, provider_arguments, invocation.id)
+                if photo_binding is not None:
+                    from .photos import result as photo_result
+                    result = photo_result(db, actor, *photo_binding, result)
                 if capability == "mail.read@v1":
                     if not isinstance(result, dict) or not isinstance(result.get('source_key'), str) or len(result['source_key']) > 200:
                         raise HTTPException(502, "邮件 Provider 缺少规范来源标识")

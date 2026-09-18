@@ -88,7 +88,8 @@ struct SettingsView: View {
                 guard let photo else { return }
                 Task { await state.perform {
                     guard let data = try await photo.loadTransferable(type: Data.self) else { return }
-                    try await ConnectorSync(api: state.api).uploadRecord(source: "photos", sourceID: DeviceIdentity.hash(data), kind: "photo.selected", payload: ["name": .string("用户选择的照片"), "content_base64": .string(data.base64EncodedString())])
+                    let prepared = try PhotoPreparation.jpeg(data)
+                    try await ConnectorSync(api: state.api).uploadRecord(source: "photos", sourceID: DeviceIdentity.hash(data), kind: "photo.selected", payload: ["name": .string("用户选择的照片"), "content_base64": .string(prepared.base64EncodedString())])
                     syncMessage = "照片已同步"
                 } }
             }

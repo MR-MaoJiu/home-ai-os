@@ -149,6 +149,8 @@ struct ChatView: View {
     }
 
     static func answer(_ result: JSONValue?) -> String? {
+        if case .object(let fields) = result, case .string(let text) = fields["text"] { return text }
+        if case .object(let fields) = result, fields["audio_base64"] != nil { return "语音已生成。请在语音朗读页面播放。" }
         if case .object(let object) = result,
            case .array(let choices) = object["choices"], case .object(let first) = choices.first,
            case .object(let message) = first["message"], case .string(let content) = message["content"] { return content }
