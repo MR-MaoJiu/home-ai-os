@@ -85,11 +85,10 @@ struct DataView: View {
             if !state.syncStatus.isEmpty { Text(state.syncStatus).font(.caption).foregroundStyle(.secondary) }
             Section {
                 if !currentMemberName.isEmpty { Text("当前成员：" + currentMemberName).font(.caption) }
-                NavigationLink("我的与共享记忆") { MemberMemoryView() }.disabled(!state.connected)
-                Text("显示本人成员的数据和明确共享给你的数据。其他账号的管理后台，需要你逐条共享后才能看到。").font(.caption)
+                Text("显示本人成员的数据和明确共享给你的数据。图片、文件等逐条共享；健康和位置的持续共享在设置中管理。").font(.caption)
             }
             Section("已授权的数据") {
-                ForEach(state.records) { record in
+                ForEach(state.records.filter { !$0.kind.hasPrefix("memory.") }) { record in
                     NavigationLink {
                         MemberRecordDetail(record: record, isOwner: record.owner_id == currentUser)
                     } label: {
@@ -99,7 +98,7 @@ struct DataView: View {
                 }
             }
         }
-        .overlay { if state.records.isEmpty { ContentUnavailableView("数据由你掌控", systemImage: "externaldrive", description: Text(state.syncStatus.isEmpty ? "在设置中授权同步，或导入文件。" : state.syncStatus)) } }
+        .overlay { if state.records.filter({ !$0.kind.hasPrefix("memory.") }).isEmpty { ContentUnavailableView("数据由你掌控", systemImage: "externaldrive", description: Text(state.syncStatus.isEmpty ? "在设置中授权同步，或导入文件。" : state.syncStatus)) } }
         .navigationTitle("数据")
         .toolbar { Button("导入文件", systemImage: "plus") { importing = true } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
@@ -273,19 +272,18 @@ struct MemberMemoryView: View {
         List {
             Section { Text("同步的原始资料不会自动成为长期记忆。提交候选并确认后，才保存到你的记忆账本。").font(.caption) }
             if let error { Text(error).foregroundStyle(.red) }
-            Section("已确认及共享给我的记忆") {
-                ForEach(state.records.filter { $0.kind == "memory.fact" }) { record in
+            Section("我的已确认记忆") {
+                ForEach(state.records.filter { $0.kind == "memory.fact" && $0.owner_id == ownerID }) { record in
                     VStack(alignment: .leading) {
                         Text(record.payload["content"]?.description ?? record.title)
-                        if record.owner_id == ownerID { NavigationLink("共享此条记忆") { RecordSharingView(recordID: record.id) } }
-                        else { Text("成员共享给你的记忆").font(.caption) }
+
                     }
                 }
             }
             Section("提交我的候选记忆") {
                 Picker("来源资料", selection: $source) {
                     Text("请选择自己的资料").tag("")
-                    ForEach(state.records.filter { $0.owner_id == ownerID && $0.sensitivity != "SECRET" }) { record in Text(record.title).tag(record.id) }
+                    ForEach(state.records.filter { $0.owner_id == ownerID && $0.sensitivity != "SECRET" && !$0.kind.hasPrefix("memory.") }) { record in Text(record.title).tag(record.id) }
                 }
                 TextField("需要记住的内容", text: $content, axis: .vertical).lineLimit(3...8)
                 Button("提交候选，等待确认") { Task { await submit() } }.disabled(busy || source.isEmpty || content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -301,7 +299,7 @@ struct MemberMemoryView: View {
                     }
                 }
             }
-        }.navigationTitle("成员记忆").task(id: state.connectionRevision) { candidates = []; await load() }.refreshable { await load() }
+        }.navigationTitle("记忆").task(id: state.connectionRevision) { candidates = []; await load() }.refreshable { await load() }
     }
     func load() async {
         do {
@@ -334,7 +332,11 @@ private struct MemberRecordDetail: View {
             LabeledContent("类型", value: record.kind)
             LabeledContent("敏感等级", value: record.sensitivity)
             if isOwner && record.sensitivity != "SECRET" {
-                NavigationLink("共享给家庭成员") { RecordSharingView(recordID: record.id) }
+                if record.kind.hasPrefix("health.") || record.kind.hasPrefix("location.") {
+                    NavigationLink("管理此类数据的持续共享") { ContinuousSharingView() }
+                } else {
+                    NavigationLink("共享给家庭成员") { RecordSharingView(recordID: record.id) }
+                }
             }
             if record.kind == "photo.selected" && record.sensitivity != "SECRET" {
                 NavigationLink("使用本地模型分析照片") { PhotoAnalysisView(recordID: record.id) }
@@ -346,5 +348,54 @@ private struct MemberRecordDetail: View {
                 }
             }
         }.navigationTitle(record.title)
+    }
+}
+
+struct ContinuousSharingView: View {
+    @Environment(AppState.self) private var state
+    struct Rule: Decodable { let category: String; let grantee_id: String }
+    @State private var members: [FamilyMember] = []
+    @State private var rules: [Rule] = []
+    @State private var namespace: String?
+    @State private var error: String?
+    @State private var busy = false
+    var body: some View {
+        List {
+            Section {
+                Text("开启后向指定成员共享该类已有资料及后续上传、更新的资料；关闭会撤回该类全部共享。秘密资料始终不可共享。此设置不会扩大系统采集权限，也不会共享你的记忆。").font(.caption)
+            }
+            if let error { Text(error).foregroundStyle(.red) }
+            ForEach(["health", "location"], id: \.self) { category in
+                Section(category == "health" ? "健康信息" : "位置信息") {
+                    ForEach(members) { member in
+                        Toggle(member.name, isOn: Binding(get: {
+                            rules.contains { $0.category == category && $0.grantee_id == member.id }
+                        }, set: { enabled in Task { await change(category, member.id, enabled) } }))
+                        .disabled(busy || namespace == nil)
+                    }
+                    if members.isEmpty { Text("暂无可共享的其他家庭成员").foregroundStyle(.secondary) }
+                }
+            }
+        }.navigationTitle("持续共享")
+            .task(id: state.connectionRevision) { namespace = nil; members = []; rules = []; await load() }
+            .refreshable { await load() }
+    }
+    private func load() async {
+        do {
+            let current = try await state.api.syncNamespace()
+            let owner = try await state.api.ownerIdentity(expectedNamespace: current)
+            let people = try JSONDecoder().decode([FamilyMember].self, from: await state.api.request("GET", "/api/v1/members", expectedNamespace: current))
+            let saved = try JSONDecoder().decode([Rule].self, from: await state.api.request("GET", "/api/v1/sharing/rules", expectedNamespace: current))
+            guard !Task.isCancelled else { return }
+            members = people.filter { $0.id != owner.userID }; rules = saved; namespace = current; error = nil
+        } catch { self.error = error.localizedDescription; namespace = nil }
+    }
+    private func change(_ category: String, _ member: String, _ enabled: Bool) async {
+        guard let namespace else { return }
+        busy = true; defer { busy = false }
+        do {
+            _ = try await state.api.request(enabled ? "PUT" : "DELETE", "/api/v1/sharing/rules/" + category + "/" + member, expectedNamespace: namespace)
+            await load()
+        } catch { self.error = error.localizedDescription }
     }
 }

@@ -122,3 +122,34 @@ def test_grant_management_requires_owner_and_revokes_visibility(system,alice):
     assert outsider.request('GET',path).status_code==404
     assert bob.request('DELETE',path+'/grants/'+alice.user_id).status_code==200
     assert alice.request('GET',path).status_code==404
+
+
+def test_continuous_sharing_is_scoped_and_reversible(system,alice):
+    bob=SignedClient(system[1],system[2])
+    outsider=SignedClient(system[1],system[2],household='other')
+    path='/api/v1/sharing/rules/health/'+bob.user_id
+    health=put(alice,record(source_id='health-old',kind='health.sleep'))
+    location=put(alice,record(source_id='location-old',kind='location.point'))
+    memory=put(alice,record(source_id='memory-old',kind='memory.fact'))
+    secret=record(source_id='health-secret',kind='health.sleep');secret['sensitivity']='SECRET'
+    secret_id=put(alice,secret)
+    assert alice.request('PUT','/api/v1/sharing/rules/health/'+outsider.user_id).status_code==404
+    assert alice.request('PUT','/api/v1/sharing/rules/memory/'+bob.user_id).status_code==422
+    assert alice.request('PUT',path).status_code==200
+    assert alice.request('PUT',path).status_code==200
+    assert len(alice.request('GET','/api/v1/sharing/rules').json())==1
+    assert bob.request('GET','/api/v1/sharing/rules').json()==[]
+    new=put(alice,record(source_id='health-new',kind='health.sleep'))
+    put(alice,record(source_id='health-old',kind='health.sleep',version=2,payload={'value':42}))
+    assert bob.request('GET','/api/v1/data/'+health).json()['payload']['value']==42
+    assert bob.request('GET','/api/v1/data/'+new).status_code==200
+    for hidden in (location,memory,secret_id):
+        assert bob.request('GET','/api/v1/data/'+hidden).status_code==404
+    assert alice.request('DELETE',path).status_code==200
+    for revoked in (health,new):
+        assert bob.request('GET','/api/v1/data/'+revoked).status_code==404
+    latest=put(alice,record(source_id='health-latest',kind='health.sleep'))
+    assert bob.request('GET','/api/v1/data/'+latest).status_code==404
+    assert alice.request('PUT','/api/v1/sharing/rules/location/'+bob.user_id).status_code==200
+    assert bob.request('GET','/api/v1/data/'+location).status_code==200
+    assert bob.request('GET','/api/v1/data/'+health).status_code==404

@@ -3,7 +3,7 @@ import Foundation
 import Observation
 
 enum HomeDestination: String, Hashable {
-    case ai, automations, data, settings
+    case ai, memory, automations, data, settings
 }
 
 @MainActor @Observable

@@ -69,6 +69,8 @@ def ingest(db, actor, item, vault):
     record.cloud_policy = "LOCAL_ONLY" if sensitive else item.cloud_policy
     record.payload = vault.seal(item.payload, actor.user_id + ":record:" + record.id)
     record.updated_at = now()
+    from .sharing import apply_rules
+    apply_rules(db, actor, record)
     emit(db, actor, "record.changed", record.id)
     notify_recipients(db, actor, "record.changed", record.id)
     if record.sensitivity == 'SECRET' and old_sensitivity != 'SECRET':

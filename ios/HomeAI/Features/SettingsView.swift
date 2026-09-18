@@ -45,12 +45,16 @@ struct SettingsView: View {
             Section("系统提醒写入") {
                 NavigationLink("选择系统列表与同步规则") { ReminderSyncSettings() }.disabled(!state.connected)
             }
+            Section("数据共享") {
+                NavigationLink("健康与位置的持续共享") { ContinuousSharingView() }.disabled(!state.connected)
+                Text("上传资料与长期记忆分别存储在家庭服务器。图片和文件在数据页逐条共享。").font(.caption)
+            }
             Section("按需授权同步") {
                 Button("同步未来 30 天日历") { sync { try await $0.calendar() } }
                 Button("导入手机已有提醒") { sync { try await $0.reminders() } }
                 Button("同步联系人") { sync { try await $0.contacts() } }
                 Button("同步最近 7 天睡眠数据") { sync { try await $0.sleep() } }
-                Button("分享本次位置") {
+                Button("同步本次位置") {
                     Task { await state.perform {
                         let coordinate = try await location.once()
                         try await ConnectorSync(api: state.api).uploadRecord(source: "location", sourceID: UUID().uuidString, kind: "location.point", payload: ["latitude": .number(coordinate.latitude), "longitude": .number(coordinate.longitude), "observed_at": .string(Date().ISO8601Format())])

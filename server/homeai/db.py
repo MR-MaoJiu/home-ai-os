@@ -348,3 +348,10 @@ class ConversationTurn(Owned, Base):
     user_message: Mapped[str] = mapped_column(Text)
     task_id: Mapped[str] = mapped_column(String,index=True)
     created_at: Mapped[float] = mapped_column(default=now)
+
+
+class SharingRule(Owned, Base):
+    __tablename__ = "sharing_rules"
+    category: Mapped[str] = mapped_column(String)
+    grantee_id: Mapped[str] = mapped_column(String)
+    __table_args__ = (UniqueConstraint("owner_id", "category", "grantee_id"),)

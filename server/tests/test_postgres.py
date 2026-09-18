@@ -81,3 +81,21 @@ async def test_pgvector_uses_canonical_content():
     with app.state.db() as db:
         scope(db,alice.user_id,household)
         assert await search(app.state,db,Actor(alice.user_id,household,alice.device_id,'adult'),'相关问题')==[]
+
+
+def test_real_continuous_sharing_rls():
+    from homeai.db import SharingRule
+    from test_security_data import test_continuous_sharing_is_scoped_and_reversible
+    settings=Settings();settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
+    app=create_app(settings)
+    with TestClient(app) as client:
+        alice=SignedClient(client,app.state.db)
+        try:
+            test_continuous_sharing_is_scoped_and_reversible((app,client,app.state.db),alice)
+            with app.state.db() as db:
+                assert db.scalar(select(SharingRule).where(SharingRule.owner_id==alice.user_id)) is None
+                scope(db,alice.user_id,'h1')
+                assert db.scalar(select(SharingRule).where(SharingRule.owner_id==alice.user_id)) is not None
+        finally:
+            alice.request('DELETE','/api/v1/devices/'+alice.device_id)
+    app.state.db.kw['bind'].dispose()

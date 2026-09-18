@@ -46,6 +46,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.state.db = db_factory or database(settings.database_url)[1]
     app.state.policy = policy or Policy(settings.opa_url)
     app.state.registry = registry or Registry(app.state.vault)
+    from .sharing import router as sharing_router
+    app.include_router(sharing_router)
     v = app.state.vault
     auth = Depends(authenticate)
 
