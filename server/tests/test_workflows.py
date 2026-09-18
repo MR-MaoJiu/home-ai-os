@@ -216,3 +216,43 @@ async def test_expired_approval_is_finalized_by_worker(workflow):
     await cycle(app)
     result = user.request('GET', '/api/v1/tasks/' + tid).json()
     assert result['status'] == 'FAILED' and '过期' in result['error']
+
+
+@pytest.mark.asyncio
+async def test_member_data_memory_tasks_and_rules_remain_scoped(workflow):
+    from conftest import SignedClient
+    app,phone=workflow
+    with app.db() as db:
+        from homeai.db import Principal
+        household=db.get(Principal,phone.user_id).household_id
+    admin=SignedClient(phone.client,app.db,household=household,role='infrastructure_owner')
+    upload=phone.request('POST','/api/v1/data/sync',{'batch_id':str(uuid.uuid4()),'records':[{'source':'health','source_id':str(uuid.uuid4()),'kind':'health.sleep','version':1,'payload':{'value':1}}]})
+    assert upload.status_code==200,upload.text
+    record=upload.json()['records'][0]['id'];path='/api/v1/data/'+record
+    assert admin.request('GET',path).status_code==404
+    assert phone.request('PUT',path+'/grants/'+admin.user_id).status_code==200
+    assert admin.request('GET',path).status_code==200
+    assert phone.request('GET',path+'/grants').json()['grantee_ids']==[admin.user_id]
+    assert admin.request('GET',path+'/grants').status_code==404
+    candidate=phone.request('POST','/api/v1/memory/candidates',{'source_ids':[record],'content':'仅用于权限隔离验收的候选记忆'}).json()['id']
+    assert admin.request('GET','/api/v1/memory/candidates').json()==[]
+    confirmed=phone.request('POST','/api/v1/memory/candidates/'+candidate+'/confirm')
+    assert confirmed.status_code==200,confirmed.text
+    fact='/api/v1/data/'+confirmed.json()['record_id']
+    assert admin.request('GET',fact).status_code==404
+    assert phone.request('PUT',fact+'/grants/'+admin.user_id).status_code==200
+    assert admin.request('GET',fact).status_code==200
+    task=create(phone,[{'capability':'mail.send@v1','arguments':{'to':'recipient@example.test','subject':'审批权限验收','text':'未审批，不发送'}}])
+    await run_task(app,task,phone.user_id)
+    pending=phone.request('GET','/api/v1/approvals').json()
+    assert pending[0]['task_id']==task
+    assert admin.request('GET','/api/v1/approvals').json()==[]
+    assert admin.request('POST','/api/v1/approvals/'+pending[0]['id'],{'decision':'APPROVED'}).status_code==404
+    rule=phone.request('POST','/api/v1/automations',{'name':'权限验收','cron':'0 8 * * *','timezone':'Asia/Shanghai','skill':{'name':'权限验收','steps':[{'capability':'reminder.create@v1','arguments':{'title':'权限验收'}}]}})
+    assert rule.status_code==200,rule.text
+    assert admin.request('GET','/api/v1/automations').json()==[]
+    assert phone.request('DELETE',path+'/grants/'+admin.user_id).status_code==200
+    assert phone.request('DELETE',fact+'/grants/'+admin.user_id).status_code==200
+    assert admin.request('GET',path).status_code==404
+    assert admin.request('GET',fact).status_code==404
+    admin.request('DELETE','/api/v1/devices/'+admin.device_id)

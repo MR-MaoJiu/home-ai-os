@@ -24,6 +24,19 @@ final class DirectTests: XCTestCase {
         }
     }
 
+    func testSearchResultsOnlyExposeSafeUniqueWebLinks() {
+        let result: JSONValue = .object(["content_trust": .string("untrusted_web"), "results": .array([
+            .object(["title": .string("公开结果"), "url": .string("https://example.test/article")]),
+            .object(["title": .string("重复"), "url": .string("https://example.test/article")]),
+            .object(["title": .string("脚本"), "url": .string("javascript:alert(1)")]),
+            .object(["title": .string("带凭据"), "url": .string("https://user:password@example.test")])
+        ])])
+        let hits = webSearchHits(result)
+        XCTAssertEqual(hits?.count, 1)
+        XCTAssertEqual(hits?.first?.title, "公开结果")
+        XCTAssertEqual(taskStatusLabel("AWAITING_APPROVAL"), "等待你的确认")
+    }
+
     @MainActor
     func testPollingCancellationAndIdleKeepSameConnection() async throws {
         let env = ProcessInfo.processInfo.environment

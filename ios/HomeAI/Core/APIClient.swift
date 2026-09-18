@@ -33,7 +33,7 @@ struct PairingCode: Codable, Sendable {
 
 /// 网络与身份集中在单一 actor，避免页面自行处理签名或泄露会话。
 struct TaskStateEvent: Decodable, Sendable {
-    struct Item: Decodable, Sendable, Identifiable { let id: String; let status: String }
+    struct Item: Decodable, Sendable, Identifiable, Equatable { let id: String; let status: String }
     let type: String
     let tasks: [Item]
     let has_more: Bool

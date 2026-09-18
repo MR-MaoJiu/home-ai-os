@@ -155,14 +155,15 @@ final class AppState {
                         self.serverReachable = true
                         await self.confirmConnectionRecovered()
                         if event.type == "task.snapshot" {
-                            try await self.loadActivity(expectedNamespace: namespace)
                             let owner = try await self.api.ownerIdentity(expectedNamespace: namespace)
                             if UserDefaults.standard.bool(forKey: SystemReminderSync.preferenceKey(owner.namespace) + ".automatic") {
                                 try await self.loadData()
                             }
                             guard namespace == (try await self.api.syncNamespace()), !Task.isCancelled else { return }
-                            self.taskStates = event.tasks
-                            self.taskEventRevision = UUID()
+                            if self.taskStates != event.tasks {
+                                self.taskStates = event.tasks
+                                self.taskEventRevision = UUID()
+                            }
                             self.taskEventStatus = event.has_more ? "显示最近 100 个任务状态" : "任务状态已连接"
                             retries = 0
                         }
@@ -315,7 +316,7 @@ struct AutomationEntry: Decodable, Identifiable {
         return ["record.changed": "数据新增或更新", "record.deleted": "数据删除", "record.revoked": "共享授权撤回"][event_type ?? ""] ?? "数据事件"
     }
 }
-struct ApprovalEntry: Decodable, Identifiable { let id: String; let capability: String; let arguments: [String: JSONValue] }
+struct ApprovalEntry: Decodable, Identifiable { let id: String; let task_id: String?; let capability: String; let arguments: [String: JSONValue] }
 
 indirect enum JSONValue: Codable, Sendable, CustomStringConvertible {
     case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null

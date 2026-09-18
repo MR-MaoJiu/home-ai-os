@@ -328,3 +328,23 @@ class PairEnrollment(Base):
     user_id: Mapped[str] = mapped_column(String)
     expires: Mapped[float]
     ciphertext: Mapped[str] = mapped_column(Text)
+
+
+class Conversation(Owned, Base):
+    __tablename__ = 'conversations'
+    title: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[float] = mapped_column(default=now)
+    updated_at: Mapped[float] = mapped_column(default=now)
+    next_sequence: Mapped[int] = mapped_column(Integer,default=0)
+
+
+class ConversationTurn(Owned, Base):
+    __tablename__ = 'conversation_turns'
+    __table_args__ = (UniqueConstraint('conversation_id','sequence'),UniqueConstraint('conversation_id','client_key'),UniqueConstraint('task_id'))
+    conversation_id: Mapped[str] = mapped_column(String,index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    client_key: Mapped[str] = mapped_column(String)
+    request_hash: Mapped[str] = mapped_column(String)
+    user_message: Mapped[str] = mapped_column(Text)
+    task_id: Mapped[str] = mapped_column(String,index=True)
+    created_at: Mapped[float] = mapped_column(default=now)

@@ -102,7 +102,6 @@ struct RootView: View {
         @Bindable var state = state
         TabView(selection: $navigation.destination) {
             Tab("AI", systemImage: "sparkles", value: HomeDestination.ai) { NavigationStack { ChatView().id(state.connectionRevision) } }
-            Tab("活动", systemImage: "clock.arrow.circlepath", value: HomeDestination.activity) { NavigationStack { ActivityView().id(state.connectionRevision) } }
             Tab("自动化", systemImage: "bolt", value: HomeDestination.automations) { NavigationStack { AutomationsView() } }
             Tab("数据", systemImage: "externaldrive", value: HomeDestination.data) { NavigationStack { DataView() } }
             Tab("设置", systemImage: "gearshape", value: HomeDestination.settings) { NavigationStack { SettingsView() } }

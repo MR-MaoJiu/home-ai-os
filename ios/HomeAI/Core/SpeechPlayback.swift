@@ -71,7 +71,7 @@ final class SpeechPlayback {
         operation?.cancel(); operation = nil
         activeTask = nil; busy = false
         releaseAudio()
-        status = task == nil ? "已停止" : "已停止等待，服务端任务可在活动中查看"
+        status = task == nil ? "已停止" : "已停止等待，服务端任务仍在继续处理"
         if cancelServer, let task, let scope {
             Task { _ = try? await api.request("POST", "/api/v1/tasks/" + task + "/cancel", expectedNamespace: scope) }
         }
@@ -126,7 +126,7 @@ final class SpeechPlayback {
             }
             try await Task.sleep(for: .seconds(1))
         }
-        throw APIClient.APIError.message("任务仍在服务器运行，请到活动页面查看；没有重新提交")
+        throw APIClient.APIError.message("语音任务仍在服务器运行，请稍后查看；没有重新提交")
     }
 
     private func validateSources(_ sources: [RecordReference], namespace: String) async throws {

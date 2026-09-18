@@ -69,6 +69,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.include_router(pairing_router)
     from .service_application import router as application_router
     app.include_router(application_router)
+    from .conversations import router as conversation_router
+    app.include_router(conversation_router)
 
     @app.post("/api/v1/pair")
     def pair(body: PairRequest):
@@ -151,6 +153,13 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             from .deletion import delete_tree
             deleted_ids = delete_tree(db, actor, record, v, settings.state_dir)
             return {"deleted": True, "deleted_ids": deleted_ids, "derived_purge": "pending"}
+
+    @app.get("/api/v1/data/{record_id}/grants")
+    def record_grants(record_id: str, actor: Actor = auth):
+        with app.state.db() as db:
+            record=own(db,Record,record_id,actor)
+            if record.deleted:raise HTTPException(404,"数据已删除")
+            return {"grantee_ids":list(db.scalars(select(Grant.grantee_id).where(Grant.record_id==record.id,Grant.owner_id==actor.user_id)))}
 
     @app.put("/api/v1/data/{record_id}/grants/{user_id}")
     def share(record_id: str, user_id: str, actor: Actor = auth):
@@ -307,11 +316,12 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             result = []
             for row in rows:
                 inv = db.get(Invocation, row.invocation_id)
-                task = db.get(Task, inv.task_id)
+                task = db.get(Task, inv.task_id) if inv else None
+                if not task or task.status != "AWAITING_APPROVAL" or task.cancel_requested:continue
                 from .result_access import check_dependencies
                 try: check_dependencies(db, actor, v.open(task.request, actor.user_id + ':task:' + task.id))
                 except HTTPException: continue
-                result.append({"id": row.id, "capability": inv.capability, "arguments": v.open(inv.arguments, actor.user_id + ":invocation:" + inv.id), "expires_at": row.expires_at})
+                result.append({"id": row.id, "task_id": task.id, "capability": inv.capability, "arguments": v.open(inv.arguments, actor.user_id + ":invocation:" + inv.id), "expires_at": row.expires_at})
             return result
 
     @app.post("/api/v1/approvals/{approval_id}")

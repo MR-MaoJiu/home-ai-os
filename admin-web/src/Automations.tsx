@@ -40,7 +40,7 @@ export function Automations({rules,onChanged}:{rules:Rule[];onChanged:()=>void})
   catch(error){setError(error instanceof Error?error.message:'读取失败')}
   finally{setBusy(false)}
  }
- return <><section><h2>创建自动化</h2><p>按时间或数据变化创建提醒。事件仅携带记录标识，执行仍受数据权限和设备授权约束。</p>
+ return <><section><h2>我的自动化</h2><p>自动化是“什么时候、做什么”的规则。例如每天 8 点创建提醒；触发后会生成任务，再到“任务与审批”查看执行或确认。这里管理当前账号的规则，不展示其他成员的私人自动化。事件仅携带记录标识，执行仍受权限约束。</p>
   {error&&<p role="alert">{error}</p>}
   <form onSubmit={create}><fieldset disabled={busy}>
    <label className="field">名称或提醒内容<input name="title" required maxLength={100}/></label>

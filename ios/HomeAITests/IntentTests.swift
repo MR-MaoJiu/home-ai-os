@@ -7,7 +7,7 @@ final class IntentTests: XCTestCase {
     func testOpenIntentUsesSharedNavigation() async throws {
         IntentRouter.shared.destination = .ai
         _ = try await OpenHomeActivityIntent().perform()
-        XCTAssertEqual(IntentRouter.shared.destination, .activity)
+        XCTAssertEqual(IntentRouter.shared.destination, .ai)
         XCTAssertEqual(CreateHomeReminderIntent.authenticationPolicy, .requiresLocalDeviceAuthentication)
         XCTAssertTrue(CreateHomeReminderIntent.openAppWhenRun)
         XCTAssertTrue(Bundle.main.localizations.contains("zh-Hans"))

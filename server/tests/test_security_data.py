@@ -106,3 +106,19 @@ def test_legacy_file_migration_preserves_classification_and_download(system,alic
     response=alice.request('GET','/api/v1/files/'+rid+'/content')
     assert response.content==data and response.headers['cache-control']=='no-store'
     assert alice.request('POST','/api/v1/files/'+rid+'/parse').status_code==403
+
+
+def test_grant_management_requires_owner_and_revokes_visibility(system,alice):
+    bob=SignedClient(system[1],system[2]);outsider=SignedClient(system[1],system[2],household='other')
+    rid=put(bob,record(kind='health.sleep',payload={'value':1}))
+    path='/api/v1/data/'+rid
+    assert alice.request('GET',path).status_code==404
+    assert alice.request('GET',path+'/grants').status_code==404
+    assert bob.request('GET',path+'/grants').json()=={'grantee_ids':[]}
+    assert bob.request('PUT',path+'/grants/'+alice.user_id).status_code==200
+    assert alice.request('GET',path).status_code==200
+    assert alice.request('GET',path+'/grants').status_code==404
+    assert bob.request('GET',path+'/grants').json()['grantee_ids']==[alice.user_id]
+    assert outsider.request('GET',path).status_code==404
+    assert bob.request('DELETE',path+'/grants/'+alice.user_id).status_code==200
+    assert alice.request('GET',path).status_code==404

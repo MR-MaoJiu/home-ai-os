@@ -34,7 +34,7 @@ actor ReminderIntentService {
             let legacy = DeviceIdentity.hash(Data((namespace + ":" + title).utf8))
             if let existing = pending[legacy], existing.title == title, existing.namespace == namespace, existing.dueAt == nil { return existing }
         }
-        guard pending.count < 20 else { throw APIClient.APIError.message("未确认的快捷指令提交过多，请先恢复连接并检查活动") }
+        guard pending.count < 20 else { throw APIClient.APIError.message("未确认的快捷指令提交过多，请先恢复连接并检查对话") }
         let request = Pending(namespace: namespace, title: title, idempotencyKey: UUID().uuidString, dueAt: dueAt, notifyAtDue: notify, storageID: key)
         pending[key] = request
         try DeviceIdentity.save(JSONEncoder().encode(pending), name: storageKey)
@@ -59,15 +59,17 @@ actor ReminderIntentService {
         let pending = try prepare(title: title, namespace: namespace, dueDate: dueDate, notify: notify)
         var arguments: [String: Any] = ["title": pending.title]
         if let due = pending.dueAt { arguments["due_at"] = due; arguments["notify_at_due"] = pending.notifyAtDue ?? false }
-        let body = try JSONSerialization.data(withJSONObject: ["idempotency_key": pending.idempotencyKey,
-            "capability": "reminder.create@v1", "arguments": arguments])
-        struct Identifier: Decodable { let id: String }
-        let result = try JSONDecoder().decode(Identifier.self, from: await api.request("POST", "/api/v1/tasks", body: body, expectedNamespace: namespace))
-        guard namespace == (try await api.syncNamespace()) else { throw APIClient.APIError.message("连接已切换，请在原服务器活动中确认提交结果") }
+        arguments["idempotency_key"] = pending.idempotencyKey
+        arguments["timezone"] = TimeZone.current.identifier
+        let body = try JSONSerialization.data(withJSONObject: arguments)
+        struct Identifier: Decodable { let id: String; let conversation_id: String }
+        let result = try JSONDecoder().decode(Identifier.self, from: await api.request("POST", "/api/v1/input/reminder", body: body, expectedNamespace: namespace))
+        guard namespace == (try await api.syncNamespace()) else { throw APIClient.APIError.message("连接已切换，请在原服务器对话中确认提交结果") }
         guard UUID(uuidString: result.id) != nil else { throw APIClient.APIError.message("服务器返回的任务标识无效") }
         var entries = try load()
         entries.removeValue(forKey: pending.storageID ?? DeviceIdentity.hash(Data((namespace + ":" + pending.title).utf8)))
         try DeviceIdentity.save(JSONEncoder().encode(entries), name: storageKey)
+        await MainActor.run { IntentRouter.shared.conversationID = result.conversation_id }
         return result.id
     }
 }

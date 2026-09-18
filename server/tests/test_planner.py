@@ -36,3 +36,8 @@ async def test_agent_token_budget_stops_before_model_request(system, alice):
     assert 'Token 预算不足' in result['error']
     assert result['execution']['model_rounds'] == 0
     assert alice.request('GET', '/api/v1/tasks/' + tid + '/steps').json() == []
+
+
+def test_web_search_is_mapped_without_allowing_extra_authority():
+    assert decode_proposal(proposal('search_web','{"query":"Python documentation"}'))==('web.search@v1',{'query':'Python documentation'})
+    with pytest.raises(HTTPException):decode_proposal(proposal('search_web','{"query":"Python","approved":true}'))
