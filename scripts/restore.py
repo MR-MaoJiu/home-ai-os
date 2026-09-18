@@ -9,7 +9,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from homeai.backup import decrypt_stream,safe_extract,replay_deletions
+from homeai.backup import decrypt_stream,safe_extract,replay_deletions,verify_archive
 from homeai.crypto import Vault
 from homeai.db import database
 
@@ -19,20 +19,22 @@ p.add_argument('--file',type=Path,required=True)
 p.add_argument('--key',type=Path,required=True)
 p.add_argument('--database',required=True)
 p.add_argument('--deletion-journal',type=Path,required=True,help='备份之外独立保管的最新删除日志')
+p.add_argument('--allow-legacy',action='store_true',help='显式接受缺少完整性清单的旧备份')
 a=p.parse_args()
 if not re.fullmatch(r'homeai_restore_[a-z0-9_]+',a.database):raise SystemExit('目标必须为新的 homeai_restore_ 数据库')
 if not a.deletion_journal.is_file():raise SystemExit('独立删除日志缺失，不能恢复')
 config=dotenv_values(root/'.env.local')
 admin=f"postgresql+psycopg://homeai_migrator:{config['HOMEAI_DB_ADMIN_PASSWORD']}@127.0.0.1:55432/homeai"
-engine=create_engine(admin,isolation_level='AUTOCOMMIT')
-with engine.connect() as db:
-    if db.scalar(text('SELECT 1 FROM pg_database WHERE datname=:name'),{'name':a.database}):raise SystemExit('目标库已存在，禁止覆盖')
-    db.execute(text('CREATE DATABASE '+a.database))
 key=a.key.read_bytes()
 if len(key)!=32 or a.key.stat().st_mode & 0o077:raise SystemExit('备份密钥格式/权限无效')
 buffer=io.BytesIO()
 with a.file.open('rb') as src:decrypt_stream(src,buffer,key)
+verify_archive(buffer,allow_legacy=a.allow_legacy)
 buffer.seek(0)
+engine=create_engine(admin,isolation_level='AUTOCOMMIT')
+with engine.connect() as db:
+    if db.scalar(text('SELECT 1 FROM pg_database WHERE datname=:name'),{'name':a.database}):raise SystemExit('目标库已存在，禁止覆盖')
+    db.execute(text('CREATE DATABASE '+a.database))
 # 解密临时目录受 0700 保护，所有内容原本还有应用层加密。
 with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
     destination=Path(directory)

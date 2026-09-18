@@ -82,3 +82,39 @@ def replay_deletions(factory, vault, journal: Path):
                 db.execute(delete(Grant).where(Grant.record_id == record.id))
                 db.add(Outbox(household_id=user.household_id, owner_id=user.id, kind='record.deleted', resource_id=record.id))
         db.commit()
+
+
+def verify_archive(archive, allow_legacy=False):
+    """逐文件核对，不允许重复路径、链接或未列入清单的文件。"""
+    import hashlib
+    from pathlib import PurePosixPath
+    archive.seek(0)
+    with tarfile.open(fileobj=archive, mode='r:*') as tar:
+        members = tar.getmembers()
+        if len(members) > 100000:
+            raise ValueError('归档条目过多')
+        seen, actual = set(), {}
+        for member in members:
+            path = PurePosixPath(member.name)
+            if not member.name or str(path) == '.' or path.is_absolute() or '..' in path.parts or str(path) in seen or not (member.isfile() or member.isdir()):
+                raise ValueError('归档包含重复或不安全路径')
+            seen.add(str(path))
+            if member.isfile() and member.name != 'manifest.json':
+                source = tar.extractfile(member)
+                if source is None:
+                    raise ValueError('不能读取归档文件')
+                actual[member.name] = {'bytes': member.size, 'sha256': hashlib.file_digest(source, 'sha256').hexdigest()}
+        if 'database.dump' not in actual:
+            raise ValueError('归档缺少数据库文件')
+        try:
+            manifest_entry = tar.getmember('manifest.json')
+        except KeyError:
+            if not allow_legacy:
+                raise ValueError('旧备份没有完整性清单，必须显式允许旧格式') from None
+            return {'format_version': 1, 'files': len(actual), 'manifest_verified': False}
+        if not manifest_entry.isfile() or manifest_entry.size > 16 * 1024 * 1024:
+            raise ValueError('备份清单无效或过大')
+        manifest = json.load(tar.extractfile(manifest_entry))
+        if manifest.get('format_version') != 2 or manifest.get('files') != actual:
+            raise ValueError('归档文件与完整性清单不一致')
+        return {'format_version': 2, 'files': len(actual), 'manifest_verified': True}

@@ -958,7 +958,19 @@ FunASR 与 whisper.cpp 均实现 `speech.transcribe@v1`。当前 Registry 按已
 
 ## 备份
 
-`scripts/backup.py` 生成认证加密归档，并支持密文完整性验证。备份密钥应是独立的 32 字节随机文件，权限 0600，不随备份一起存储。`scripts/restore.py` 只允许恢复到全新隔离库，并强制重放独立删除日志。本机小样本演练已通过；异机恢复、备份期间附件一致性和 RPO/RTO 仍需验收。
+`scripts/backup.py` 生成认证加密归档，格式 2 内含每个文件的字节数和 SHA-256 清单。创建时自检；验证时逐文件读取核对，拒绝缺失/多余/变化文件、重复路径、链接和路径穿越。备份密钥应是独立的 32 字节随机文件，权限 0600，不随备份一起存储。
+
+```bash
+# 先停止 API 和所有写入 worker，在维护窗口执行：
+.venv/bin/python scripts/backup.py create --key state/backup.key
+.venv/bin/python scripts/backup.py verify --key state/backup.key --file state/backups/实际文件.haib
+# 只恢复到全新的隔离数据库；必须使用备份之外保管的最新删除日志：
+.venv/bin/python scripts/restore.py --key state/backup.key --file state/backups/实际文件.haib --database homeai_restore_check --deletion-journal state/deletions.jsonl
+```
+
+恢复先验证密文与归档清单，再创建隔离库、运行数据库恢复/迁移、重放独立删除日志并恢复对象文件；不会自动切换业务服务。格式 1 旧归档必须显式传 `--allow-legacy`，验证结果会保留 `manifest_verified: false`，不能声称具备新格式的逐文件清单保证。
+
+已用实际运行库生成格式 2 归档并恢复到新隔离库，旧格式兼容路径也已验证。**清单完整性不等于活跃写入期间的跨数据库/附件一致性**，目前仍要求维护窗口。异机恢复、每日保留/异机副本、规模性能及 RPO/RTO 仍需验收。
 
 ## 网页管理与远程访问
 
