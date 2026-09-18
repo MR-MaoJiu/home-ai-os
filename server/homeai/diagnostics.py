@@ -73,7 +73,22 @@ async def inspect(app, actor):
         remote = False
     checks = {'database': database, 'policy': opa, 'events': events,
               'encryption': {'ok': vault_ok, 'reason': '信封加密往返检查通过' if vault_ok else '加密检查失败'}}
+    from .heartbeat import status as worker_status
+    workers = worker_status(app)
+    required = ['core-worker', 'memory-worker']
+    try:
+        import json
+        from .db import Provider
+        from sqlalchemy import select
+        with app.db() as db:
+            if any(json.loads(provider.manifest).get('home_events') for provider in db.scalars(select(Provider).where(Provider.enabled.is_(True)))):
+                required.append('home-observer')
+    except Exception:
+        required.append('home-observer')
+    ready_workers = all(any(item['phase'] == 'running' for item in workers[name]['instances']) for name in required)
+    dependencies_ready = all(item['ok'] for item in checks.values())
+    checks['workers'] = {'ok': ready_workers, 'reason': '必需执行器近期有正常循环心跳' if ready_workers else '必需执行器未启动、心跳过期、初始化中或最近循环失败'}
     return {'database': database.get('connected', False), 'master_key_loaded': vault_ok,
         'environment': app.settings.environment, 'production_sandbox_verified': False,
-        'remote_configured': remote, 'core_dependencies_ready': all(item['ok'] for item in checks.values()),
-        'checks': checks, 'checked_at': now(), 'unverified': ['worker 存活及任务实际执行', '模型推理', '生产沙箱', '备份恢复', '真机与家庭部署']}
+        'remote_configured': remote, 'core_dependencies_ready': dependencies_ready, 'runtime_ready': dependencies_ready and ready_workers, 'workers': workers,
+        'checks': checks, 'checked_at': now(), 'unverified': ['任务与 Provider 实际执行', '模型推理', '生产沙箱', '备份恢复', '真机与家庭部署']}

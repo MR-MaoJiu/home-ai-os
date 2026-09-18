@@ -68,17 +68,21 @@ async def main():
         await js.add_stream(name=app.settings.event_stream, subjects=[app.settings.event_subject_prefix + ".>"])
     from .event_automations import subscription, drain
     sub = await subscription(app, js)
+    from .heartbeat import Heartbeat
     try:
-        while True:
-            try:
-                await cycle(app, js)
-                await drain(app, sub)
-                with app.db() as db:
-                    db.execute(delete(Nonce).where(Nonce.expires_at < now()))
-                    db.commit()
-            except Exception as exc:
-                log.error("工作循环失败：%s", type(exc).__name__)
-            await asyncio.sleep(1)
+        async with Heartbeat(app, "core-worker") as heartbeat:
+            while True:
+                try:
+                    await cycle(app, js)
+                    await drain(app, sub)
+                    with app.db() as db:
+                        db.execute(delete(Nonce).where(Nonce.expires_at < now()))
+                        db.commit()
+                    heartbeat.progress()
+                except Exception as exc:
+                    heartbeat.progress(exc)
+                    log.error("工作循环失败：%s", type(exc).__name__)
+                await asyncio.sleep(1)
     finally:
         await nc.drain()
 

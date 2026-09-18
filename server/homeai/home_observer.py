@@ -139,26 +139,29 @@ async def main():
     from .api import create_app
     app = create_app().state
     workers = {}
+    from .heartbeat import Heartbeat
     try:
-        while True:
-            targets = {}
-            with app.db() as db:
-                for user in list(db.scalars(select(Principal))):
-                    actor = Actor(user.id, user.household_id, 'home-observer', user.role)
-                    scope(db, user.id, user.household_id)
-                    for provider in list(db.scalars(select(Provider).where(Provider.enabled.is_(True)))):
-                        try:
-                            _, _, signature = binding(db, actor, provider.id)
-                            targets[(user.id, provider.id)] = (actor, signature)
-                        except HTTPException:
-                            continue
-            for key, (task, signature) in list(workers.items()):
-                if key not in targets or targets[key][1] != signature:
-                    task.cancel(); await asyncio.gather(task, return_exceptions=True); del workers[key]
-            for key, (actor, signature) in targets.items():
-                if key not in workers:
-                    workers[key] = (asyncio.create_task(watch(app, actor, key[1])), signature)
-            await asyncio.sleep(5)
+        async with Heartbeat(app, "home-observer") as heartbeat:
+            while True:
+                targets = {}
+                with app.db() as db:
+                    for user in list(db.scalars(select(Principal))):
+                        actor = Actor(user.id, user.household_id, 'home-observer', user.role)
+                        scope(db, user.id, user.household_id)
+                        for provider in list(db.scalars(select(Provider).where(Provider.enabled.is_(True)))):
+                            try:
+                                _, _, signature = binding(db, actor, provider.id)
+                                targets[(user.id, provider.id)] = (actor, signature)
+                            except HTTPException:
+                                continue
+                for key, (task, signature) in list(workers.items()):
+                    if key not in targets or targets[key][1] != signature:
+                        task.cancel(); await asyncio.gather(task, return_exceptions=True); del workers[key]
+                for key, (actor, signature) in targets.items():
+                    if key not in workers:
+                        workers[key] = (asyncio.create_task(watch(app, actor, key[1])), signature)
+                heartbeat.progress()
+                await asyncio.sleep(5)
     finally:
         for task, _ in workers.values(): task.cancel()
         await asyncio.gather(*(task for task, _ in workers.values()), return_exceptions=True)
