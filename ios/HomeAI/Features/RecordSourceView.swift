@@ -1,11 +1,5 @@
 import SwiftUI
 
-struct RecordReference: Identifiable {
-    let id: String
-    let title: String
-    let version: Int?
-}
-
 struct RecordSourceView: View {
     @Environment(AppState.self) private var state
     let source: RecordReference

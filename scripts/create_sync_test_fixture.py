@@ -10,6 +10,7 @@ from homeai.data import ingest
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--with-documents",action="store_true")
+parser.add_argument("--with-speech",action="store_true")
 args=parser.parse_args()
 settings=Settings();settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
 app=create_app(settings).state
@@ -26,6 +27,11 @@ with app.db() as db:
         db.add(Provider(id=provider_id,manifest=manifest.model_dump_json(),enabled=True))
         manifest=ProviderManifest(id='native.embed.'+user.id,version='1',adapter='openai',endpoint='http://127.0.0.1:58081/v1',model='embeddinggemma-300M-Q8_0.gguf',allowed_hosts=['127.0.0.1'],embedding_query_prefix='task: search result | query: ',embedding_document_prefix='title: none | text: ',capabilities={'model.embed@v1':'embed'})
         db.add(Provider(id=manifest.id,manifest=manifest.model_dump_json(),enabled=True))
+    if args.with_speech:
+        secret_id=uid();provider_id='native.cosyvoice.'+user.id
+        db.add(Secret(id=secret_id,owner_id=user.id,household_id=user.household_id,provider_id=provider_id,value=app.vault.seal(Path('state/provider-secrets/cosyvoice.token').read_text().strip(),user.id+':secret:'+secret_id)))
+        manifest=ProviderManifest(id=provider_id,version='fbb71de2afe387ed854eebd80b9f3d078c6b9869',adapter='http',endpoint='http://127.0.0.1:8106',allowed_hosts=['127.0.0.1'],secret_id=secret_id,timeout_seconds=300,capabilities={'speech.voices@v1':'/invoke/voices','speech.synthesize@v1':'/invoke/synthesize'})
+        db.add(Provider(id=provider_id,manifest=manifest.model_dump_json(),enabled=True))
     token=credential(db,user.id,'pair',600)
     db.commit()
 with tempfile.NamedTemporaryFile(mode='w',prefix='homeai-sync-native-',suffix='.json',delete=False) as file:

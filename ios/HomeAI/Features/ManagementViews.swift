@@ -60,7 +60,7 @@ struct ActivityView: View {
 struct TaskProgressView: View {
     @Environment(AppState.self) private var state
     let identifier: String
-    @State private var result: ChatView.TaskResult?
+    @State private var result: TaskResult?
     @State private var error: String?
     var body: some View {
         List {
@@ -88,7 +88,7 @@ struct TaskProgressView: View {
             let namespace = try await state.api.syncNamespace()
             let data = try await state.api.request("GET", "/api/v1/tasks/" + identifier, expectedNamespace: namespace)
             guard !Task.isCancelled else { return }
-            result = try JSONDecoder().decode(ChatView.TaskResult.self, from: data)
+            result = try JSONDecoder().decode(TaskResult.self, from: data)
             error = nil
         } catch {
             guard !Task.isCancelled else { return }

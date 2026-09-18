@@ -45,6 +45,9 @@ struct SettingsView: View {
                 Text("只同步已授权的服务器数据，不在后台录音，也不会自动扩大系统数据授权。执行时间由 iOS 决定，锁屏时可能无法访问受保护缓存。").font(.caption).foregroundStyle(.secondary)
                 if !state.backgroundSyncStatus.isEmpty { Text(state.backgroundSyncStatus).font(.caption) }
             }
+            Section("语音") {
+                NavigationLink("音色与语音朗读") { SpeechView() }.disabled(!state.connected)
+            }
             Section("系统提醒写入") {
                 NavigationLink("选择系统列表与同步规则") { ReminderSyncSettings() }.disabled(!state.connected)
             }

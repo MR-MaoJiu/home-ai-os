@@ -5,6 +5,7 @@ struct ChatView: View {
     @Environment(AppState.self) private var state
     @State private var input = ""
     @State private var conversationNamespace: String?
+    @State private var conversationIdentity: String?
     @State private var messages: [ChatMessage] = []
     @State private var currentTask: String?
     @State private var status = ""
@@ -23,6 +24,9 @@ struct ChatView: View {
                                 if message.mine { Spacer(minLength: 32) }
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text(message.text).textSelection(.enabled)
+                                    if !message.mine, let namespace = conversationNamespace {
+                                        NavigationLink { SpeechView(text: message.text, expectedNamespace: namespace, sources: message.sources) } label: { Label("朗读", systemImage: "speaker.wave.2").font(.caption) }
+                                    }
                                     ForEach(message.sources) { source in
                                         NavigationLink { RecordSourceView(source: source) } label: { Label(source.title, systemImage: "doc.text.magnifyingglass").font(.caption) }
                                     }
@@ -45,7 +49,7 @@ struct ChatView: View {
                             let task = try JSONDecoder().decode(TaskCreated.self, from: data)
                             let result = try await waitForTask(task.id, namespace: namespace, seconds: 120)
                             if result.status == "SUCCEEDED", case .object(let object) = result.result {
-                                input = object["text"]?.description ?? ""
+                                if namespace == conversationNamespace { input = object["text"]?.description ?? "" }
                             } else { throw APIClient.APIError.message(result.error ?? result.status) }
                         } else { try await voice.start() }
                     } }
@@ -59,7 +63,17 @@ struct ChatView: View {
             }.padding()
         }
         .navigationTitle("Home AI")
-        .task(id: state.connected) { conversationNamespace = state.connected ? (try? await state.api.syncNamespace()) : nil }
+        .task(id: "\(state.connected)-\(state.connectionRevision)") {
+            let identity = "\(state.connected)-\(state.connectionRevision)"
+            if conversationIdentity != identity {
+                conversationIdentity = identity
+                conversationNamespace = nil; messages = []; input = ""
+                if voice.recording { _ = try? voice.finish() }
+            }
+            let namespace = state.connected ? (try? await state.api.syncNamespace()) : nil
+            guard !Task.isCancelled else { return }
+            conversationNamespace = namespace
+        }
         .toolbar {
             Text(state.connected ? "家庭服务器" : "未配对").font(.caption).foregroundStyle(.secondary)
             if state.connected && conversationNamespace == nil {
@@ -81,6 +95,7 @@ struct ChatView: View {
             let created = try JSONDecoder().decode(TaskCreated.self, from: data)
             currentTask = created.id
             let task = try await waitForTask(created.id, namespace: namespace, seconds: 300)
+            guard namespace == conversationNamespace else { return }
             messages.append(ChatMessage(text: task.error ?? Self.answer(task.result) ?? (task.status == "AWAITING_APPROVAL" ? "请在活动页面确认操作。" : task.status), mine: false, sources: Self.sources(task.result)))
         }
     }
@@ -139,6 +154,4 @@ struct ChatView: View {
            case .object(let message) = first["message"], case .string(let content) = message["content"] { return content }
         return result?.description
     }
-    struct TaskCreated: Decodable { let id: String }
-    struct TaskResult: Decodable { let status: String; let error: String?; let result: JSONValue? }
 }

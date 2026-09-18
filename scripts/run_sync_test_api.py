@@ -36,4 +36,17 @@ def pair_ticket(actor:Actor=Depends(authenticate)):
         db.commit()
         return {'token':token}
 
+@app.post('/_test/run-speech')
+async def run_pending_speech(actor:Actor=Depends(authenticate)):
+    from sqlalchemy import select
+    from homeai.db import Task,scope
+    from homeai.runtime import run_task
+    with app.state.db() as db:
+        scope(db,actor.user_id,actor.household_id)
+        candidates=list(db.scalars(select(Task).where(Task.owner_id==actor.user_id,Task.status=='RECEIVED').limit(20)))
+        identifiers=[row.id for row in candidates if app.state.vault.open(row.request,actor.user_id+':task:'+row.id).get('capability') in {'speech.voices@v1','speech.synthesize@v1'}]
+    for identifier in identifiers:
+        await run_task(app.state,identifier,actor.user_id)
+    return {'executed':len(identifiers)}
+
 uvicorn.run(app,host='127.0.0.1',port=58444,ssl_keyfile='state/tls/server.key',ssl_certfile='state/tls/server.crt',access_log=False)
