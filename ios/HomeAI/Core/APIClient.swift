@@ -8,12 +8,22 @@ struct Connection: Codable, Sendable {
     var expiresAt: Date
     var tlsKeyFingerprint: String? = nil
     var deviceID: String? = nil
+    var serverID: String? = nil
+    var serverPublicKey: String? = nil
+    var namespaceAnchor: String? = nil
+    var addresses: [String]? = nil
+    var namespaceIdentity: String { namespaceAnchor ?? tlsKeyFingerprint ?? fingerprint }
 }
 
 struct PairingCode: Codable, Sendable {
     var url: String
     var fingerprint: String
     var token: String
+    var schema_version: String? = nil
+    var server_id: String? = nil
+    var server_public_key: String? = nil
+    var namespace_anchor: String? = nil
+    var addresses: [String]? = nil
 }
 
 /// 网络与身份集中在单一 actor，避免页面自行处理签名或泄露会话。
@@ -62,7 +72,18 @@ actor APIClient {
         let attempt = UUID()
         pairingAttempt = attempt
         guard let url = URL(string: code.url), url.scheme == "https", code.fingerprint.count == 64 else { throw APIError.message("需要 HTTPS 地址和完整服务器证书指纹") }
-        let pinning = PinnedSession(fingerprint: code.fingerprint)
+        var verified: ServerTrust.Verified?
+        if code.schema_version == "2.0" {
+            guard let identifier = code.server_id, let publicKey = code.server_public_key, let anchor = code.namespace_anchor else {
+                throw APIError.message("第二版配对信息缺少稳定身份")
+            }
+            verified = try await ServerTrust.probe(url: code.url, serverID: identifier, publicKey: publicKey)
+            guard verified?.proof.namespace_anchor == anchor else { throw APIError.message("服务器数据命名空间不匹配") }
+        } else if code.schema_version != nil { throw APIError.message("不支持此配对协议版本") }
+        guard pairingAttempt == attempt else { throw APIError.message("配对请求已变化") }
+        for address in [code.url] + (code.addresses ?? []) { _ = try ServerTrust.origin(address) }
+        guard (code.addresses?.count ?? 0) <= 8 else { throw APIError.message("配对地址过多") }
+        let pinning = PinnedSession(fingerprint: verified?.proof.fingerprint ?? code.fingerprint)
         let transport = URLSession(configuration: .ephemeral, delegate: pinning, delegateQueue: nil)
         var request = URLRequest(url: url.appendingPathComponent("api/v1/pair"))
         request.httpMethod = "POST"
@@ -75,10 +96,71 @@ actor APIClient {
         for socket in eventSockets.values { socket.cancel(with: .goingAway, reason: nil) }
         eventSockets.removeAll()
         generation = UUID()
-        connection = Connection(url: code.url, fingerprint: code.fingerprint, token: result.access_token, refreshToken: result.refresh_token, expiresAt: Date().addingTimeInterval(Double(result.expires_in)))
+        connection = Connection(url: code.url, fingerprint: verified?.proof.fingerprint ?? code.fingerprint, token: result.access_token, refreshToken: result.refresh_token, expiresAt: Date().addingTimeInterval(Double(result.expires_in)))
         connection?.tlsKeyFingerprint = pinning.acceptedKeyFingerprint
         connection?.deviceID = result.device_id
+        if let verified {
+            connection?.serverID = verified.proof.server_id
+            connection?.serverPublicKey = verified.proof.server_public_key
+            connection?.namespaceAnchor = verified.proof.namespace_anchor
+            let candidates = [code.url] + (code.addresses ?? []) + verified.proof.addresses
+            var urls: [String] = []
+            for address in candidates {
+                if !urls.contains(address) && urls.count < 8 { urls.append(address) }
+            }
+            connection?.addresses = urls
+        }
         session = transport
+        try persist()
+    }
+
+    struct TrustInfo: Sendable { let bound: Bool; let serverID: String?; let url: String; let addresses: [String] }
+    func trustInfo() -> TrustInfo? {
+        guard let saved = connection else { return nil }
+        return TrustInfo(bound: saved.serverID != nil && saved.serverPublicKey != nil, serverID: saved.serverID,
+                         url: saved.url, addresses: saved.addresses ?? [saved.url])
+    }
+
+    // 仅通过当前已固定证书的认证通道升级旧连接，界面必须由用户显式触发。
+    func enrollServerIdentity() async throws {
+        let started = generation
+        guard let saved = connection, saved.serverID == nil, let session else { throw APIError.message("连接已绑定身份或尚未配对") }
+        let nonce = (UUID().uuidString + UUID().uuidString).replacingOccurrences(of: "-", with: "").lowercased()
+        let data = try await request("GET", "/api/v1/server/identity?nonce=" + nonce)
+        let envelope = try JSONDecoder().decode(ServerTrust.Envelope.self, from: data)
+        guard let payload = Data(base64Encoded: envelope.payload), let observer = session.delegate as? PinnedSession,
+              let peer = observer.acceptedFingerprint else { throw APIError.message("无法确认当前证书") }
+        let advertised = try JSONDecoder().decode(ServerIdentityProof.self, from: payload)
+        let proof = try ServerTrust.validate(data, nonce: nonce, peerFingerprint: peer, serverID: nil, publicKey: advertised.server_public_key)
+        guard started == generation, var current = connection, current.serverID == nil,
+              current.tlsKeyFingerprint == proof.namespace_anchor else {
+            throw APIError.message("旧连接无法安全迁移，请使用本机第二版配对信息重新配对")
+        }
+        current.serverID = proof.server_id; current.serverPublicKey = proof.server_public_key
+        current.namespaceAnchor = proof.namespace_anchor
+        current.addresses = Array(([current.url] + proof.addresses.filter { $0 != current.url }).prefix(8))
+        connection = current; try persist()
+    }
+
+    // 此操作只恢复信任和连接，不自动重放任何失败的业务请求。
+    func verifyServerAddress(_ address: String) async throws {
+        let started = generation
+        guard let saved = connection, let identifier = saved.serverID, let key = saved.serverPublicKey else {
+            throw APIError.message("请先通过原可信连接升级服务器身份，或使用第二版配对信息")
+        }
+        let verified = try await ServerTrust.probe(url: address, serverID: identifier, publicKey: key)
+        guard started == generation, var current = connection, current.serverID == identifier,
+              current.namespaceIdentity == verified.proof.namespace_anchor else { throw APIError.message("服务器身份或数据命名空间发生变化") }
+        let knownAddresses = current.addresses ?? [current.url]
+        current.url = address; current.fingerprint = verified.proof.fingerprint; current.tlsKeyFingerprint = verified.tlsKey
+        var urls: [String] = []
+        for item in [address] + verified.proof.addresses + knownAddresses where !urls.contains(item) && urls.count < 8 { urls.append(item) }
+        current.addresses = urls
+        for socket in eventSockets.values { socket.cancel(with: .goingAway, reason: nil) }
+        eventSockets.removeAll(); generation = UUID()
+        session?.invalidateAndCancel()
+        connection = current
+        session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: current.fingerprint, keyFingerprint: current.tlsKeyFingerprint), delegateQueue: nil)
         try persist()
     }
 
@@ -101,7 +183,7 @@ actor APIClient {
             try persist()
         }
         guard let saved = connection, let device = saved.deviceID else { throw APIError.message("请先配对") }
-        return DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":" + device).utf8))
+        return DeviceIdentity.hash(Data((saved.namespaceIdentity + ":" + device).utf8))
     }
 
     struct OwnerIdentity: Sendable { let userID: String; let namespace: String }
@@ -111,7 +193,7 @@ actor APIClient {
         let data = try await request("GET", "/api/v1/me", expectedNamespace: expectedNamespace)
         let me = try JSONDecoder().decode(Me.self, from: data)
         guard started == generation, let saved = connection else { throw APIError.message("连接已切换") }
-        let namespace = DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":owner:" + me.user_id).utf8))
+        let namespace = DeviceIdentity.hash(Data((saved.namespaceIdentity + ":owner:" + me.user_id).utf8))
         return OwnerIdentity(userID: me.user_id, namespace: namespace)
     }
 
@@ -122,7 +204,7 @@ actor APIClient {
     func request(_ method: String, _ path: String, body: Data? = nil, expectedNamespace: String? = nil, contentType: String = "application/json") async throws -> Data {
         if let expectedNamespace {
             guard let saved = connection, let device = saved.deviceID,
-                  DeviceIdentity.hash(Data(((saved.tlsKeyFingerprint ?? saved.fingerprint) + ":" + device).utf8)) == expectedNamespace else {
+                  DeviceIdentity.hash(Data((saved.namespaceIdentity + ":" + device).utf8)) == expectedNamespace else {
                 throw APIError.message("同步连接已切换，请重新开始")
             }
         }

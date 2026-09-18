@@ -20,10 +20,16 @@ def main():
     web.add_argument("--user", required=True)
     pair = commands.add_parser("pair")
     pair.add_argument("--user", required=True)
+    pair.add_argument("--url", help="生成包含稳定服务器身份的第二版配对信息")
+    pair.add_argument("--output", type=Path, help="将第二版配对信息写入新的 0600 文件")
     member = commands.add_parser("member")
     member.add_argument("--household", required=True)
     member.add_argument("--name", required=True)
     args = parser.parse_args()
+    if args.command == "pair" and args.output and not args.url:parser.error("--output 必须与 --url 一起使用")
+    if args.command == "pair" and args.url:
+        from .server_identity import addresses
+        addresses([args.url])
     settings = Settings()
     if args.command == "init-key":
         settings.master_key_file.parent.mkdir(parents=True, exist_ok=True)
@@ -56,4 +62,17 @@ def main():
         token = credential(db, user.id, "browser_recovery" if args.command == "web-recover" else ("browser_bootstrap" if args.command == "web-setup" else "pair"), 300)
         db.commit()
         # 配对码为短期一次性凭据，仅显示于明确调用的本机终端。
-        print(json.dumps({"user_id": user.id, "household_id": user.household_id, "pairing_token": token, "expires_in": 300}, ensure_ascii=False))
+        if args.command == 'pair' and args.url:
+            from types import SimpleNamespace
+            from .crypto import Vault
+            from .server_identity import public_identity,addresses
+            public=public_identity(SimpleNamespace(settings=settings,vault=Vault.from_file(settings.master_key_file)))
+            urls=addresses([args.url,*public['addresses']])
+            payload={'schema_version':'2.0',**public,'url':urls[0],'addresses':urls,'token':token}
+            encoded=json.dumps(payload,ensure_ascii=False)
+            if args.output:
+                with os.fdopen(os.open(args.output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'w') as file:file.write(encoded)
+                print('第二版配对信息已写入指定私有文件，有效期 5 分钟。')
+            else:print(encoded)
+        else:
+            print(json.dumps({"user_id": user.id, "household_id": user.household_id, "pairing_token": token, "expires_in": 300}, ensure_ascii=False))

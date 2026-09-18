@@ -32,7 +32,7 @@ if args.action == 'create':
             tar.addfile(info, io.BytesIO(content))
             manifest['files'][name] = {'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
         add('database.dump', dump)
-        for name in ['blobs', 'deletions.jsonl']:
+        for name in ['blobs', 'deletions.jsonl', 'server-identity.enc']:
             path = root / 'state' / name
             if path.is_symlink():
                 raise SystemExit('备份源不能是符号链接')

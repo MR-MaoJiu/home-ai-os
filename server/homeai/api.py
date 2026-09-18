@@ -454,6 +454,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.include_router(management_router)
     from .remote import router as remote_router
     app.include_router(remote_router)
+    from .server_identity import router as server_identity_router
+    app.include_router(server_identity_router)
     from fastapi.staticfiles import StaticFiles
     admin_dist = settings.admin_dist
     if admin_dist.is_dir():

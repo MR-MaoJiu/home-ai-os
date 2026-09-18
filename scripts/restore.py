@@ -65,6 +65,11 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
     if (destination/'blobs').exists():
         import shutil
         shutil.copytree(destination/'blobs',output/'blobs')
+    if (destination/'server-identity.enc').exists():
+        # 身份仍为主密钥加密的密文；只放入隔离恢复目录，不覆盖正在使用的身份。
+        import shutil
+        shutil.copyfile(destination/'server-identity.enc',output/'server-identity.enc')
+        os.chmod(output/'server-identity.enc',0o600)
     # 删除日志同时应用到恢复出的对象，禁止物理附件残留。
     vault=Vault.from_file(root/'state/master.key')
     for line in a.deletion_journal.read_text().splitlines():

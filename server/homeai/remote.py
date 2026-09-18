@@ -19,19 +19,7 @@ def private_write(path,value):
     with os.fdopen(fd,'w') as file:file.write(value)
     os.replace(temp,path)
 
-def identity(app):
-    path=app.settings.state_dir/'server-identity.enc'
-    if not path.exists():
-        key=ec.generate_private_key(ec.SECP256R1())
-        value={'server_id':uid(),'private_key':key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()).decode()}
-        # 首次创建使用排他打开，避免并发初始化覆盖服务器身份。
-        try:
-            fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-            with os.fdopen(fd,'w') as f:f.write(app.vault.seal(value,'server-identity'))
-        except FileExistsError:pass
-    value=app.vault.open(path.read_text(),'server-identity')
-    key=serialization.load_pem_private_key(value['private_key'].encode(),password=None)
-    return value['server_id'],key
+from .server_identity import identity
 
 def read_config(app):
     path=app.settings.state_dir/'remote-config.enc'

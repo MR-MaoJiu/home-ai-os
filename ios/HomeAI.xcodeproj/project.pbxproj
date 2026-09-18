@@ -29,6 +29,7 @@
 		9D1E2E3606F70BE747E4DD31 /* SystemReminderSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */; };
 		9D6743351460DED597B63044 /* SpeechPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139483634791876484D98FA9 /* SpeechPlayback.swift */; };
 		9FE59175F863F35CE56AE2C8 /* DeviceDataSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */; };
+		C0289C241914C3F770FF223C /* ServerTrust.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8618794DCBB144BCD6989D4 /* ServerTrust.swift */; };
 		C58AE019E455845FE722DAD7 /* ReminderSyncSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 488555DA9581D34F75317DD7 /* ReminderSyncSettings.swift */; };
 		CCB39D61D9DF7DF91B7D9E9D /* valid.der in Resources */ = {isa = PBXBuildFile; fileRef = 66988C5604968C44ACD83192 /* valid.der */; };
 		D1B2F004EE2B58CE1EA46CDC /* HomeIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9615D81084CBED64C6522C73 /* HomeIntents.swift */; };
@@ -38,6 +39,7 @@
 		E54A2D234B033B4C84F8192B /* expired.der in Resources */ = {isa = PBXBuildFile; fileRef = 69B6E5AB48EE76965AD72D13 /* expired.der */; };
 		F14D0F35AF71D3CE64599B24 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */; };
 		F157368B807DCEA022253C7B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030A9C6729AEAA14F8E8E130 /* APIClient.swift */; };
+		F1EA94C965285C4A371421C1 /* ServerIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6EB9642F2D0AFA749D9322F /* ServerIdentityTests.swift */; };
 		F23F05F824092191E1852E69 /* HomeAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E4C314968102960503AA /* HomeAIApp.swift */; };
 		F2A9DADDD37E5F78ECA1B800 /* AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = 95C00AFF2B6A9C9C42CCE3F2 /* AppShortcuts.strings */; };
 		F70BA49598AEC176FE65A948 /* future.der in Resources */ = {isa = PBXBuildFile; fileRef = 7663DFFCF83A100838851D5D /* future.der */; };
@@ -92,7 +94,9 @@
 		CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemReminderSync.swift; sourceTree = "<group>"; };
 		DC3D313A504FF8385B870CE4 /* SpeechView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechView.swift; sourceTree = "<group>"; };
 		DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
+		E6EB9642F2D0AFA749D9322F /* ServerIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerIdentityTests.swift; sourceTree = "<group>"; };
 		F29C16E91255A0E4D8BA30DC /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		F8618794DCBB144BCD6989D4 /* ServerTrust.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTrust.swift; sourceTree = "<group>"; };
 		FE55D2FE3C69D506D916C9A3 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -106,6 +110,7 @@
 				7663DFFCF83A100838851D5D /* future.der */,
 				4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */,
 				146CDED233DA69974310DB30 /* PhotoTests.swift */,
+				E6EB9642F2D0AFA749D9322F /* ServerIdentityTests.swift */,
 				021B66A5F1C82A5A6DFD08B8 /* SpeechTests.swift */,
 				31F98BE893BDC6DAF21EE75D /* SyncTests.swift */,
 				66988C5604968C44ACD83192 /* valid.der */,
@@ -155,6 +160,7 @@
 				20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */,
 				026E7BEC5639994664ECC698 /* DeviceIdentity.swift */,
 				7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */,
+				F8618794DCBB144BCD6989D4 /* ServerTrust.swift */,
 				139483634791876484D98FA9 /* SpeechPlayback.swift */,
 				A3DD64447563DDCEADD700C2 /* TaskResponse.swift */,
 			);
@@ -329,6 +335,7 @@
 				90C6635A6D4A199315B7C027 /* ReminderIntentService.swift in Sources */,
 				35D9A8BF2F4A29BCAB6BD6A6 /* ReminderSchedule.swift in Sources */,
 				C58AE019E455845FE722DAD7 /* ReminderSyncSettings.swift in Sources */,
+				C0289C241914C3F770FF223C /* ServerTrust.swift in Sources */,
 				E4AEE4ABEC5743739C53A0AD /* SettingsView.swift in Sources */,
 				9D6743351460DED597B63044 /* SpeechPlayback.swift in Sources */,
 				27C6662C31FA32E9EE76DEA9 /* SpeechView.swift in Sources */,
@@ -346,6 +353,7 @@
 				97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */,
 				67741F121857E92BB53DB322 /* IntentTests.swift in Sources */,
 				E1EE3C9DF6A2A965A8CF8D87 /* PhotoTests.swift in Sources */,
+				F1EA94C965285C4A371421C1 /* ServerIdentityTests.swift in Sources */,
 				0C99C0EAB13EC89CA87A9668 /* SpeechTests.swift in Sources */,
 				3200B4ACE967E878200789FE /* SyncTests.swift in Sources */,
 			);

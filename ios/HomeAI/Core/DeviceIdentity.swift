@@ -51,7 +51,9 @@ final class PinnedSession: NSObject, URLSessionTaskDelegate, @unchecked Sendable
     let keyFingerprint: String?
     private let lock = NSLock()
     private var observedKey: String?
+    private var observedCertificate: String?
     var acceptedKeyFingerprint: String? { lock.withLock { observedKey } }
+    var acceptedFingerprint: String? { lock.withLock { observedCertificate } }
     init(fingerprint: String, keyFingerprint: String? = nil) {
         self.fingerprint = fingerprint.lowercased()
         self.keyFingerprint = keyFingerprint
@@ -97,7 +99,7 @@ final class PinnedSession: NSObject, URLSessionTaskDelegate, @unchecked Sendable
                 return
             }
         }
-        lock.withLock { observedKey = currentKey }
+        lock.withLock { observedKey = currentKey; observedCertificate = DeviceIdentity.hash(SecCertificateCopyData(certificate) as Data) }
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }

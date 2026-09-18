@@ -16,3 +16,5 @@ class Settings(BaseSettings):
     session_seconds: int = 900
     max_upload_bytes: int = 20 * 1024 * 1024
     provider_timeout_seconds: int = 60
+    identity_certificate_file: Path = Path('state/tls/server.crt')
+    server_addresses: list[str] = []

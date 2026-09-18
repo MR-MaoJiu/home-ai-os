@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import VisionKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
@@ -8,10 +9,14 @@ struct SettingsView: View {
     @State private var server = "https://"
     @State private var fingerprint = ""
     @State private var token = ""
-    @State private var pairingJSON = ""
+    @State private var scannedPairing: PairingCode?
+    @State private var trustInfo: APIClient.TrustInfo?
+    @State private var candidateAddress = ""
+    @State private var trustMessage = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var syncMessage = ""
     @State private var scanning = false
+    @State private var importingPairing = false
     @State private var location = LocationCapture()
     var body: some View {
         Form {
@@ -19,12 +24,17 @@ struct SettingsView: View {
                 if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                     Button("扫描服务器配对码", systemImage: "qrcode.viewfinder") { scanning = true }
                 }
+                Button("导入本机生成的配对 JSON") { importingPairing = true }
                 Label(state.connected ? "已保存安全连接" : "尚未配对", systemImage: state.connected ? "lock.shield" : "wifi.slash")
                 TextField("服务器 HTTPS 地址", text: $server).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 TextField("证书 SHA-256 指纹", text: $fingerprint).textInputAutocapitalization(.never).autocorrectionDisabled()
                 SecureField("一次性配对码", text: $token)
                 Button("安全配对") { Task { await state.perform {
-                    try await state.api.pair(PairingCode(url: server, fingerprint: fingerprint, token: token))
+                    let code: PairingCode
+                    if let scannedPairing, scannedPairing.url == server, scannedPairing.fingerprint == fingerprint, scannedPairing.token == token {
+                        code = scannedPairing
+                    } else { code = PairingCode(url: server, fingerprint: fingerprint, token: token) }
+                    try await state.api.pair(code)
                     state.records = []
                     state.activity = []
                     state.approvals = []
@@ -36,6 +46,30 @@ struct SettingsView: View {
                     state.connectionRevision = UUID()
                     token = ""
                 } } }.disabled(state.busy)
+            }
+            if let trustInfo {
+                Section("服务器身份与远程地址") {
+                    Label(trustInfo.bound ? "稳定服务器身份已绑定" : "当前连接仍使用旧版证书绑定", systemImage: "checkmark.shield")
+                    if !trustInfo.bound {
+                        Text("升级会通过当前已信任连接确认服务器公钥，保留同步与提醒身份。请在原地址仍能正常连接时完成。").font(.caption)
+                        Button("通过当前可信连接升级身份") { Task { await state.perform {
+                            try await state.api.enrollServerIdentity()
+                            self.trustInfo = await state.api.trustInfo()
+                            trustMessage = "稳定服务器身份已保存"
+                        } } }.disabled(state.busy)
+                    } else {
+                        TextField("要验证的 HTTPS 地址", text: $candidateAddress).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        ForEach(trustInfo.addresses, id: \.self) { address in Button(address) { candidateAddress = address }.font(.caption) }
+                        Button("验证身份并更新连接") { Task { await state.perform {
+                            try await state.api.verifyServerAddress(candidateAddress)
+                            self.trustInfo = await state.api.trustInfo()
+                            state.connectionRevision = UUID()
+                            trustMessage = "身份验证通过，连接已更新；没有重发此前失败的操作"
+                        } } }.disabled(state.busy || candidateAddress.isEmpty)
+                        Text("可用于证书换钥或切换到远程地址。验证期间不发送配对码、会话或设备签名；服务器身份不一致会拒绝更新。").font(.caption)
+                    }
+                    if !trustMessage.isEmpty { Text(trustMessage).font(.caption) }
+                }
             }
             Section("后台同步") {
                 Toggle("允许系统后台刷新", isOn: $backgroundSyncEnabled)
@@ -75,14 +109,33 @@ struct SettingsView: View {
                 Text("当前为开发版本：推送、后台调度真机表现、完整脱敏链与生产插件隔离仍需验收。").font(.caption).foregroundStyle(.secondary)
             }
         }.navigationTitle("设置")
+            .task(id: state.connectionRevision) {
+                trustInfo = await state.api.trustInfo()
+                candidateAddress = trustInfo?.url ?? ""
+            }
             .sheet(isPresented: $scanning) {
                 PairingScanner { text in
                     scanning = false
                     do {
                         let code = try JSONDecoder().decode(PairingCode.self, from: Data(text.utf8))
+                        scannedPairing = code
                         server = code.url; fingerprint = code.fingerprint; token = code.token
                     } catch { state.error = "配对二维码格式无效" }
                 }.ignoresSafeArea()
+            }
+            .fileImporter(isPresented: $importingPairing, allowedContentTypes: [.json]) { result in
+                do {
+                    let url = try result.get()
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    let handle = try FileHandle(forReadingFrom: url)
+                    defer { try? handle.close() }
+                    let data = try handle.read(upToCount: 16385) ?? Data()
+                    guard data.count <= 16384 else { throw APIClient.APIError.message("配对文件过大") }
+                    let code = try JSONDecoder().decode(PairingCode.self, from: data)
+                    scannedPairing = code
+                    server = code.url; fingerprint = code.fingerprint; token = code.token
+                } catch { state.error = "无法导入配对文件：" + error.localizedDescription }
             }
             .onChange(of: selectedPhoto) { _, photo in
                 guard let photo else { return }
