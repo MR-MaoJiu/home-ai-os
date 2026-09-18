@@ -20,10 +20,22 @@ final class AppState {
     }
     var pairingFeedback: PairingFeedback = .idle
     var pairingNotice = false
+    private var pairingRecoveryGeneration: UUID?
 
-    func reportPairingFailure(_ message: String) {
+    func reportPairingFailure(_ message: String, recoveryGeneration: UUID? = nil) {
+        pairingRecoveryGeneration = recoveryGeneration
         pairingFeedback = .failure(message)
         pairingNotice = true
+    }
+
+    /// 只清除当前这次连接的瞬时失败，不能把旧连接可用当作新配对成功。
+    func confirmConnectionRecovered() async {
+        guard connected, case .failure = pairingFeedback, let expected = pairingRecoveryGeneration else { return }
+        let current = await api.connectionGeneration()
+        guard !Task.isCancelled, current == expected, pairingRecoveryGeneration == expected, case .failure = pairingFeedback else { return }
+        pairingFeedback = .success
+        pairingNotice = false
+        pairingRecoveryGeneration = nil
     }
 
     /// 用户主动配对有独立结果状态，不能被通用操作的取消处理静默吞掉。
@@ -31,6 +43,8 @@ final class AppState {
         guard pairingFeedback != .connecting else { return }
         guard !busy else { reportPairingFailure("另一个操作正在进行，请稍后重新扫码。"); return }
         busy = true; error = nil; pairingNotice = false; pairingFeedback = .connecting
+        pairingRecoveryGeneration = nil
+        let generationBeforePairing = await api.connectionGeneration()
         await stopForegroundEvents()
         backgroundRun?.1.cancel()
         defer {
@@ -71,7 +85,8 @@ final class AppState {
                 default: message = "无法连接家庭服务器：" + network.localizedDescription
                 }
             } else { message = error.localizedDescription }
-            reportPairingFailure(message)
+            let current = await api.connectionGeneration()
+            reportPairingFailure(message, recoveryGeneration: attemptedPairing && current != generationBeforePairing ? current : nil)
         }
     }
     private let dataSync = DeviceDataSync()
@@ -120,6 +135,7 @@ final class AppState {
                     for try await event in subscription.events {
                         try Task.checkCancellation()
                         guard namespace == (try await self.api.syncNamespace()) else { return }
+                        await self.confirmConnectionRecovered()
                         if event.type == "task.snapshot" {
                             try await self.loadActivity(expectedNamespace: namespace)
                             let owner = try await self.api.ownerIdentity(expectedNamespace: namespace)
@@ -138,7 +154,11 @@ final class AppState {
                     if Task.isCancelled { return }
                     self.taskEventStatus = "连接中断，正在恢复任务状态"
                     // 用正常签名请求确认授权；刷新失败不伪装在线。
-                    do { _ = try await self.api.request("GET", "/api/v1/me") }
+                    do {
+                        _ = try await self.api.request("GET", "/api/v1/me")
+                        try Task.checkCancellation()
+                        await self.confirmConnectionRecovered()
+                    }
                     catch let APIClient.APIError.http(code, _) where code == 401 || code == 403 {
                         self.connected = false
                         self.activity = []; self.approvals = []; self.taskStates = []

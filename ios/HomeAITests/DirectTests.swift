@@ -25,6 +25,46 @@ final class DirectTests: XCTestCase {
     }
 
     @MainActor
+    func testRecoveredConnectionClearsOnlyItsOwnFailure() async {
+        let api = APIClient(persistConnection: false)
+        let state = AppState(api: api)
+        state.connected = true
+        state.reportPairingFailure("二维码已过期")
+        await state.confirmConnectionRecovered()
+        XCTAssertEqual(state.pairingFeedback, .failure("二维码已过期"))
+        state.reportPairingFailure("直连已关闭", recoveryGeneration: UUID())
+        await state.confirmConnectionRecovered()
+        XCTAssertEqual(state.pairingFeedback, .failure("直连已关闭"))
+        state.reportPairingFailure("直连已关闭", recoveryGeneration: await api.connectionGeneration())
+        await state.confirmConnectionRecovered()
+        XCTAssertEqual(state.pairingFeedback, .success)
+        XCTAssertFalse(state.pairingNotice)
+    }
+
+    @MainActor
+    func testConcurrentReadsDuringRemotePairing() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let encoded = env["HOMEAI_DIRECT_REMOTE_PAIR_FILE_BASE64"], let data = Data(base64Encoded: encoded) else { throw XCTSkip("需要真实家庭服务的短期配对载荷") }
+        struct Fixture: Decodable { let pairing: PairingCode }
+        let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+        let api = APIClient(persistConnection: false)
+        let pairing = Task { try await api.pair(fixture.pairing) }
+        defer { pairing.cancel() }
+        let deadline = Date().addingTimeInterval(100)
+        while !(await api.isConnected()) && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        guard await api.isConnected() else { try await pairing.value; return XCTFail("配对没有保存授权") }
+        // 模拟真实 App 的前台事件与同步在凭据保存后同时发起请求。
+        async let first = api.request("GET", "/api/v1/me")
+        async let second = api.request("GET", "/api/v1/me")
+        try await pairing.value
+        let responses = try await [first, second]
+        XCTAssertEqual(responses.count, 2)
+        let me = try XCTUnwrap(JSONSerialization.jsonObject(with: responses[0]) as? [String: Any])
+        let device = try XCTUnwrap(me["device_id"] as? String)
+        _ = try await api.request("DELETE", "/api/v1/devices/" + device)
+    }
+
+    @MainActor
     func testInvalidQRCodeAlwaysProducesVisibleFailure() async {
         let state = AppState(api: APIClient(persistConnection: false))
         await state.pair(scannedText: "not-a-homeai-code")

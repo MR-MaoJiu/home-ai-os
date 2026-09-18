@@ -79,6 +79,7 @@ actor APIClient {
     #endif
 
     func isConnected() -> Bool { connection != nil }
+    func connectionGeneration() -> UUID { generation }
 
     func restoreConnectionIfNeeded() {
         guard connection == nil, persistConnection,
@@ -232,13 +233,23 @@ actor APIClient {
     }
 
     func connectRemoteDirect(requirePublicPath: Bool = false, resetEvents: Bool = true) async throws {
+        try await directGate.withPermit {
+            try await self.establishRemoteDirect(requirePublicPath: requirePublicPath, resetEvents: resetEvents)
+        }
+    }
+
+    // 仅在持有 directGate 时调用，配对和后台恢复共享同一条建连流程。
+    private func establishRemoteDirect(requirePublicPath: Bool, resetEvents: Bool) async throws {
+        if let directTransport, await directTransport.isReady, directPublicOnly == requirePublicPath { return }
         let started = generation
         guard let saved = connection, let access = saved.directAccess, let publicKey = saved.serverPublicKey else { throw APIError.message("请先在家庭网络为此设备授权远程直连") }
         directPublicOnly = requirePublicPath
         connection?.prefersDirect = true
         try persist()
         let transport = try await DirectTransport(stunURLs: access.stun_urls, requirePublicPath: requirePublicPath)
+        guard started == generation else { await transport.close(); throw APIError.message("连接身份已切换") }
         await directTransport?.close()
+        guard started == generation else { await transport.close(); throw APIError.message("连接身份已切换") }
         directTransport = transport
         if resetEvents { stopTaskEvents() }
         do {
@@ -265,7 +276,7 @@ actor APIClient {
 
     private func reconnectDirectIfNeeded() async throws {
         if let directTransport, await directTransport.isReady { return }
-        try await connectRemoteDirect(requirePublicPath: directPublicOnly, resetEvents: false)
+        try await establishRemoteDirect(requirePublicPath: directPublicOnly, resetEvents: false)
     }
 
     func disableDirect() async {
