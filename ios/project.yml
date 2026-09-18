@@ -31,6 +31,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.homeai.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconMale
         INFOPLIST_KEY_CFBundleDisplayName: Home AI
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: 连接你的家庭 AI 服务器

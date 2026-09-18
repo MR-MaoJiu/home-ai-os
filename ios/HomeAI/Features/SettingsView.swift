@@ -41,6 +41,7 @@ struct SettingsView: View {
             Section("语音") {
                 NavigationLink("音色与语音朗读") { SpeechView() }.disabled(!state.connected)
             }
+            AppIconSettingsSection()
             Section("系统提醒写入") {
                 NavigationLink("选择系统列表与同步规则") { ReminderSyncSettings() }.disabled(!state.connected)
             }
@@ -102,5 +103,63 @@ struct SettingsView: View {
     }
     func sync(_ work: @escaping @MainActor (ConnectorSync) async throws -> Void) {
         Task { await state.perform { try await work(ConnectorSync(api: state.api)); syncMessage = "同步完成" } }
+    }
+}
+
+private struct AppIconSettingsSection: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedIcon = UIApplication.shared.alternateIconName
+    @State private var changing = false
+    @State private var failure: String?
+
+    var body: some View {
+        Section {
+            iconRow("女生款", preview: "FemaleIconPreview", iconName: nil)
+            iconRow("男生款", preview: "MaleIconPreview", iconName: "AppIconMale")
+            if changing { ProgressView("正在切换图标…") }
+        } header: {
+            Text("App 图标")
+        } footer: {
+            Text(UIApplication.shared.supportsAlternateIcons ? "默认使用女生款，可随时切换桌面图标。" : "当前环境不支持切换 App 图标。")
+        }
+        .onAppear { selectedIcon = UIApplication.shared.alternateIconName }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { selectedIcon = UIApplication.shared.alternateIconName }
+        }
+        .alert("图标切换失败", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("知道了", role: .cancel) { failure = nil }
+        } message: {
+            Text(failure ?? "")
+        }
+    }
+
+    private func iconRow(_ title: String, preview: String, iconName: String?) -> some View {
+        Button {
+            guard !changing, selectedIcon != iconName else { return }
+            changing = true
+            Task { @MainActor in
+                defer {
+                    changing = false
+                    // 以系统实际图标为准，切换失败时保留原选中项。
+                    selectedIcon = UIApplication.shared.alternateIconName
+                }
+                do { try await UIApplication.shared.setAlternateIconName(iconName) }
+                catch { failure = error.localizedDescription }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(preview).resizable().scaledToFit().frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .accessibilityHidden(true)
+                Text(title).foregroundStyle(.primary)
+                Spacer()
+                if selectedIcon == iconName {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.teal)
+                }
+            }
+        }
+        .disabled(changing || !UIApplication.shared.supportsAlternateIcons)
+        .accessibilityLabel(title)
+        .accessibilityValue(selectedIcon == iconName ? "已选中" : "未选中")
     }
 }

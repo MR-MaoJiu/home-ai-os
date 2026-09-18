@@ -75,7 +75,15 @@ struct ChatView: View {
             conversationNamespace = namespace
         }
         .toolbar {
-            Text(state.connected ? "家庭服务器" : "未配对").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(state.connected && state.serverReachable ? Color.green : Color.red)
+                    .frame(width: 7, height: 7)
+                Text("家庭服务器").font(.caption).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("家庭服务器")
+            .accessibilityValue(state.connected && state.serverReachable ? "已连通" : "未连通")
             if state.connected && conversationNamespace == nil {
                 Button("重试连接") { Task { conversationNamespace = try? await state.api.syncNamespace() } }
             }

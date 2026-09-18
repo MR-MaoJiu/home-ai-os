@@ -64,6 +64,7 @@ final class AppState {
             records = []; activity = []; approvals = []; automations = []; taskStates = []
             syncStatus = ""; systemReminderStatus = ""
             connected = true; connectionRevision = UUID()
+            serverReachable = true
             pairingFeedback = .success; pairingNotice = true
         } catch {
             if attemptedPairing {
@@ -99,6 +100,8 @@ final class AppState {
     private var eventRun: Task<Void, Never>?
     private var backgroundRun: (UUID, Task<Void, Never>)?
     var connected = false
+    // 配对凭据与实际连通状态分开，避免离线时仍显示绿灯。
+    var serverReachable = false
     var connectionRevision = UUID()
     var error: String?
     var busy = false
@@ -111,11 +114,13 @@ final class AppState {
         guard UIApplication.shared.isProtectedDataAvailable else { return }
         await api.restoreConnectionIfNeeded()
         connected = await api.isConnected()
+        if !connected { serverReachable = false }
     }
 
     func stopForegroundEvents() async {
         eventRun?.cancel()
         eventRun = nil
+        serverReachable = false
         await api.stopTaskEvents()
         taskEventStatus = "后台暂停实时连接"
     }
@@ -135,6 +140,8 @@ final class AppState {
                     for try await event in subscription.events {
                         try Task.checkCancellation()
                         guard namespace == (try await self.api.syncNamespace()) else { return }
+                        try Task.checkCancellation()
+                        self.serverReachable = true
                         await self.confirmConnectionRecovered()
                         if event.type == "task.snapshot" {
                             try await self.loadActivity(expectedNamespace: namespace)
@@ -149,14 +156,18 @@ final class AppState {
                             retries = 0
                         }
                     }
+                    guard !Task.isCancelled else { return }
+                    self.serverReachable = false
                 } catch is CancellationError { return }
                 catch {
                     if Task.isCancelled { return }
+                    self.serverReachable = false
                     self.taskEventStatus = "连接中断，正在恢复任务状态"
                     // 用正常签名请求确认授权；刷新失败不伪装在线。
                     do {
                         _ = try await self.api.request("GET", "/api/v1/me")
                         try Task.checkCancellation()
+                        self.serverReachable = true
                         await self.confirmConnectionRecovered()
                     }
                     catch let APIClient.APIError.http(code, _) where code == 401 || code == 403 {

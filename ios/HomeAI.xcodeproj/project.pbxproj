@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AE80300CC7624CCF8EDB1D01 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AE80300CC7624CCF8EDB1D02 /* Assets.xcassets */; };
 		0C99C0EAB13EC89CA87A9668 /* SpeechTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 021B66A5F1C82A5A6DFD08B8 /* SpeechTests.swift */; };
 		0D457DD2610BAB68B05948CC /* LocationCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75E227CB9D07EC6BD64E95F2 /* LocationCapture.swift */; };
 		0DDC420981C50F73DD18E556 /* ConnectorSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 870F09D02633F5C931A181DA /* ConnectorSync.swift */; };
@@ -62,7 +63,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		0137196ABAE22F67F52B9D1A /* HomeAI.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HomeAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE80300CC7624CCF8EDB1D02 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		0137196ABAE22F67F52B9D1A /* HomeAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HomeAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		021B66A5F1C82A5A6DFD08B8 /* SpeechTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTests.swift; sourceTree = "<group>"; };
 		026E7BEC5639994664ECC698 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		030A9C6729AEAA14F8E8E130 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -80,11 +82,11 @@
 		4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentTests.swift; sourceTree = "<group>"; };
 		59682522EF3FF4C68D504EDE /* ManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementViews.swift; sourceTree = "<group>"; };
 		6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncOperationGate.swift; sourceTree = "<group>"; };
-		66988C5604968C44ACD83192 /* valid.der */ = {isa = PBXFileReference; path = valid.der; sourceTree = "<group>"; };
-		69B6E5AB48EE76965AD72D13 /* expired.der */ = {isa = PBXFileReference; path = expired.der; sourceTree = "<group>"; };
+		66988C5604968C44ACD83192 /* valid.der */ = {isa = PBXFileReference; lastKnownFileType = file; path = valid.der; sourceTree = "<group>"; };
+		69B6E5AB48EE76965AD72D13 /* expired.der */ = {isa = PBXFileReference; lastKnownFileType = file; path = expired.der; sourceTree = "<group>"; };
 		6A4DABFD6B644F5B4848F1A4 /* PhotoPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreparation.swift; sourceTree = "<group>"; };
 		75E227CB9D07EC6BD64E95F2 /* LocationCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationCapture.swift; sourceTree = "<group>"; };
-		7663DFFCF83A100838851D5D /* future.der */ = {isa = PBXFileReference; path = future.der; sourceTree = "<group>"; };
+		7663DFFCF83A100838851D5D /* future.der */ = {isa = PBXFileReference; lastKnownFileType = file; path = future.der; sourceTree = "<group>"; };
 		7780E4C314968102960503AA /* HomeAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAIApp.swift; sourceTree = "<group>"; };
 		78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScanner.swift; sourceTree = "<group>"; };
 		7AB31B5A22A12DD64AC2B5CA /* DirectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectTests.swift; sourceTree = "<group>"; };
@@ -211,6 +213,7 @@
 		A2A09E7EB0C741A5E6EAF004 /* HomeAI */ = {
 			isa = PBXGroup;
 			children = (
+				AE80300CC7624CCF8EDB1D02 /* Assets.xcassets */,
 				2565FEAD234C22AC9F0B12E7 /* HomeAI.entitlements */,
 				7780E4C314968102960503AA /* HomeAIApp.swift */,
 				8BDF0FE60E34CE16D2DDD28B /* Info.plist */,
@@ -334,6 +337,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AE80300CC7624CCF8EDB1D01 /* Assets.xcassets in Resources */,
 				F2A9DADDD37E5F78ECA1B800 /* AppShortcuts.strings in Resources */,
 				5E27B5C93D091DD71C601885 /* WebRTC-LICENSE.txt in Resources */,
 			);
@@ -465,9 +469,11 @@
 		3A02009D9E66AA4F53FD577E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconMale;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = HomeAI/HomeAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 656L4QXPF6;
 				INFOPLIST_FILE = HomeAI/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Home AI";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "将你授权的日历同步到家庭服务器";
@@ -527,9 +533,11 @@
 		AB01411D7DBD1AB1036D9417 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconMale;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = HomeAI/HomeAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 656L4QXPF6;
 				INFOPLIST_FILE = HomeAI/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Home AI";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "将你授权的日历同步到家庭服务器";

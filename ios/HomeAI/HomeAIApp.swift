@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main struct HomeAIApp: App {
     @State private var state = AppState()
@@ -7,6 +8,7 @@ import SwiftUI
     var body: some Scene {
         WindowGroup {
             RootView().environment(state).task { await state.resumeForeground() }
+                .background(KeyboardDismissalInstaller())
                 .onOpenURL { url in
                     guard url.scheme == SystemReminderSync.markerScheme, url.query == nil, url.fragment == nil,
                           url.pathComponents.count == 2, let identifier = UUID(uuidString: String(url.path.dropFirst())) else { return }
@@ -39,6 +41,57 @@ import SwiftUI
                 Task { await state.resumeForeground() }
             }
         }
+    }
+}
+
+private struct KeyboardDismissalInstaller: UIViewRepresentable {
+    func makeUIView(context: Context) -> KeyboardDismissalView { KeyboardDismissalView() }
+    func updateUIView(_ uiView: KeyboardDismissalView, context: Context) { }
+
+    static func dismantleUIView(_ uiView: KeyboardDismissalView, coordinator: ()) {
+        uiView.removeGesture()
+    }
+}
+
+private final class KeyboardDismissalView: UIView, UIGestureRecognizerDelegate {
+    private weak var installedWindow: UIWindow?
+    private lazy var dismissGesture: UITapGestureRecognizer = {
+        let gesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        // 收起键盘时继续传递点击，避免吞掉按钮或导航操作。
+        gesture.cancelsTouchesInView = false
+        gesture.delegate = self
+        return gesture
+    }()
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        removeGesture()
+        guard let window else { return }
+        installedWindow = window
+        window.addGestureRecognizer(dismissGesture)
+    }
+
+    func removeGesture() {
+        installedWindow?.removeGestureRecognizer(dismissGesture)
+        installedWindow = nil
+    }
+
+    @objc private func dismissKeyboard() {
+        installedWindow?.endEditing(false)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // 输入框内部点击、光标定位和原生控件交互不触发收起。
+        var view = touch.view
+        while let current = view {
+            if current is UITextField || current is UITextView || current is UIControl { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 
