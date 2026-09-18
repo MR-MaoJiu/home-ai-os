@@ -1,7 +1,6 @@
 import SwiftUI
 import PhotosUI
 import VisionKit
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
@@ -9,13 +8,25 @@ struct SettingsView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var syncMessage = ""
     @State private var scanning = false
+    @State private var pendingPairing: String?
+    @State private var scannerError: String?
     @State private var location = LocationCapture()
     var body: some View {
         Form {
             Section("家庭服务器") {
                 if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
-                    Button("扫码配对", systemImage: "qrcode.viewfinder") { scanning = true }.disabled(state.busy)
+                    Button("扫码配对", systemImage: "qrcode.viewfinder") { scanning = true }.disabled(state.busy || state.pairingFeedback == .connecting)
                 } else { Text("当前设备无法使用扫码，请检查相机权限。") }
+                switch state.pairingFeedback {
+                case .idle: EmptyView()
+                case .connecting:
+                    ProgressView(state.pairingFeedback.message).accessibilityIdentifier("pairing.connecting")
+                    Text("远程首次配对可能需要一两分钟，请保持 App 在前台。").font(.caption).foregroundStyle(.secondary)
+                case .success:
+                    Label(state.pairingFeedback.message, systemImage: "checkmark.circle.fill").foregroundStyle(.green).accessibilityIdentifier("pairing.success")
+                case .failure(let message):
+                    Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).accessibilityIdentifier("pairing.failure")
+                }
                 Label(state.connected ? "已保存家庭连接" : "尚未配对", systemImage: state.connected ? "lock.shield" : "wifi.slash")
                 Text("在家庭管理端的“成员与设备”生成二维码。扫码后自动填写连接信息；已开通远程服务时可在外网首次配对。").font(.caption)
             }
@@ -57,23 +68,27 @@ struct SettingsView: View {
                 Text("当前为开发版本：推送、后台调度真机表现、完整脱敏链与生产插件隔离仍需验收。").font(.caption).foregroundStyle(.secondary)
             }
         }.navigationTitle("设置")
-            .sheet(isPresented: $scanning) {
-                PairingScanner { text in
-                    scanning = false
-                    guard text.utf8.count <= 8192 else { state.error = "配对二维码过大"; return }
-                    Task { await state.perform {
-                        let code = try JSONDecoder().decode(PairingCode.self, from: Data(text.utf8))
-                        do { try await state.api.pair(code) }
-                        catch {
-                            state.records = []; state.activity = []; state.approvals = []; state.automations = []; state.taskStates = []
-                            state.connected = await state.api.isConnected(); state.connectionRevision = UUID()
-                            throw error
-                        }
-                        state.records = []; state.activity = []; state.approvals = []; state.automations = []; state.taskStates = []
-                        state.syncStatus = ""; state.systemReminderStatus = ""
-                        state.connected = true; state.connectionRevision = UUID()
-                    } }
-                }.ignoresSafeArea()
+            .sheet(isPresented: $scanning, onDismiss: {
+                // 关闭扫码页后再配对，避免结果弹窗与 sheet 关闭动画冲突。
+                if let message = scannerError {
+                    scannerError = nil; pendingPairing = nil
+                    state.reportPairingFailure(message)
+                } else if let text = pendingPairing {
+                    pendingPairing = nil
+                    Task { await state.pair(scannedText: text) }
+                }
+            }) {
+                NavigationStack {
+                    PairingScanner(onCode: { text in
+                        pendingPairing = text; scanning = false
+                    }, onFailure: { message in
+                        scannerError = message; scanning = false
+                    })
+                    .ignoresSafeArea(edges: .bottom)
+                    .navigationTitle("扫描配对二维码")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { scanning = false } } }
+                }
             }
             .onChange(of: selectedPhoto) { _, photo in
                 guard let photo else { return }

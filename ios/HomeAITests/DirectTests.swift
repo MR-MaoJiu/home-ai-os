@@ -5,6 +5,38 @@ import UIKit
 
 final class DirectTests: XCTestCase {
     @MainActor
+    func testInvalidQRCodeAlwaysProducesVisibleFailure() async {
+        let state = AppState(api: APIClient(persistConnection: false))
+        await state.pair(scannedText: "not-a-homeai-code")
+        XCTAssertTrue(state.pairingNotice)
+        XCTAssertFalse(state.busy)
+        XCTAssertNil(state.error) // 不依赖容易与扫码 sheet 冲突的通用错误路径。
+        guard case .failure(let message) = state.pairingFeedback else { return XCTFail("缺少失败状态") }
+        XCTAssertTrue(message.contains("二维码"))
+        XCTAssertFalse(state.connected)
+    }
+
+    @MainActor
+    func testExpiredQRCodeEndsConnectingState() async throws {
+        let state = AppState(api: APIClient(persistConnection: false))
+        let code = PairingCode(expires_at: 1, url: "https://example.invalid", fingerprint: String(repeating: "a", count: 64), token: "expired")
+        let text = String(decoding: try JSONEncoder().encode(code), as: UTF8.self)
+        await state.pair(scannedText: text)
+        XCTAssertEqual(state.pairingFeedback, .failure("配对二维码已过期，请在管理端重新生成"))
+        XCTAssertTrue(state.pairingNotice)
+        XCTAssertFalse(state.busy)
+    }
+
+    @MainActor
+    func testDuplicateScanCannotReplaceActiveProgress() async {
+        let state = AppState(api: APIClient(persistConnection: false))
+        state.pairingFeedback = .connecting
+        await state.pair(scannedText: "duplicate")
+        XCTAssertEqual(state.pairingFeedback, .connecting)
+        XCTAssertFalse(state.pairingNotice)
+    }
+
+    @MainActor
     func testRealCoreOverDirectChannel() async throws {
         try await runFlow(remote: false)
     }

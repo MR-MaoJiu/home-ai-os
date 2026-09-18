@@ -57,8 +57,8 @@ struct RootView: View {
         .task(id: state.connectionRevision) { if state.connected { state.startForegroundEvents() } }
         .onChange(of: state.connected) { _, connected in if connected { state.startForegroundEvents() } }
         .tint(.teal)
-        .alert("操作未完成", isPresented: Binding(get: { state.error != nil }, set: { if !$0 { state.error = nil } })) {
-            Button("知道了", role: .cancel) { state.error = nil }
-        } message: { Text(state.error ?? "") }
+        .alert(state.pairingNotice ? (state.pairingFeedback == .success ? "连接成功" : "连接未完成") : "操作未完成", isPresented: Binding(get: { state.pairingNotice || state.error != nil }, set: { if !$0 { state.pairingNotice = false; state.error = nil } })) {
+            Button("知道了", role: .cancel) { state.pairingNotice = false; state.error = nil }
+        } message: { Text(state.pairingNotice ? state.pairingFeedback.message : (state.error ?? "")) }
     }
 }

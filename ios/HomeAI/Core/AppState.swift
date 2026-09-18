@@ -4,7 +4,71 @@ import UIKit
 
 @MainActor @Observable
 final class AppState {
-    let api = AppServices.api
+    let api: APIClient
+    init(api: APIClient = AppServices.api) { self.api = api }
+
+    enum PairingFeedback: Equatable {
+        case idle, connecting, success, failure(String)
+        var message: String {
+            switch self {
+            case .idle: return ""
+            case .connecting: return "正在验证配对信息并连接家庭服务器…"
+            case .success: return "配对成功，已连接家庭服务器。"
+            case .failure(let message): return message
+            }
+        }
+    }
+    var pairingFeedback: PairingFeedback = .idle
+    var pairingNotice = false
+
+    func reportPairingFailure(_ message: String) {
+        pairingFeedback = .failure(message)
+        pairingNotice = true
+    }
+
+    /// 用户主动配对有独立结果状态，不能被通用操作的取消处理静默吞掉。
+    func pair(scannedText: String) async {
+        guard pairingFeedback != .connecting else { return }
+        guard !busy else { reportPairingFailure("另一个操作正在进行，请稍后重新扫码。"); return }
+        busy = true; error = nil; pairingNotice = false; pairingFeedback = .connecting
+        await stopForegroundEvents()
+        backgroundRun?.1.cancel()
+        defer {
+            busy = false
+            if connected { startForegroundEvents() }
+        }
+        var attemptedPairing = false
+        do {
+            guard scannedText.utf8.count <= 8192 else { throw APIClient.APIError.message("配对二维码过大，请使用家庭后台生成的二维码。") }
+            let code: PairingCode
+            do { code = try JSONDecoder().decode(PairingCode.self, from: Data(scannedText.utf8)) }
+            catch { throw APIClient.APIError.message("不是有效的家庭配对二维码，请在“成员与设备”重新生成。") }
+            attemptedPairing = true
+            try await api.pair(code)
+            // 保存凭据不等于连通；通过已授权通道验证后才显示成功。
+            _ = try await api.request("GET", "/api/v1/me")
+            records = []; activity = []; approvals = []; automations = []; taskStates = []
+            syncStatus = ""; systemReminderStatus = ""
+            connected = true; connectionRevision = UUID()
+            pairingFeedback = .success; pairingNotice = true
+        } catch {
+            if attemptedPairing {
+                records = []; activity = []; approvals = []; automations = []; taskStates = []
+                connected = await api.isConnected(); connectionRevision = UUID()
+            }
+            let message: String
+            if error is CancellationError { message = "连接已中断，请重新扫码重试。" }
+            else if let network = error as? URLError {
+                switch network.code {
+                case .timedOut: message = "连接超时。请检查手机网络和家庭服务器是否在线，然后重新扫码。"
+                case .notConnectedToInternet: message = "手机当前没有网络，请联网后重新扫码。"
+                case .cancelled: message = "连接已中断，请重新扫码重试。"
+                default: message = "无法连接家庭服务器：" + network.localizedDescription
+                }
+            } else { message = error.localizedDescription }
+            reportPairingFailure(message)
+        }
+    }
     private let dataSync = DeviceDataSync()
     var syncStatus = ""
     var backgroundSyncStatus = ""
@@ -37,6 +101,7 @@ final class AppState {
     }
 
     func startForegroundEvents() {
+        guard pairingFeedback != .connecting else { return }
         eventRun?.cancel()
         eventRun = Task { [weak self] in
             guard let self else { return }
@@ -90,6 +155,7 @@ final class AppState {
     }
 
     func resumeForeground() async {
+        guard pairingFeedback != .connecting else { return }
         await restore()
         guard connected, UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else { return }
         startForegroundEvents()
