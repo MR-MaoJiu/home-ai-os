@@ -2,13 +2,10 @@
 import base64,json,os,secrets
 from pathlib import Path
 from urllib.parse import urlparse
-import httpx
 from fastapi import APIRouter,Request,Depends,HTTPException
 from pydantic import BaseModel,ConfigDict,Field
-from cryptography.hazmat.primitives import serialization,hashes
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
 from .security import authenticate,owner
-from .db import uid
 
 router=APIRouter(prefix='/api/v1/remote',tags=['可选远程连接'])
 
@@ -42,7 +39,9 @@ def status(request:Request,actor=Depends(authenticate)):
     from .certificate_store import runtime_status
     try:tls=runtime_status(request.app.state)
     except Exception as error:tls={'status':'unavailable','error_type':type(error).__name__}
-    return {'configured':config is not None,'enabled':bool(config and config.get('enabled')),'url':config.get('url') if config else None,'runtime':runtime,
+    return {'configured':config is not None,'enabled':False,'previously_enabled':bool(config and config.get('enabled')),
+            'transport_policy':'direct_only','direct_ready':False,'relay_allowed':False,
+            'migration_required':config is not None,'url':config.get('url') if config else None,'runtime':runtime,
             'managed_https_port':request.app.state.settings.managed_https_port,'tls':tls}
 
 class Binding(BaseModel):
@@ -63,29 +62,13 @@ async def bind(body:Binding,request:Request,actor=Depends(authenticate)):
     target=urlparse(str(data.get('url','')))
     if target.scheme!='https' or not target.hostname or target.username or target.query or target.fragment:
         raise HTTPException(422,'绑定地址必须是无凭据的 HTTPS 地址')
-    _,key=identity(app)
-    signature=base64.b64encode(key.sign(('homeai-connect-bind:'+token).encode(),ec.ECDSA(hashes.SHA256()))).decode()
-    async with httpx.AsyncClient(timeout=20,trust_env=False,follow_redirects=False) as client:
-        ca=await client.get(body.portal_url.rstrip('/')+'/api/public/relay-ca');ca.raise_for_status()
-        response=await client.post(body.portal_url.rstrip('/')+'/api/agent/claim',json={'instance_id':instance_id,'token':token,'signature':signature});response.raise_for_status()
-    claimed=response.json()
-    if target.hostname!=claimed.get('domain'):
-        raise HTTPException(422,'绑定地址与平台确认的实例域名不一致')
-    credential=claimed['credential']
-    config={'portal_url':body.portal_url.rstrip('/'),'instance_id':instance_id,'credential':credential,'url':data['url'],'local_https_port':app.settings.managed_https_port,'relay_ca':ca.json()['certificate'],'enabled':True}
-    private_write(app.settings.state_dir/'remote-config.enc',app.vault.seal(config,'remote-config'))
-    return {'bound':True,'url':data['url'],'agent_required':True}
+    raise HTTPException(409,'旧版中继绑定已停用；纯直连协商尚未完成，不能建立远程连接')
 
 @router.post('/use-managed-https')
 def use_managed_https(request:Request,actor=Depends(authenticate)):
     owner(actor);app=request.app.state;config=read_config(app)
     if not config:raise HTTPException(409,'尚未绑定远程实例')
-    from .certificate_store import ready_for_remote
-    if not ready_for_remote(app,urlparse(config['url']).hostname,app.settings.managed_https_port):
-        raise HTTPException(409,'受管 HTTPS 尚未以匹配域名的正式证书就绪')
-    config['local_https_port']=app.settings.managed_https_port
-    private_write(app.settings.state_dir/'remote-config.enc',app.vault.seal(config,'remote-config'))
-    return {'configured':True,'enabled':config.get('enabled',False),'local_https_port':config['local_https_port']}
+    raise HTTPException(409,'中继迁移入口已停用；HTTPS 证书就绪不代表 P2P 直连就绪')
 
 @router.post('/disable')
 def disable(request:Request,actor=Depends(authenticate)):
@@ -98,5 +81,4 @@ def disable(request:Request,actor=Depends(authenticate)):
 def enable(request:Request,actor=Depends(authenticate)):
     owner(actor);app=request.app.state;config=read_config(app)
     if not config:raise HTTPException(409,'尚未绑定远程实例')
-    config['enabled']=True;private_write(app.settings.state_dir/'remote-config.enc',app.vault.seal(config,'remote-config'))
-    return {'enabled':True,'requires_certificate_and_lease':True}
+    raise HTTPException(409,'旧版中继已停用；纯直连尚未就绪，禁止回退到中继')
