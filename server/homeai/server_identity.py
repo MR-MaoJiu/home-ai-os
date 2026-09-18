@@ -19,7 +19,8 @@ DOMAIN=b'homeai-server-identity:v1\n'
 
 
 def certificate(app):
-    cert=x509.load_pem_x509_certificate(app.settings.identity_certificate_file.read_bytes())
+    loaded=getattr(app,'tls_leaf_certificate',None)
+    cert=loaded() if loaded else x509.load_pem_x509_certificate(app.settings.identity_certificate_file.read_bytes())
     now=datetime.now(timezone.utc)
     if not cert.not_valid_before_utc<=now<cert.not_valid_after_utc:
         raise HTTPException(503,'服务器身份绑定的 TLS 证书已过期或尚未生效')

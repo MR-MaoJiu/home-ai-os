@@ -1,5 +1,7 @@
 """本机开发数据库加密备份；密钥与备份必须分开保管。"""
 import argparse
+import atexit
+import fcntl
 import io
 import json
 import hashlib
@@ -21,6 +23,11 @@ key = args.key.read_bytes()
 if len(key) != 32 or args.key.stat().st_mode & 0o077:
     raise SystemExit('备份密钥必须为 32 字节且权限为 0600')
 if args.action == 'create':
+    acme=root/'state/acme';acme.mkdir(parents=True,exist_ok=True)
+    lock=os.fdopen(os.open(acme/'operation.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600),'r+')
+    atexit.register(lock.close)
+    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:raise SystemExit('证书操作正在进行，请稍后进入备份维护窗口')
     dump = subprocess.run(['docker','compose','--env-file',str(root/'.env.local'),'-f',str(root/'deploy/compose.dev.yml'),'exec','-T','postgres','pg_dump','-U','homeai_migrator','-d','homeai_runtime','-Fc'],check=True,capture_output=True).stdout
     buffer = io.BytesIO()
     manifest = {'format_version': 2, 'created_at': datetime.now(timezone.utc).isoformat(), 'files': {}}
@@ -32,7 +39,7 @@ if args.action == 'create':
             tar.addfile(info, io.BytesIO(content))
             manifest['files'][name] = {'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
         add('database.dump', dump)
-        for name in ['blobs', 'deletions.jsonl', 'server-identity.enc']:
+        for name in ['blobs', 'deletions.jsonl', 'server-identity.enc', 'remote-config.enc', 'acme', 'tls', 'tls-selection.enc', 'tls-runtime.enc']:
             path = root / 'state' / name
             if path.is_symlink():
                 raise SystemExit('备份源不能是符号链接')
@@ -42,7 +49,7 @@ if args.action == 'create':
             for item in paths:
                 if item.is_symlink():
                     raise SystemExit('备份源不能包含符号链接')
-                if item.is_file():
+                if item.is_file() and item.suffix != '.lock':
                     add(item.relative_to(root / 'state').as_posix(), item.read_bytes())
         raw = json.dumps(manifest, ensure_ascii=False, sort_keys=True).encode()
         info = tarfile.TarInfo('manifest.json'); info.size = len(raw); info.mode = 0o600

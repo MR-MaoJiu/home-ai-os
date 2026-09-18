@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,3 +19,4 @@ class Settings(BaseSettings):
     provider_timeout_seconds: int = 60
     identity_certificate_file: Path = Path('state/tls/server.crt')
     server_addresses: list[str] = []
+    managed_https_port: int = Field(default=58448,ge=1024,le=65535)

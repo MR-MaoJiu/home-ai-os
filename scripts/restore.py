@@ -65,6 +65,14 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
     if (destination/'blobs').exists():
         import shutil
         shutil.copytree(destination/'blobs',output/'blobs')
+    for directory in ('acme','tls'):
+        if (destination/directory).exists():
+            import shutil
+            shutil.copytree(destination/directory,output/directory)
+    for filename in ('remote-config.enc','tls-selection.enc','tls-runtime.enc'):
+        if (destination/filename).exists():
+            import shutil
+            shutil.copyfile(destination/filename,output/filename);os.chmod(output/filename,0o600)
     if (destination/'server-identity.enc').exists():
         # 身份仍为主密钥加密的密文；只放入隔离恢复目录，不覆盖正在使用的身份。
         import shutil

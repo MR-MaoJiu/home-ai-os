@@ -2024,6 +2024,25 @@
         }
       }
     },
+    "/api/v1/remote/use-managed-https": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Use Managed Https",
+        "operationId": "use_managed_https_api_v1_remote_use_managed_https_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/remote/disable": {
       "post": {
         "tags": [
@@ -2031,6 +2050,25 @@
         ],
         "summary": "Disable",
         "operationId": "disable_api_v1_remote_disable_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/enable": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Enable",
+        "operationId": "enable_api_v1_remote_enable_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2226,11 +2264,17 @@
             "title": "Binding Code"
           },
           "local_https_port": {
-            "type": "integer",
-            "maximum": 65535.0,
-            "minimum": 1024.0,
-            "title": "Local Https Port",
-            "default": 58443
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 65535.0,
+                "minimum": 1024.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Https Port"
           }
         },
         "additionalProperties": false,

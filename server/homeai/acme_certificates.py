@@ -65,6 +65,7 @@ def inspect_certificate(chain_pem,key_pem,domain):
     certificates=x509.load_pem_x509_certificates(chain_pem)
     if len(certificates)<2:raise ValueError('CA 未返回完整证书链')
     leaf=certificates[0];key=serialization.load_pem_private_key(key_pem,password=None)
+    if not isinstance(key,(ec.EllipticCurvePrivateKey,rsa.RSAPrivateKey)):raise ValueError('TLS 身份目前只支持 EC/RSA 私钥')
     public=lambda value:value.public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)
     if public(leaf.public_key())!=public(key.public_key()):raise ValueError('证书与家庭私钥不匹配')
     san=leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
