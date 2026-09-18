@@ -9,7 +9,7 @@ from homeai.acme_certificates import issue
 from homeai.certificate_store import select_bundle,rollback_bundle
 from homeai.config import Settings
 from homeai.crypto import Vault
-from homeai.remote import private_write
+from homeai.private_files import private_write
 from test_acme_live import PebbleDNS
 
 pytestmark=pytest.mark.skipif(os.getenv('HOMEAI_ACME_TEST')!='1',reason='需要真实测试 CA、DNS、HTTPS 与已配置测试数据库')

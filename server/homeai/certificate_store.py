@@ -6,7 +6,7 @@ import certifi
 from cryptography import x509
 from cryptography.x509.verification import PolicyBuilder,Store
 from .acme_certificates import PRODUCTION,inspect_certificate
-from .remote import private_write
+from .private_files import private_write
 
 
 def validate_bundle(app,bundle,test_ca=None):
@@ -84,10 +84,3 @@ def runtime_status(app):
     if age < -5 or age > 10:
         value.update(status='stale',listening=False)
     return value
-
-
-def ready_for_remote(app,domain,port):
-    value=runtime_status(app)
-    return bool(value.get('listening') and value.get('valid') and value.get('test_certificate') is False
-        and value.get('domain')==domain and value.get('listen_port')==port==app.settings.managed_https_port
-        and value.get('listen_host') in {'127.0.0.1','0.0.0.0','localhost'})

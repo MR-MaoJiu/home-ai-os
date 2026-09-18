@@ -66,7 +66,7 @@ def get_browser_actor(request, setup=False):
         device=db.get(Device,session.device_id)
         user=db.get(Principal,session.user_id)
         if not device or device.revoked or not user:raise HTTPException(401,'网页设备已撤销')
-        sensitive = request.method not in {'GET','HEAD','OPTIONS'} and request.url.path.startswith(('/api/v1/secrets','/api/v1/providers','/api/v1/members','/api/v1/devices','/api/v1/remote/bind','/api/v1/remote/disable','/api/v1/remote/enable','/api/v1/remote/use-managed-https'))
+        sensitive = request.method not in {'GET','HEAD','OPTIONS'} and request.url.path.startswith(('/api/v1/secrets','/api/v1/providers','/api/v1/members','/api/v1/devices','/api/v1/remote/disable'))
         sensitive = sensitive or (request.method == 'POST' and request.url.path.startswith('/api/v1/tasks/') and request.url.path.endswith('/reconcile'))
         if sensitive:
             proof=db.get(Nonce,'web-stepup:'+session.digest)

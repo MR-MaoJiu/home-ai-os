@@ -84,7 +84,7 @@ flowchart TB
 | `server/homeai/policy.py`、`privacy.py` | 核心风险等级、OPA、云出站限制 |
 | `server/homeai/home_observer.py`、`home_events.py` | 家居订阅、租约、加密最新状态、断线恢复与观察 API |
 | `server/homeai/providers.py` | 端点/能力映射、凭据注入、实际 HTTP/MCP 调用 |
-| `server/homeai/remote.py`、`remote_agent.py`、`server_identity.py` | 稳定服务器身份、历史绑定读取、纯直连迁移保护 |
+| `server/homeai/remote.py`、`server_identity.py` | 稳定服务器身份、历史绑定读取、纯直连迁移保护 |
 | `server/homeai/acme_certificates.py`、`acme_dns.py` | 持久 ACME 订单、私钥保管、绑定实例的 DNS 验证与证书暂存 |
 | `providers/homeai_providers/` | 第三方 SDK 桥；独立安装依赖 |
 | `admin-web/` | 管理后台源码；构建结果由 Core 同源部署 |
@@ -301,7 +301,7 @@ flowchart LR
 
 子域名是发现或寻址手段，不会自行穿透 NAT。原生 iOS 必须集成连接协商与传输层，浏览器访问也需要相应适配，不能仅将 frp `https` 改为 `xtcp` 就视为完成。正式验收应同时观察两端与平台网络流量，证明文件/语音的业务字节不经过平台，并覆盖打洞失败、网络切换、身份冒用和禁止回退。
 
-当前 `remote/status` 返回 `transport_policy=direct_only`、`relay_allowed=false`、`direct_ready=false`；这些表示策略与未完成状态，不是连通证据。历史运行状态单独保留用于诊断，不能当作当前直连状态。`bind`、`enable` 和旧受管 HTTPS 迁移入口均拒绝启用旧中继；`disable` 保留，以清除旧配置的启用标记。
+当前 `remote/status` 返回 `transport_policy=direct_only`、`relay_allowed=false`、`direct_ready=false`；这些表示策略与未完成状态，不是连通证据。历史运行状态在 `legacy_runtime` 字段单独保留用于诊断，不能当作当前直连状态。旧申请码、`bind`、`enable` 和受管 HTTPS 中继迁移接口已删除（返回 404）；`disable` 保留，以清除旧配置的启用标记。
 
 ## 本机开发
 
@@ -1007,7 +1007,7 @@ cd ..
 
 ### 可选远程连接
 
-纯直连迁移期间，不再提供旧 frpc HTTPS 中继启动指引。`python -m homeai.remote_agent` 当前仅写入 `disabled` 或 `direct_not_ready` 诊断状态，不联系平台、不申请租约、不启动 frpc。旧绑定密文保留，管理后台允许清除启用标记，但不能创建或恢复中继。
+纯直连迁移期间，不再提供旧 frpc HTTPS 中继启动指引。旧 `remote_agent` 已删除，不再运行只写状态的占位进程。旧绑定密文保留，管理后台允许清除启用标记，但不能创建或恢复中继。
 
 请停止升级前仍运行的旧连接程序及其 frpc 子进程；仅更新源文件不会终止既有进程。本地 HTTPS、稳定服务器身份、受管证书工具仍可独立使用。纯直连客户端和平台完成真实验收后，才会补充新的远程启动流程。
 

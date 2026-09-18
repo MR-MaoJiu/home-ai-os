@@ -8,7 +8,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from .certificate_store import selection
 from .acme_certificates import inspect_certificate
-from .remote import private_write
+from .private_files import private_write
 
 
 @dataclass(frozen=True)

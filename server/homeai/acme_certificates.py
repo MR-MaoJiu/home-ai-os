@@ -17,7 +17,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import ec,rsa
 from .crypto import digest
-from .remote import private_write
+from .private_files import private_write
 
 PRODUCTION='https://acme-v02.api.letsencrypt.org/directory'
 STAGING='https://acme-staging-v02.api.letsencrypt.org/directory'

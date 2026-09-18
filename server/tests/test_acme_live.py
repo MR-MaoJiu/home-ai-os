@@ -65,7 +65,7 @@ def test_existing_order_resumes_after_real_http_failure(tmp_path):
     recovered=issue(app,domain,PebbleDNS(),**args)
     assert recovered['order_uri']==pending['order_uri']
     assert not (tmp_path/'acme/operation.enc').exists()
-    from homeai.remote import private_write
+    from homeai.private_files import private_write
     private_write(tmp_path/'acme/operation.enc',app.vault.seal({'phase':'SUBMITTING','domain':domain,'directory':args['directory']},'acme-operation'))
     with pytest.raises(RuntimeError,match='不会自动重新申请'):issue(app,domain,PebbleDNS(),**args)
 

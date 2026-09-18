@@ -6,7 +6,8 @@ from urllib.parse import urlparse
 import httpx
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from .remote import read_config,identity
+from .remote import read_config
+from .server_identity import identity
 from .acme_certificates import domain_name
 
 class RemoteDNS:

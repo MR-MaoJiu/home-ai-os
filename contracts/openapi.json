@@ -1947,25 +1947,6 @@
         }
       }
     },
-    "/api/v1/remote/request-code": {
-      "get": {
-        "tags": [
-          "可选远程连接"
-        ],
-        "summary": "Request Code",
-        "operationId": "request_code_api_v1_remote_request_code_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/remote/status": {
       "get": {
         "tags": [
@@ -1985,64 +1966,6 @@
         }
       }
     },
-    "/api/v1/remote/bind": {
-      "post": {
-        "tags": [
-          "可选远程连接"
-        ],
-        "summary": "Bind",
-        "operationId": "bind_api_v1_remote_bind_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Binding"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/remote/use-managed-https": {
-      "post": {
-        "tags": [
-          "可选远程连接"
-        ],
-        "summary": "Use Managed Https",
-        "operationId": "use_managed_https_api_v1_remote_use_managed_https_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/remote/disable": {
       "post": {
         "tags": [
@@ -2050,25 +1973,6 @@
         ],
         "summary": "Disable",
         "operationId": "disable_api_v1_remote_disable_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/remote/enable": {
-      "post": {
-        "tags": [
-          "可选远程连接"
-        ],
-        "summary": "Enable",
-        "operationId": "enable_api_v1_remote_enable_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2248,41 +2152,6 @@
           "skill"
         ],
         "title": "AutomationInput"
-      },
-      "Binding": {
-        "properties": {
-          "portal_url": {
-            "type": "string",
-            "maxLength": 300,
-            "title": "Portal Url",
-            "default": "https://homeai-connect.pintheworld.cn"
-          },
-          "binding_code": {
-            "type": "string",
-            "maxLength": 10000,
-            "minLength": 20,
-            "title": "Binding Code"
-          },
-          "local_https_port": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 65535.0,
-                "minimum": 1024.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Https Port"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "binding_code"
-        ],
-        "title": "Binding"
       },
       "Body_upload_api_v1_files_post": {
         "properties": {
