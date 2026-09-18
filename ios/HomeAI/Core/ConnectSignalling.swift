@@ -18,6 +18,32 @@ private final class NoSignalRedirect: NSObject, URLSessionTaskDelegate, @uncheck
 }
 
 enum ConnectSignalling {
+    private static let delegate = NoSignalRedirect()
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        config.urlCredentialStorage = nil
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 25
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    }()
+
+    /// 复用连接池，避免每次轮询都重新进行 TLS 握手；仍使用系统证书验证。
+    private static func response(_ request: URLRequest, stage: String) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        do { return try await session.bytes(for: request, delegate: delegate) }
+        catch let error as URLError {
+            var details = error.userInfo
+            details["homeaiConnectionStage"] = stage
+            #if DEBUG
+            print("HOMEAI_NETWORK stage=\(stage) code=\(error.code.rawValue)")
+            #endif
+            throw URLError(error.code, userInfo: details)
+        }
+    }
+
     /// 平台请求不包含家庭会话令牌；仅设备连接授权和有界信令。
     static func request(_ access: DirectAccess, method: String, path: String, body: Data = Data()) async throws -> Data {
         guard access.transport_policy == "direct_only", access.expires > Date().timeIntervalSince1970,
@@ -25,7 +51,7 @@ enum ConnectSignalling {
               base.user == nil, base.password == nil, base.query == nil, base.fragment == nil, ["", "/"].contains(base.path),
               path.hasPrefix("/api/direct/"), !path.contains("?"), body.count <= 40000,
               let url = URL(string: access.portal_url.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else {
-            throw APIClient.APIError.message("直连平台授权无效或已过期，请在家庭网络重新授权")
+            throw APIClient.APIError.message("直连平台授权无效或已过期，请在家庭后台重新生成二维码配对")
         }
         let timestamp = String(Int(Date().timeIntervalSince1970))
         let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -40,15 +66,7 @@ enum ConnectSignalling {
         request.setValue(timestamp, forHTTPHeaderField: "X-Connect-Time")
         request.setValue(nonce, forHTTPHeaderField: "X-Connect-Nonce")
         request.setValue(try DeviceIdentity().sign(Data(proof.utf8)), forHTTPHeaderField: "X-Connect-Signature")
-        let config = URLSessionConfiguration.ephemeral
-        config.httpCookieStorage = nil
-        config.urlCredentialStorage = nil
-        config.timeoutIntervalForRequest = 20
-        config.timeoutIntervalForResource = 25
-        let delegate = NoSignalRedirect()
-        let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-        let (stream, response) = try await session.bytes(for: request, delegate: delegate)
+        let (stream, response) = try await response(request, stage: "platform_signalling")
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIClient.APIError.message("连接平台拒绝协商或暂时不可用")
         }
@@ -84,13 +102,7 @@ extension ConnectSignalling {
         request.setValue(access.credential, forHTTPHeaderField: "X-Enrollment-Credential")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let ciphertext { request.httpBody = try JSONSerialization.data(withJSONObject: ["ciphertext": ciphertext]) }
-        let config = URLSessionConfiguration.ephemeral
-        config.httpCookieStorage = nil; config.urlCredentialStorage = nil
-        config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 25
-        let delegate = NoSignalRedirect()
-        let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-        let (stream, response) = try await session.bytes(for: request, delegate: delegate)
+        let (stream, response) = try await response(request, stage: "platform_pairing")
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw APIClient.APIError.message("首次配对授权失效或平台不可用，请重新生成二维码") }
         var data = Data()
         for try await byte in stream {

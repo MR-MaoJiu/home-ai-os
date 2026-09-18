@@ -27,7 +27,7 @@ struct SettingsView: View {
                 case .failure(let message):
                     Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).accessibilityIdentifier("pairing.failure")
                 }
-                Label(state.connected ? "已保存家庭连接" : "尚未配对", systemImage: state.connected ? "lock.shield" : "wifi.slash")
+                Label(state.connected ? "配对信息已保存，不代表当前在线" : "尚未配对", systemImage: state.connected ? "lock.shield" : "wifi.slash")
                 Text("在家庭管理端的“成员与设备”生成二维码。扫码后自动填写连接信息；已开通远程服务时可在外网首次配对。").font(.caption)
             }
             Section("后台同步") {

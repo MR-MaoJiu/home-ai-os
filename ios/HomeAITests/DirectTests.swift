@@ -4,6 +4,26 @@ import UIKit
 @testable import HomeAI
 
 final class DirectTests: XCTestCase {
+    func testPlatformTLSOnDevice() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["HOMEAI_PLATFORM_TLS_CHECK"] == "1" else { throw XCTSkip("仅在真实设备网络诊断时启用") }
+        let access = DirectAccess(grant_id: "public-diagnostic", credential: "", expires: Date().timeIntervalSince1970 + 300,
+                                  portal_url: "https://homeai-connect.pintheworld.cn", instance_id: "public-diagnostic", stun_urls: [], transport_policy: "direct_only")
+        for attempt in 1...3 {
+            do {
+                let data = try await ConnectSignalling.request(access, method: "GET", path: "/api/direct/capabilities")
+                let result = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                XCTAssertEqual(result["protocol"] as? Int, 1)
+                print("PLATFORM_TLS attempt=\(attempt) verified=true")
+            } catch {
+                let error = error as NSError
+                let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
+                print("PLATFORM_TLS attempt=\(attempt) code=\(error.code) underlying=\(underlying?.code ?? 0)")
+                throw error
+            }
+        }
+    }
+
     @MainActor
     func testInvalidQRCodeAlwaysProducesVisibleFailure() async {
         let state = AppState(api: APIClient(persistConnection: false))

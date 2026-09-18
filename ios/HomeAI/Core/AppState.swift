@@ -62,6 +62,11 @@ final class AppState {
                 switch network.code {
                 case .timedOut: message = "连接超时。请检查手机网络和家庭服务器是否在线，然后重新扫码。"
                 case .notConnectedToInternet: message = "手机当前没有网络，请联网后重新扫码。"
+                case .secureConnectionFailed:
+                    let stage = network.userInfo["homeaiConnectionStage"] as? String
+                    message = stage?.hasPrefix("platform_") == true
+                        ? "与远程协调平台的 TLS 安全连接未建立（-1200）。请重试；若持续出现，请检查当前网络或代理。家庭数据连接尚未建立。"
+                        : "与家庭 HTTPS 入口的 TLS 安全连接未建立（-1200）。请检查家庭证书和二维码中的连接地址。"
                 case .cancelled: message = "连接已中断，请重新扫码重试。"
                 default: message = "无法连接家庭服务器：" + network.localizedDescription
                 }

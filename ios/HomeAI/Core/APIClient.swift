@@ -139,6 +139,9 @@ actor APIClient {
     }
 
     private func pairRemote(_ code: PairingCode) async throws {
+        #if DEBUG
+        print("PAIR_STAGE remote_start")
+        #endif
         guard let access = code.remote, let serverID = code.server_id,
               let publicKey = code.server_public_key, let anchor = code.namespace_anchor,
               code.token.count >= 32 else { throw APIError.message("远程配对码缺少家庭身份") }
@@ -151,17 +154,20 @@ actor APIClient {
         guard let combined = sealed.combined else { throw APIError.message("无法加密配对信息") }
         // 同一密文提交具有幂等保证，网络短暂中断可安全重试一次。
         do { _ = try await ConnectSignalling.enrollment(access, suffix: "request", ciphertext: combined.base64EncodedString()) }
-        catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) {
+        catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost, .secureConnectionFailed].contains(error.code) {
             try await Task.sleep(for: .seconds(1))
             _ = try await ConnectSignalling.enrollment(access, suffix: "request", ciphertext: combined.base64EncodedString())
         }
+        #if DEBUG
+        print("PAIR_STAGE request_accepted")
+        #endif
         let deadline = Date().addingTimeInterval(90)
         while Date() < deadline {
             try Task.checkCancellation()
             guard pairingAttempt == attempt else { throw APIError.message("配对请求已更新") }
             let received: Data
             do { received = try await ConnectSignalling.enrollment(access, suffix: "response") }
-            catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) {
+            catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost, .secureConnectionFailed].contains(error.code) {
                 try await Task.sleep(for: .seconds(1))
                 continue
             }
@@ -169,6 +175,9 @@ actor APIClient {
             if let encrypted = try JSONDecoder().decode(Reply.self, from: received).ciphertext, let raw = Data(base64Encoded: encrypted) {
                 let decoded = try AES.GCM.open(AES.GCM.SealedBox(combined: raw), using: key, authenticating: Data(("homeai-pair-bootstrap:v1\n" + access.id + "\nresponse").utf8))
                 struct Result: Decodable { let direct_access: DirectAccess }
+                #if DEBUG
+                print("PAIR_STAGE response_decrypted")
+                #endif
                 let tokens = try JSONDecoder().decode(Tokens.self, from: decoded)
                 let direct = try JSONDecoder().decode(Result.self, from: decoded).direct_access
                 guard direct.portal_url == access.portal_url, direct.instance_id == access.instance_id else { throw APIError.message("配对平台或家庭实例不匹配") }
@@ -182,6 +191,9 @@ actor APIClient {
                 // 保存配对后即使当前网络无法打洞，后续也只尝试已验证身份的直连。
                 try persist()
                 try await connectRemoteDirect()
+                #if DEBUG
+                print("PAIR_STAGE direct_connected")
+                #endif
                 return
             }
             try await Task.sleep(for: .seconds(1))
