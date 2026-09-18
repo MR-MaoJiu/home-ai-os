@@ -66,3 +66,10 @@ requests==2.34.2
 charset-normalizer==3.5.1
 urllib3==2.8.0
 dnspython==2.8.0
+aioice==0.10.2
+aiortc==1.15.0
+av==17.1.0
+google-crc32c==1.8.0
+ifaddr==0.2.0
+pyee==14.0.0
+pylibsrtp==1.0.0

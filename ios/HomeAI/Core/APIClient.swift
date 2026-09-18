@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct Connection: Codable, Sendable {
     var url: String
@@ -11,11 +12,15 @@ struct Connection: Codable, Sendable {
     var serverID: String? = nil
     var serverPublicKey: String? = nil
     var namespaceAnchor: String? = nil
+    var prefersDirect: Bool? = nil
+    var directAccess: DirectAccess? = nil
     var addresses: [String]? = nil
     var namespaceIdentity: String { namespaceAnchor ?? tlsKeyFingerprint ?? fingerprint }
 }
 
 struct PairingCode: Codable, Sendable {
+    var remote: EnrollmentAccess? = nil
+    var expires_at: Double? = nil
     var url: String
     var fingerprint: String
     var token: String
@@ -47,6 +52,10 @@ actor APIClient {
     private var generation = UUID()
     private let renewalGate = AsyncOperationGate()
     private var pairingAttempt = UUID()
+    private let directGate = AsyncOperationGate()
+    private var directPublicOnly = false
+    private var directTransport: DirectTransport?
+    private var directEvents: [UUID: Task<Void, Never>] = [:]
     private var eventSockets: [UUID: URLSessionWebSocketTask] = [:]
 
     init(persistConnection: Bool = true) {
@@ -56,6 +65,18 @@ actor APIClient {
             session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: saved.fingerprint, keyFingerprint: saved.tlsKeyFingerprint), delegateQueue: nil)
         }
     }
+
+    #if DEBUG
+    /// 仅用于隔离真机验收，复用已配对设备；不覆盖用户的持久连接。
+    func restoreAcceptanceConnection(_ saved: Connection, devicePublicKey: String) throws {
+        guard !persistConnection, try identity.publicPEM() == devicePublicKey, saved.directAccess?.transport_policy == "direct_only" else {
+            throw APIError.message("验收配置与当前设备密钥不匹配")
+        }
+        connection = saved
+        generation = UUID()
+        session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: saved.fingerprint, keyFingerprint: saved.tlsKeyFingerprint), delegateQueue: nil)
+    }
+    #endif
 
     func isConnected() -> Bool { connection != nil }
 
@@ -69,6 +90,8 @@ actor APIClient {
     }
 
     func pair(_ code: PairingCode) async throws {
+        if let expires = code.expires_at, expires <= Date().timeIntervalSince1970 { throw APIError.message("配对二维码已过期，请在管理端重新生成") }
+        if code.schema_version == "3.0" { try await pairRemote(code); return }
         let attempt = UUID()
         pairingAttempt = attempt
         guard let url = URL(string: code.url), url.scheme == "https", code.fingerprint.count == 64 else { throw APIError.message("需要 HTTPS 地址和完整服务器证书指纹") }
@@ -110,8 +133,136 @@ actor APIClient {
             }
             connection?.addresses = urls
         }
+        await disableDirect()
         session = transport
         try persist()
+    }
+
+    private func pairRemote(_ code: PairingCode) async throws {
+        guard let access = code.remote, let serverID = code.server_id,
+              let publicKey = code.server_public_key, let anchor = code.namespace_anchor,
+              code.token.count >= 32 else { throw APIError.message("远程配对码缺少家庭身份") }
+        _ = try P256.Signing.PublicKey(pemRepresentation: publicKey)
+        let attempt = UUID(); pairingAttempt = attempt
+        let key = SymmetricKey(data: SHA256.hash(data: Data(("homeai-pair-bootstrap:v1\n" + code.token).utf8)))
+        let body = try JSONSerialization.data(withJSONObject: ["token": code.token, "public_key": identity.publicPEM(), "signature": identity.sign(Data(("homeai-pair:" + code.token).utf8)), "name": "iPhone"])
+        let aad = Data(("homeai-pair-bootstrap:v1\n" + access.id + "\nrequest").utf8)
+        let sealed = try AES.GCM.seal(body, using: key, authenticating: aad)
+        guard let combined = sealed.combined else { throw APIError.message("无法加密配对信息") }
+        // 同一密文提交具有幂等保证，网络短暂中断可安全重试一次。
+        do { _ = try await ConnectSignalling.enrollment(access, suffix: "request", ciphertext: combined.base64EncodedString()) }
+        catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) {
+            try await Task.sleep(for: .seconds(1))
+            _ = try await ConnectSignalling.enrollment(access, suffix: "request", ciphertext: combined.base64EncodedString())
+        }
+        let deadline = Date().addingTimeInterval(90)
+        while Date() < deadline {
+            try Task.checkCancellation()
+            guard pairingAttempt == attempt else { throw APIError.message("配对请求已更新") }
+            let received: Data
+            do { received = try await ConnectSignalling.enrollment(access, suffix: "response") }
+            catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) {
+                try await Task.sleep(for: .seconds(1))
+                continue
+            }
+            struct Reply: Decodable { let ciphertext: String? }
+            if let encrypted = try JSONDecoder().decode(Reply.self, from: received).ciphertext, let raw = Data(base64Encoded: encrypted) {
+                let decoded = try AES.GCM.open(AES.GCM.SealedBox(combined: raw), using: key, authenticating: Data(("homeai-pair-bootstrap:v1\n" + access.id + "\nresponse").utf8))
+                struct Result: Decodable { let direct_access: DirectAccess }
+                let tokens = try JSONDecoder().decode(Tokens.self, from: decoded)
+                let direct = try JSONDecoder().decode(Result.self, from: decoded).direct_access
+                guard direct.portal_url == access.portal_url, direct.instance_id == access.instance_id else { throw APIError.message("配对平台或家庭实例不匹配") }
+                stopTaskEvents(); await directTransport?.close()
+                generation = UUID()
+                connection = Connection(url: code.url.isEmpty ? "https://homeai.invalid" : code.url, fingerprint: code.fingerprint, token: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date().addingTimeInterval(Double(tokens.expires_in)))
+                connection?.deviceID = tokens.device_id; connection?.serverID = serverID
+                connection?.serverPublicKey = publicKey; connection?.namespaceAnchor = anchor
+                connection?.directAccess = direct; connection?.prefersDirect = true; connection?.addresses = code.addresses
+                session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: code.fingerprint), delegateQueue: nil)
+                // 保存配对后即使当前网络无法打洞，后续也只尝试已验证身份的直连。
+                try persist()
+                try await connectRemoteDirect()
+                return
+            }
+            try await Task.sleep(for: .seconds(1))
+        }
+        throw APIError.message("家庭服务器没有响应，请确认在线并重新生成二维码")
+    }
+
+    /// 当前通过可信 HTTPS 交换信令；业务请求切换到 DTLS 数据通道。
+    func enableDirect() async throws {
+        let started = generation
+        guard let saved = connection, let publicKey = saved.serverPublicKey,
+              let base = URL(string: saved.url), let session else { throw APIError.message("请先绑定稳定服务器身份") }
+        let transport = try await DirectTransport()
+        await directTransport?.close()
+        directTransport = transport
+        stopTaskEvents()
+        do {
+            let offer = try await transport.offer()
+            let object = try JSONSerialization.jsonObject(with: offer)
+            let body = try JSONSerialization.data(withJSONObject: ["envelope": object])
+            let request = try signedRequest("POST", "/api/v1/direct/offer", body: body, token: saved.token, base: base)
+            let (answer, response) = try await session.data(for: request)
+            try Self.validate(answer, response)
+            try await transport.accept(answer, serverPublicKey: publicKey)
+            guard started == generation else { throw APIError.message("直连协商期间连接已切换") }
+        } catch { await transport.close(); throw error }
+    }
+
+    func configureRemoteDirectAccess() async throws {
+        let started = generation
+        let data = try await request("POST", "/api/v1/remote/direct-access")
+        let access = try JSONDecoder().decode(DirectAccess.self, from: data)
+        guard started == generation, access.transport_policy == "direct_only" else { throw APIError.message("连接授权期间身份已变化") }
+        connection?.directAccess = access
+        try persist()
+    }
+
+    func connectRemoteDirect(requirePublicPath: Bool = false, resetEvents: Bool = true) async throws {
+        let started = generation
+        guard let saved = connection, let access = saved.directAccess, let publicKey = saved.serverPublicKey else { throw APIError.message("请先在家庭网络为此设备授权远程直连") }
+        directPublicOnly = requirePublicPath
+        connection?.prefersDirect = true
+        try persist()
+        let transport = try await DirectTransport(stunURLs: access.stun_urls, requirePublicPath: requirePublicPath)
+        await directTransport?.close()
+        directTransport = transport
+        if resetEvents { stopTaskEvents() }
+        do {
+            let offer = try await transport.offer()
+            guard let object = try JSONSerialization.jsonObject(with: offer) as? [String: Any],
+                  let payload = object["payload"] as? [String: Any], let session = payload["session"] as? String else { throw APIError.message("直连信令无效") }
+            let body = try JSONSerialization.data(withJSONObject: ["envelope": object])
+            _ = try await ConnectSignalling.request(access, method: "POST", path: "/api/direct/offers", body: body)
+            let deadline = Date().addingTimeInterval(45)
+            while Date() < deadline {
+                try Task.checkCancellation()
+                guard started == generation else { throw APIError.message("直连协商期间身份已变化") }
+                let data = try await ConnectSignalling.request(access, method: "GET", path: "/api/direct/answers/" + session)
+                if let response = try JSONSerialization.jsonObject(with: data) as? [String: Any], let answer = response["envelope"] as? [String: Any] {
+                    try await transport.accept(JSONSerialization.data(withJSONObject: answer), serverPublicKey: publicKey)
+                    guard started == generation else { throw APIError.message("连接已切换") }
+                    return
+                }
+                try await Task.sleep(for: .seconds(1))
+            }
+            throw APIError.message("家庭服务器离线或当前网络无法直连；不会使用中继")
+        } catch { await transport.close(); throw error }
+    }
+
+    private func reconnectDirectIfNeeded() async throws {
+        if let directTransport, await directTransport.isReady { return }
+        try await connectRemoteDirect(requirePublicPath: directPublicOnly, resetEvents: false)
+    }
+
+    func disableDirect() async {
+        await directTransport?.close()
+        directTransport = nil
+        directPublicOnly = false
+        connection?.prefersDirect = false
+        try? persist()
+        stopTaskEvents()
     }
 
     struct TrustInfo: Sendable { let bound: Bool; let serverID: String?; let url: String; let addresses: [String] }
@@ -157,8 +308,9 @@ actor APIClient {
         for item in [address] + verified.proof.addresses + knownAddresses where !urls.contains(item) && urls.count < 8 { urls.append(item) }
         current.addresses = urls
         for socket in eventSockets.values { socket.cancel(with: .goingAway, reason: nil) }
-        eventSockets.removeAll(); generation = UUID()
+        eventSockets.removeAll(); await disableDirect(); generation = UUID()
         session?.invalidateAndCancel()
+        current.prefersDirect = false
         connection = current
         session = URLSession(configuration: .ephemeral, delegate: PinnedSession(fingerprint: current.fingerprint, keyFingerprint: current.tlsKeyFingerprint), delegateQueue: nil)
         try persist()
@@ -209,6 +361,10 @@ actor APIClient {
             }
         }
         let started = generation
+        if connection?.prefersDirect == true {
+            try await directGate.withPermit { try await self.reconnectDirectIfNeeded() }
+            guard started == generation else { throw APIError.message("直连恢复期间身份已变化") }
+        }
         guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对家庭服务器") }
         if saved.expiresAt.timeIntervalSinceNow < 60 && path != "/api/v1/session/renew" {
             saved = try await renewalGate.withPermit { try await self.renewIfNeeded(generation: started) }
@@ -222,6 +378,7 @@ actor APIClient {
     func taskEvents(taskID: String? = nil, expectedNamespace: String) async throws -> TaskEventSubscription {
         guard try await syncNamespace() == expectedNamespace else { throw APIError.message("连接已切换") }
         let started = generation
+        if directTransport != nil || connection?.prefersDirect == true { return try directTaskEvents(taskID: taskID, namespace: expectedNamespace) }
         guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对") }
         if saved.expiresAt.timeIntervalSinceNow < 60 {
             saved = try await renewalGate.withPermit { try await self.renewIfNeeded(generation: started) }
@@ -268,11 +425,37 @@ actor APIClient {
         return TaskEventSubscription(id: identifier, events: events)
     }
 
+    private func directTaskEvents(taskID: String?, namespace: String) throws -> TaskEventSubscription {
+        if let taskID, UUID(uuidString: taskID) == nil { throw APIError.message("无效任务标识") }
+        let identifier = UUID()
+        let path = "/api/v1/direct/task-snapshot" + (taskID.map { "?task_id=" + $0 } ?? "")
+        let events = AsyncThrowingStream<TaskStateEvent, Error>(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let reader = Task {
+                do {
+                    while !Task.isCancelled {
+                        let data = try await self.request("GET", path, expectedNamespace: namespace)
+                        continuation.yield(try JSONDecoder().decode(TaskStateEvent.self, from: data))
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                    continuation.finish()
+                } catch is CancellationError { continuation.finish() }
+                catch { continuation.finish(throwing: error) }
+                self.directEvents.removeValue(forKey: identifier)
+            }
+            directEvents[identifier] = reader
+            continuation.onTermination = { _ in reader.cancel() }
+        }
+        return TaskEventSubscription(id: identifier, events: events)
+    }
+
     func closeTaskEvents(_ identifier: UUID) {
+        directEvents.removeValue(forKey: identifier)?.cancel()
         eventSockets.removeValue(forKey: identifier)?.cancel(with: .goingAway, reason: nil)
     }
 
     func stopTaskEvents() {
+        for reader in directEvents.values { reader.cancel() }
+        directEvents.removeAll()
         for socket in eventSockets.values { socket.cancel(with: .goingAway, reason: nil) }
         eventSockets.removeAll()
     }
@@ -325,6 +508,14 @@ actor APIClient {
     private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession, expectedGeneration: UUID, contentType: String = "application/json") async throws -> Data {
         let request = try signedRequest(method, path, body: body, token: token, base: base, contentType: contentType)
         do {
+            if let directTransport {
+                let (data, status) = try await directTransport.request(request)
+                guard expectedGeneration == generation else { throw APIError.message("连接已切换，请重试") }
+                guard let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil) else { throw APIError.message("直连响应无效") }
+                try Self.validate(data, response)
+                return data
+            }
+            guard connection?.prefersDirect != true else { throw APIError.message("直连尚未建立，不允许回退") }
             let (data, response) = try await session.data(for: request)
             guard expectedGeneration == generation else { throw APIError.message("连接已切换，请重试") }
             try Self.validate(data, response)

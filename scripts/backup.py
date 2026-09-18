@@ -39,7 +39,7 @@ if args.action == 'create':
             tar.addfile(info, io.BytesIO(content))
             manifest['files'][name] = {'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
         add('database.dump', dump)
-        for name in ['blobs', 'deletions.jsonl', 'server-identity.enc', 'remote-config.enc', 'acme', 'tls', 'tls-selection.enc', 'tls-runtime.enc']:
+        for name in ['blobs', 'deletions.jsonl', 'server-identity.enc', 'remote-config.enc', 'remote-legacy.enc', 'remote-network.enc', 'pairing-address.enc', 'service-application.enc', 'acme', 'tls', 'tls-selection.enc', 'tls-runtime.enc']:
             path = root / 'state' / name
             if path.is_symlink():
                 raise SystemExit('备份源不能是符号链接')

@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
         if (destination/directory).exists():
             import shutil
             shutil.copytree(destination/directory,output/directory)
-    for filename in ('remote-config.enc','tls-selection.enc','tls-runtime.enc'):
+    for filename in ('remote-config.enc','remote-legacy.enc', 'remote-network.enc', 'pairing-address.enc', 'service-application.enc','tls-selection.enc','tls-runtime.enc'):
         if (destination/filename).exists():
             import shutil
             shutil.copyfile(destination/filename,output/filename);os.chmod(output/filename,0o600)

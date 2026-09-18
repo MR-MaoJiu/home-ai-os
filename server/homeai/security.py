@@ -45,7 +45,8 @@ async def authenticate(request: Request):
     signature = request.headers.get("x-homeai-signature", "")
     try:
         parsed_time = float(timestamp)
-        if not math.isfinite(parsed_time) or abs(now() - parsed_time) > 60 or not 16 <= len(nonce) <= 100:
+        received_at = request.scope.get("homeai.received_at", now())
+        if not math.isfinite(parsed_time) or abs(now() - received_at) > 180 or abs(received_at - parsed_time) > 60 or not 16 <= len(nonce) <= 100:
             raise ValueError()
     except ValueError:
         raise HTTPException(401, "请求证明缺失或已过期") from None
@@ -53,6 +54,9 @@ async def authenticate(request: Request):
         auth = db.get(Credential, digest(token.encode()))
         if not auth or auth.expires_at <= now() or (auth.kind != "access" and not (auth.kind == "refresh" and request.url.path == "/api/v1/session/renew")):
             raise HTTPException(401, "会话无效或已过期")
+        bound_device = request.scope.get('homeai.direct_device_id')
+        if bound_device is not None and auth.device_id != bound_device:
+            raise HTTPException(401, '请求凭据与直连设备不匹配')
         device = db.get(Device, auth.device_id)
         user = db.get(Principal, auth.user_id)
         if not device or device.revoked or not user or device.user_id != user.id:

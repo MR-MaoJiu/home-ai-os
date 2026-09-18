@@ -9,11 +9,17 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     CODE_SIGN_STYLE: Automatic
     GENERATE_INFOPLIST_FILE: YES
+packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC.git
+    exactVersion: 153.0.0
 targets:
   HomeAI:
     type: application
     platform: iOS
     sources: [HomeAI]
+    dependencies:
+      - package: WebRTC
     info:
       path: HomeAI/Info.plist
       properties:

@@ -20,3 +20,6 @@ class Settings(BaseSettings):
     identity_certificate_file: Path = Path('state/tls/server.crt')
     server_addresses: list[str] = []
     managed_https_port: int = Field(default=58448,ge=1024,le=65535)
+
+    direct_enabled: bool = True
+    direct_stun_urls: list[str] = Field(default_factory=list, max_length=2)

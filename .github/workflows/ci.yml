@@ -17,7 +17,7 @@ jobs:
           python scripts/migrate.py --test
           homeai init-key
       - name: Unit and PostgreSQL policy/sync tests
-        run: HOMEAI_INTEGRATION=1 pytest -q
+        run: HOMEAI_INTEGRATION=1 HOMEAI_DIRECT_INTEGRATION=1 pytest -q
       - run: python -m compileall -q server providers
       - name: Stop isolated services
         if: always()

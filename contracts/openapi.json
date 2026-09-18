@@ -21,6 +21,181 @@
         }
       }
     },
+    "/api/v1/members/{user_id}/pairing": {
+      "post": {
+        "summary": "Issue Pairing",
+        "operationId": "issue_pairing_api_v1_members__user_id__pairing_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pairing/address": {
+      "get": {
+        "summary": "Pairing Address",
+        "operationId": "pairing_address_api_v1_pairing_address_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save Address",
+        "operationId": "save_address_api_v1_pairing_address_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/catalog": {
+      "post": {
+        "summary": "Catalog",
+        "operationId": "catalog_api_v1_remote_catalog_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Platform"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/applications": {
+      "post": {
+        "summary": "Apply",
+        "operationId": "apply_api_v1_remote_applications_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Apply"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/application": {
+      "get": {
+        "summary": "Application Status",
+        "operationId": "application_status_api_v1_remote_application_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pair": {
       "post": {
         "summary": "Pair",
@@ -1599,13 +1774,30 @@
         }
       }
     },
-    "/api/v1/members/invite": {
+    "/api/v1/members": {
+      "get": {
+        "tags": [
+          "管理"
+        ],
+        "summary": "Members",
+        "operationId": "members_api_v1_members_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "管理"
         ],
         "summary": "Invite",
-        "operationId": "invite_api_v1_members_invite_post",
+        "operationId": "invite_api_v1_members_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1632,25 +1824,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/members": {
-      "get": {
-        "tags": [
-          "管理"
-        ],
-        "summary": "Members",
-        "operationId": "members_api_v1_members_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
               }
             }
           }
@@ -1947,6 +2120,111 @@
         }
       }
     },
+    "/api/v1/direct/offer": {
+      "post": {
+        "tags": [
+          "纯直连"
+        ],
+        "summary": "Offer",
+        "operationId": "offer_api_v1_direct_offer_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Offer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/direct/task-snapshot": {
+      "get": {
+        "tags": [
+          "纯直连"
+        ],
+        "summary": "Task Snapshot",
+        "operationId": "task_snapshot_api_v1_direct_task_snapshot_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/direct/evidence": {
+      "get": {
+        "tags": [
+          "纯直连"
+        ],
+        "summary": "Evidence",
+        "operationId": "evidence_api_v1_direct_evidence_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/remote/status": {
       "get": {
         "tags": [
@@ -1979,6 +2257,160 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/platform-check": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Platform Check",
+        "operationId": "platform_check_api_v1_remote_platform_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformCheck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/migrate": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Migrate",
+        "operationId": "migrate_api_v1_remote_migrate_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/direct-access": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Direct Access",
+        "operationId": "direct_access_api_v1_remote_direct_access_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/resume": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Resume",
+        "operationId": "resume_api_v1_remote_resume_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/refresh-node": {
+      "post": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Refresh Node",
+        "operationId": "refresh_node_api_v1_remote_refresh_node_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/remote/stun": {
+      "put": {
+        "tags": [
+          "可选远程连接"
+        ],
+        "summary": "Configure Stun",
+        "operationId": "configure_stun_api_v1_remote_stun_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -2054,6 +2486,43 @@
           "cursor"
         ],
         "title": "Acknowledge"
+      },
+      "AddressInput": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "AddressInput"
+      },
+      "Apply": {
+        "properties": {
+          "portal_url": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Portal Url",
+            "default": "https://homeai-connect.pintheworld.cn"
+          },
+          "plan_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Plan Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "plan_id"
+        ],
+        "title": "Apply"
       },
       "AutomationInput": {
         "properties": {
@@ -2425,6 +2894,44 @@
         ],
         "title": "MemberInput"
       },
+      "NetworkInput": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "pattern": "^(platform|custom)$",
+            "title": "Mode"
+          },
+          "stun_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Stun Urls"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "NetworkInput"
+      },
+      "Offer": {
+        "properties": {
+          "envelope": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Envelope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "envelope"
+        ],
+        "title": "Offer"
+      },
       "PairRequest": {
         "properties": {
           "token": {
@@ -2459,6 +2966,32 @@
           "name"
         ],
         "title": "PairRequest"
+      },
+      "Platform": {
+        "properties": {
+          "portal_url": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Portal Url",
+            "default": "https://homeai-connect.pintheworld.cn"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Platform"
+      },
+      "PlatformCheck": {
+        "properties": {
+          "portal_url": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Portal Url",
+            "default": "https://homeai-connect.pintheworld.cn"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PlatformCheck"
       },
       "Predicate": {
         "properties": {

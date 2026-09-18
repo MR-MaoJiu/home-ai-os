@@ -1,5 +1,6 @@
 from starlette.responses import JSONResponse
 import hashlib
+import time
 
 
 class BodyLimitMiddleware:
@@ -10,6 +11,7 @@ class BodyLimitMiddleware:
     async def __call__(self, scope, receive, send):
         if scope['type']!='http':
             return await self.app(scope,receive,send)
+        scope.setdefault("homeai.received_at", time.time())
         body=bytearray()
         while True:
             message=await receive()

@@ -318,3 +318,13 @@ class KnowledgeChunk(Owned, Base):
     position: Mapped[int] = mapped_column(Integer)
     start: Mapped[int] = mapped_column(Integer)
     end: Mapped[int] = mapped_column(Integer)
+
+
+class PairEnrollment(Base):
+    """短期身份引导账本，密文不承载业务资料；读取必须核对家庭。"""
+    __tablename__ = 'pair_enrollments'
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    household_id: Mapped[str] = mapped_column(String)
+    user_id: Mapped[str] = mapped_column(String)
+    expires: Mapped[float]
+    ciphertext: Mapped[str] = mapped_column(Text)

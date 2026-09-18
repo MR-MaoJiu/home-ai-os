@@ -1,3 +1,4 @@
+import {Members,RemoteSetup} from './ConnectionSetup';
 import {Speech} from './Speech';
 import {HomeObservations} from './HomeObservations';
 import {WebSearch} from './WebSearch';
@@ -42,12 +43,12 @@ function Panel({section,revision,run,reload,notify}:Props){
  if(busy&&!data)return <section><p className="empty">正在加载…</p></section>;
  if(section==='Provider')return <section><div className="section-title"><h2>能力提供方</h2><button onClick={reload}><RefreshCw size={16}/>刷新</button></div><Providers data={data} mutate={mutate}/></section>;
  if(section==='概览')return <><section><h2>家庭服务状态</h2><div className="summary">{[['可见数据',data?.records],['我的任务',data?.tasks],['有效设备',data?.devices]].map(([k,v])=><div key={k}><span>{k}</span><strong>{v??'—'}</strong></div>)}</div><p>当前环境：{data?.environment??'—'}</p></section><Readiness/></>;
- if(section==='成员与设备')return <><section><h2>家庭成员</h2><Rows rows={data} keys={['name','role']}/><form className="inline" onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);run(async()=>{const r=await api('/members/invite','POST',{name:form.get('name')});notify(`一次性配对码（5 分钟有效）：${r.pairing_token}`);reload()})}}><input name="name" placeholder="新成员名称" required/><button className="primary">邀请成员</button></form></section><section><h2>我的设备</h2>{secondary?.map((d:any)=><div className="row" key={d.id}><span>{d.name}</span><span>{d.revoked?'已撤销':'有效'}</span>{!d.revoked&&<button onClick={()=>{if(confirm('撤销后该设备无法继续访问，确定吗？'))mutate('/devices/'+d.id,'DELETE')}}>撤销</button>}</div>)}</section></>;
+ if(section==='成员与设备')return <Members members={data??[]} devices={secondary??[]} run={run} reload={reload}/>;
  if(section==='数据与记忆')return <><Speech/><HomeObservations/><WebSearch/><DocumentUpload onChanged={reload}/><MemoryIndex revision={revision} onChanged={reload}/><section><h2>已授权数据</h2>{data?.records?.length?data.records.map((r:any)=><details key={r.id}><summary>{r.payload.title??r.payload.name??r.kind}<span>{r.sensitivity}</span></summary><pre>{JSON.stringify(r.payload,null,2)}</pre><button onClick={()=>{if(confirm('确认删除这条数据及其派生记忆？'))mutate('/data/'+r.id,'DELETE')}}>删除数据</button></details>):<Empty text="暂无已授权数据"/>}</section></>;
  if(section==='任务与审批')return <><section><h2>等待确认</h2>{secondary?.length?secondary.map((a:any)=><div className="approval" key={a.id}><b>{a.capability}</b>{a.capability==='web.search@v1'&&<p>确认后，下列查询词将发送给外部搜索引擎。</p>}<pre>{JSON.stringify(a.arguments,null,2)}</pre><button onClick={()=>mutate('/approvals/'+a.id,'POST',{decision:'REJECTED'})}>拒绝</button><button className="primary" onClick={()=>mutate('/approvals/'+a.id,'POST',{decision:'APPROVED'})}>确认执行</button></div>):<Empty text="没有待确认操作"/>}</section><TaskHistory tasks={data} onChanged={reload}/></>;
  if(section==='自动化')return <Automations rules={data??[]} onChanged={reload}/>;
  if(section==='备份与恢复')return <section><h2>加密备份</h2><p>恢复必须在家庭服务器本机操作，避免远程误覆盖数据。此处展示已有加密归档。</p><Rows rows={data} keys={['name','bytes','modified_at']}/></section>;
- if(section==='远程连接')return <section><h2>纯直连远程访问</h2><p>平台只用于连接协调，家庭业务数据必须由客户端与家庭服务器直接传输，禁止中继兜底。</p><p role="status">纯直连尚未就绪，当前不能通过平台建立远程连接。本地 AI 与局域网访问不受影响。</p><p>旧版中继配置：{data?.configured?'已保存，等待迁移':'未配置'}。已关闭新绑定和恢复中继入口。</p>{data?.previously_enabled&&<button onClick={()=>mutate('/remote/disable')}>清除旧配置的启用标记</button>}<p>如果仍运行升级前的连接程序，需要在主机上停止旧程序；更新网页不会终止旧进程。</p><p>直连成功后的速度由两端网络决定，不按平台业务转发流量收费。网络不支持直连时将明确失败，不会自动转发。</p></section>;
+ if(section==='远程连接')return <RemoteSetup status={data} run={run} reload={reload}/>;
 
  return <><section><h2>操作记录</h2><Rows rows={data?.entries} keys={['action','resource_id','created_at']}/></section><section><h2>云端披露</h2><Rows rows={data?.disclosures} keys={['provider','bytes_sent','status']}/></section></>;
 }

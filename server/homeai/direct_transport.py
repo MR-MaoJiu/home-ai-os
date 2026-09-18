@@ -61,15 +61,28 @@ class DirectPeer:
         self.closed = False
         self.opened = asyncio.Event()
         self.writable = asyncio.Event()
-        self.messages = asyncio.Queue(maxsize=16)
+        self.messages = asyncio.Queue(maxsize=128)
         self.channel = self.pc.createDataChannel('homeai', negotiated=True, id=0, protocol='homeai.direct.v1', ordered=True)
         self.channel.bufferedAmountLowThreshold = MAX_FRAME
         self.channel.on('open', self.opened.set)
         self.channel.on('bufferedamountlow', self.writable.set)
         self.channel.on('message', self._message)
+        self.channel.on('close', self._mark_closed)
         self.pc.on('datachannel', lambda channel: channel.close())
 
+    def _mark_closed(self):
+        if self.closed:
+            return
+        self.closed = True
+        self.opened.set()
+        self.writable.set()
+        while not self.messages.empty():
+            self.messages.get_nowait()
+        self.messages.put_nowait(None)
+
     def _message(self, value):
+        if self.closed:
+            return
         if not isinstance(value, bytes) or len(value) > MAX_FRAME or self.messages.full():
             self.channel.close()
             return
@@ -144,23 +157,36 @@ class DirectPeer:
             await self.close()
             raise
 
+    def ensure_authorized(self):
+        deadline = getattr(self, 'authorized_until', None)
+        if deadline is not None and time.time() >= deadline():
+            self.channel.close()
+            raise PermissionError('直连许可已过期')
+
     async def send(self, value, timeout=15):
         if not isinstance(value, bytes) or len(value) > MAX_FRAME:
             raise ValueError('数据帧必须是最多 16 KiB 的字节串')
         async with asyncio.timeout(timeout):
             await self.opened.wait()
             while self.channel.bufferedAmount > MAX_FRAME * 4:
+                if self.closed:
+                    raise ConnectionError("直连已关闭")
                 self.writable.clear()
                 await self.writable.wait()
             if self.closed or self.channel.readyState != 'open':
                 raise ConnectionError('直连已关闭')
+            self.ensure_authorized()
             self.channel.send(value)
 
     async def receive(self, timeout=15):
-        return await asyncio.wait_for(self.messages.get(), timeout)
+        if self.closed:
+            raise ConnectionError('直连已关闭')
+        value = await asyncio.wait_for(self.messages.get(), timeout)
+        if value is None:
+            raise ConnectionError('直连已关闭')
+        self.ensure_authorized()
+        return value
 
     async def close(self):
-        self.closed = True
-        self.opened.set()
-        self.writable.set()
+        self._mark_closed()
         await self.pc.close()

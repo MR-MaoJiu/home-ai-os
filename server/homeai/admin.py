@@ -14,7 +14,7 @@ class MemberInput(BaseModel):
     name:str=Field(min_length=1,max_length=100)
 
 
-@router.post('/members/invite')
+@router.post('/members')
 def invite(body:MemberInput,request:Request,actor:Actor=Depends(authenticate)):
     owner(actor)
     with request.app.state.db() as db:
@@ -22,10 +22,9 @@ def invite(body:MemberInput,request:Request,actor:Actor=Depends(authenticate)):
         user=Principal(id=uid(),household_id=actor.household_id,name=body.name,role='adult')
         db.add(user)
         db.flush()
-        token=credential(db,user.id,'pair',300)
         audit(db,actor,'member.invite',user.id)
         db.commit()
-        return {'user_id':user.id,'pairing_token':token,'expires_in':300}
+        return {'user_id':user.id}
 
 
 @router.get('/members')

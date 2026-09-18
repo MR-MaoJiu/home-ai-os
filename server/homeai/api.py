@@ -22,7 +22,23 @@ from .runtime import submit
 
 def create_app(settings=None, vault=None, db_factory=None, policy=None, registry=None):
     settings = settings or Settings()
-    app = FastAPI(title="Home AI OS", version="0.1.0", docs_url=None if settings.environment == "production" else "/docs")
+    @asynccontextmanager
+    async def lifespan(app):
+        signalling = None
+        if app.state.settings.direct_enabled:
+            import aiortc  # 显式启用时要求真实传输依赖就绪。
+            from .connect_signalling import run_agent
+            signalling = asyncio.create_task(run_agent(app))
+        try:
+            yield
+        finally:
+            if signalling:
+                signalling.cancel()
+                await asyncio.gather(signalling, return_exceptions=True)
+            manager = getattr(app.state, 'direct_sessions', None)
+            if manager:
+                await manager.close()
+    app = FastAPI(lifespan=lifespan, title="Home AI OS", version="0.1.0", docs_url=None if settings.environment == "production" else "/docs")
     from .limits import BodyLimitMiddleware
     app.add_middleware(BodyLimitMiddleware)
     app.state.settings = settings
@@ -49,20 +65,18 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     def live():
         return {"status": "alive"}
 
+    from .pairing import router as pairing_router
+    app.include_router(pairing_router)
+    from .service_application import router as application_router
+    app.include_router(application_router)
+
     @app.post("/api/v1/pair")
     def pair(body: PairRequest):
-        verify(body.public_key, body.signature, ("homeai-pair:" + body.token).encode())
+        from .pairing import consume
         with app.state.db() as db:
-            invitation = db.scalar(select(Credential).where(Credential.digest == digest(body.token.encode())).with_for_update())
-            if not invitation or invitation.kind != "pair" or invitation.expires_at <= now():
-                raise HTTPException(401, "配对码失效")
-            device = Device(id=uid(), user_id=invitation.user_id, public_key=body.public_key, name=body.name)
-            db.add(device)
-            token = credential(db, invitation.user_id, "access", settings.session_seconds, device.id)
-            refresh = credential(db, invitation.user_id, "refresh", 30 * 86400, device.id)
-            db.delete(invitation)
+            result=consume(app.state,db,body)
             db.commit()
-            return {"access_token": token, "device_id": device.id, "refresh_token": refresh, "expires_in": settings.session_seconds}
+            return result
 
     @app.post("/api/v1/session/renew")
     def renew(request: Request, actor: Actor = auth):
@@ -452,6 +466,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.include_router(browser_router)
     from .management import router as management_router
     app.include_router(management_router)
+    from .direct_sessions import router as direct_router
+    app.include_router(direct_router)
     from .remote import router as remote_router
     app.include_router(remote_router)
     from .server_identity import router as server_identity_router

@@ -19,10 +19,14 @@
 		3200B4ACE967E878200789FE /* SyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F98BE893BDC6DAF21EE75D /* SyncTests.swift */; };
 		35D9A8BF2F4A29BCAB6BD6A6 /* ReminderSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02189EA2B9A614E7B60C381 /* ReminderSchedule.swift */; };
 		3ECFD7DC6007E52EFC8313C5 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE55D2FE3C69D506D916C9A3 /* ChatView.swift */; };
+		5E27B5C93D091DD71C601885 /* WebRTC-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8942679A15317DEFAFD004AC /* WebRTC-LICENSE.txt */; };
 		6571226787D32CC9D94130D3 /* AsyncOperationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */; };
 		67741F121857E92BB53DB322 /* IntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */; };
+		76063EF4C6834DDCBBE589D7 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = BC21537BCC642D60EEDC2F0B /* WebRTC */; };
 		8BC859052EB0D6804590A98A /* VoiceCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EE9E84840F2DB31B0144210 /* VoiceCapture.swift */; };
+		8C3CA593A08DD6BDBB7E261E /* DirectTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0642763DE6E5DD69EDC1EAE4 /* DirectTransport.swift */; };
 		90C6635A6D4A199315B7C027 /* ReminderIntentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */; };
+		96CDCF927E52288820129842 /* DirectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AB31B5A22A12DD64AC2B5CA /* DirectTests.swift */; };
 		97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2801207D982F13C2327BEEB /* CertificateTests.swift */; };
 		97D9238113B8261863C1C533 /* PairingScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */; };
 		9895A416F620F06B5C9BC810 /* PhotoPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4DABFD6B644F5B4848F1A4 /* PhotoPreparation.swift */; };
@@ -37,6 +41,7 @@
 		E1EE3C9DF6A2A965A8CF8D87 /* PhotoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146CDED233DA69974310DB30 /* PhotoTests.swift */; };
 		E4AEE4ABEC5743739C53A0AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183D74AAB13DDE4008A68FBE /* SettingsView.swift */; };
 		E54A2D234B033B4C84F8192B /* expired.der in Resources */ = {isa = PBXBuildFile; fileRef = 69B6E5AB48EE76965AD72D13 /* expired.der */; };
+		EA7648138E437BC0514D76C3 /* ConnectSignalling.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA80798DECBA763A2455DBCD /* ConnectSignalling.swift */; };
 		F14D0F35AF71D3CE64599B24 /* BackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */; };
 		F157368B807DCEA022253C7B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030A9C6729AEAA14F8E8E130 /* APIClient.swift */; };
 		F1EA94C965285C4A371421C1 /* ServerIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6EB9642F2D0AFA749D9322F /* ServerIdentityTests.swift */; };
@@ -61,6 +66,7 @@
 		021B66A5F1C82A5A6DFD08B8 /* SpeechTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTests.swift; sourceTree = "<group>"; };
 		026E7BEC5639994664ECC698 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		030A9C6729AEAA14F8E8E130 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		0642763DE6E5DD69EDC1EAE4 /* DirectTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectTransport.swift; sourceTree = "<group>"; };
 		139483634791876484D98FA9 /* SpeechPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlayback.swift; sourceTree = "<group>"; };
 		146CDED233DA69974310DB30 /* PhotoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoTests.swift; sourceTree = "<group>"; };
 		183D74AAB13DDE4008A68FBE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -81,8 +87,10 @@
 		7663DFFCF83A100838851D5D /* future.der */ = {isa = PBXFileReference; path = future.der; sourceTree = "<group>"; };
 		7780E4C314968102960503AA /* HomeAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeAIApp.swift; sourceTree = "<group>"; };
 		78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScanner.swift; sourceTree = "<group>"; };
+		7AB31B5A22A12DD64AC2B5CA /* DirectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectTests.swift; sourceTree = "<group>"; };
 		7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderIntentService.swift; sourceTree = "<group>"; };
 		870F09D02633F5C931A181DA /* ConnectorSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectorSync.swift; sourceTree = "<group>"; };
+		8942679A15317DEFAFD004AC /* WebRTC-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "WebRTC-LICENSE.txt"; sourceTree = "<group>"; };
 		8BDF0FE60E34CE16D2DDD28B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		95C00AFF2B6A9C9C42CCE3F2 /* AppShortcuts.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = AppShortcuts.strings; path = "zh-Hans.lproj/AppShortcuts.strings"; sourceTree = "<group>"; };
 		9615D81084CBED64C6522C73 /* HomeIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeIntents.swift; sourceTree = "<group>"; };
@@ -92,6 +100,7 @@
 		B02189EA2B9A614E7B60C381 /* ReminderSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderSchedule.swift; sourceTree = "<group>"; };
 		C13D11A6314EF89ECDB84A5E /* PhotoAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoAnalysisView.swift; sourceTree = "<group>"; };
 		CDB83FE1AF6D0BF100CD7B95 /* SystemReminderSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemReminderSync.swift; sourceTree = "<group>"; };
+		DA80798DECBA763A2455DBCD /* ConnectSignalling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectSignalling.swift; sourceTree = "<group>"; };
 		DC3D313A504FF8385B870CE4 /* SpeechView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechView.swift; sourceTree = "<group>"; };
 		DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSync.swift; sourceTree = "<group>"; };
 		E6EB9642F2D0AFA749D9322F /* ServerIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerIdentityTests.swift; sourceTree = "<group>"; };
@@ -100,12 +109,24 @@
 		FE55D2FE3C69D506D916C9A3 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		048D611B66DAA03A8A59D4AF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				76063EF4C6834DDCBBE589D7 /* WebRTC in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXGroup section */
 		28D2C01869CF8CDC3D66616F /* HomeAITests */ = {
 			isa = PBXGroup;
 			children = (
 				34C88046675947658051AA23 /* BackgroundSyncTests.swift */,
 				A2801207D982F13C2327BEEB /* CertificateTests.swift */,
+				7AB31B5A22A12DD64AC2B5CA /* DirectTests.swift */,
 				69B6E5AB48EE76965AD72D13 /* expired.der */,
 				7663DFFCF83A100838851D5D /* future.der */,
 				4B0AD254E02FCFFBCF18F98B /* IntentTests.swift */,
@@ -122,6 +143,7 @@
 			isa = PBXGroup;
 			children = (
 				95C00AFF2B6A9C9C42CCE3F2 /* AppShortcuts.strings */,
+				8942679A15317DEFAFD004AC /* WebRTC-LICENSE.txt */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -157,8 +179,10 @@
 				F29C16E91255A0E4D8BA30DC /* AppState.swift */,
 				6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */,
 				DC91D9E6DFA51EB8E3DBECC0 /* BackgroundSync.swift */,
+				DA80798DECBA763A2455DBCD /* ConnectSignalling.swift */,
 				20306C1DE6F93F8DFF73CABC /* DeviceDataSync.swift */,
 				026E7BEC5639994664ECC698 /* DeviceIdentity.swift */,
+				0642763DE6E5DD69EDC1EAE4 /* DirectTransport.swift */,
 				7DA4A4E427E22C18F150A9A1 /* ReminderIntentService.swift */,
 				F8618794DCBB144BCD6989D4 /* ServerTrust.swift */,
 				139483634791876484D98FA9 /* SpeechPlayback.swift */,
@@ -221,6 +245,7 @@
 			buildPhases = (
 				CF6BF380ABE25CC23BD2C531 /* Sources */,
 				8C69A5E6AB5ED85C5D99E934 /* Resources */,
+				048D611B66DAA03A8A59D4AF /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -228,6 +253,7 @@
 			);
 			name = HomeAI;
 			packageProductDependencies = (
+				BC21537BCC642D60EEDC2F0B /* WebRTC */,
 			);
 			productName = HomeAI;
 			productReference = 0137196ABAE22F67F52B9D1A /* HomeAI.app */;
@@ -279,6 +305,9 @@
 			);
 			mainGroup = 3D10D10553520F18274DEF53;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5A556A6D3755A2F49DCECDD5 /* XCRemoteSwiftPackageReference "WebRTC" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7DCA41109DD34FA9E37B5D9E /* Products */;
 			projectDirPath = "";
@@ -306,6 +335,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F2A9DADDD37E5F78ECA1B800 /* AppShortcuts.strings in Resources */,
+				5E27B5C93D091DD71C601885 /* WebRTC-LICENSE.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,9 +351,11 @@
 				6571226787D32CC9D94130D3 /* AsyncOperationGate.swift in Sources */,
 				F14D0F35AF71D3CE64599B24 /* BackgroundSync.swift in Sources */,
 				3ECFD7DC6007E52EFC8313C5 /* ChatView.swift in Sources */,
+				EA7648138E437BC0514D76C3 /* ConnectSignalling.swift in Sources */,
 				0DDC420981C50F73DD18E556 /* ConnectorSync.swift in Sources */,
 				9FE59175F863F35CE56AE2C8 /* DeviceDataSync.swift in Sources */,
 				F9B16823F9E13697EC44B81F /* DeviceIdentity.swift in Sources */,
+				8C3CA593A08DD6BDBB7E261E /* DirectTransport.swift in Sources */,
 				F23F05F824092191E1852E69 /* HomeAIApp.swift in Sources */,
 				D1B2F004EE2B58CE1EA46CDC /* HomeIntents.swift in Sources */,
 				0D457DD2610BAB68B05948CC /* LocationCapture.swift in Sources */,
@@ -351,6 +383,7 @@
 			files = (
 				23C1EA8A5112A8D8B3F2A6EC /* BackgroundSyncTests.swift in Sources */,
 				97A507578EF635630FDE75B7 /* CertificateTests.swift in Sources */,
+				96CDCF927E52288820129842 /* DirectTests.swift in Sources */,
 				67741F121857E92BB53DB322 /* IntentTests.swift in Sources */,
 				E1EE3C9DF6A2A965A8CF8D87 /* PhotoTests.swift in Sources */,
 				F1EA94C965285C4A371421C1 /* ServerIdentityTests.swift in Sources */,
@@ -618,6 +651,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5A556A6D3755A2F49DCECDD5 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC.git";
+			requirement = {
+				kind = exactVersion;
+				version = 153.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BC21537BCC642D60EEDC2F0B /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A556A6D3755A2F49DCECDD5 /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8B4D4D8D3E2334711FEA80DC /* Project object */;
 }

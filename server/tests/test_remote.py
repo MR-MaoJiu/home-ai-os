@@ -11,7 +11,7 @@ def test_legacy_binding_cannot_reenable_relay(system, alice):
     status = alice.request('GET', '/api/v1/remote/status').json()
     assert status['enabled'] is False
     assert status['runtime']['state'] == 'direct_not_ready'
-    assert status['legacy_runtime']['state'] == 'lease_active'
+    assert 'legacy_runtime' not in status
     assert status['direct_ready'] is False and status['relay_allowed'] is False
     assert status['transport_policy'] == 'direct_only'
     assert status['previously_enabled'] is True and status['migration_required'] is True
@@ -29,3 +29,16 @@ def test_removed_remote_routes_are_not_published(system, alice):
         path = '/api/v1/remote/' + suffix
         assert path not in paths
         assert alice.request('GET' if suffix == 'request-code' else 'POST', path).status_code == 404
+
+
+
+def test_remote_configuration_is_scoped_to_owning_household(system, alice):
+    from conftest import SignedClient
+    from homeai.private_files import private_write
+    app=system[0].state
+    config={'protocol':1,'transport_policy':'direct_only','household_id':'h1','enabled':True}
+    private_write(app.settings.state_dir/'remote-config.enc',app.vault.seal(config,'remote-config'))
+    outsider=SignedClient(system[1],system[2],household='other',role='infrastructure_owner')
+    assert outsider.request('GET','/api/v1/remote/status').status_code==403
+    assert outsider.request('POST','/api/v1/remote/disable').status_code==403
+    assert alice.request('GET','/api/v1/remote/status').json()['enabled'] is True

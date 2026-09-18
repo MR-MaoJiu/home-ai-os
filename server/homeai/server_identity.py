@@ -79,12 +79,18 @@ def addresses(values):
     return result
 
 
+def configured_addresses(app):
+    path=app.settings.state_dir/'pairing-address.enc'
+    if path.exists():return addresses(app.vault.open(path.read_text(),'pairing-address')['addresses'])
+    return addresses(app.settings.server_addresses)
+
+
 def public_identity(app):
     fingerprint,anchor=certificate(app)
     value=record(app,anchor)
     server_id,key=identity(app)
     return {'server_id':server_id,'server_public_key':key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
-            'namespace_anchor':value['namespace_anchor'],'fingerprint':fingerprint,'addresses':addresses(app.settings.server_addresses)}
+            'namespace_anchor':value['namespace_anchor'],'fingerprint':fingerprint,'addresses':configured_addresses(app)}
 
 
 @router.get('/identity')
