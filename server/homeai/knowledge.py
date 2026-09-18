@@ -64,9 +64,9 @@ async def reconcile(app,user_id,household_id):
         db.commit()
 
 
-def rehydrate(db,actor,result,vault):
+def authorized_chunks(db,actor,items,vault):
     matches=[]
-    for match in result.get('matches',[])[:5]:
+    for match in items[:20]:
         record=read_record(db,actor,match['record_id'])
         if record.kind!='document.parsed' or record.sensitivity=='SECRET':raise HTTPException(403,'文档不能进入模型')
         if record.version!=match['version']:raise HTTPException(409,'文档已变化，请重新检索')
@@ -76,7 +76,13 @@ def rehydrate(db,actor,result,vault):
         if not isinstance(content,str) or not 0<=start<end<=len(content) or end-start>1000:raise HTTPException(502,'文档分块范围无效')
         title=payload.get('name','文档')
         matches.append({'record_id':record.id,'version':record.version,'start':start,'end':end,'title':title[:200] if isinstance(title,str) else '文档','excerpt':content[start:end]})
-    return KnowledgeResponse(mode=result['mode'],matches=matches).model_dump()
+    return matches
+
+
+def rehydrate(db,actor,result,vault):
+    matches=authorized_chunks(db,actor,result.get('matches',[])[:5],vault)
+    return KnowledgeResponse(mode=result['mode'],matches=matches,
+        reranking=result.get('reranking','not_configured')).model_dump()
 
 
 async def search(app,db,actor,query):
@@ -94,7 +100,7 @@ async def search(app,db,actor,query):
                 WHERE c.model=:model AND c.version=r.version AND NOT r.deleted
                   AND r.sensitivity<>'SECRET' AND r.kind='document.parsed' AND c.household_id=:household
                   AND vector_dims(c.search_vector)=vector_dims(CAST(:v AS vector))
-                ORDER BY c.search_vector <=> CAST(:v AS vector) LIMIT 5'''),{'model':index_revision(manifest),'household':actor.household_id,'v':vector}).mappings().all()
+                ORDER BY c.search_vector <=> CAST(:v AS vector) LIMIT 20'''),{'model':index_revision(manifest),'household':actor.household_id,'v':vector}).mappings().all()
             matches=[dict(row) for row in rows]
             if matches:mode='pgvector_chunks'
         except Exception:
@@ -110,8 +116,29 @@ async def search(app,db,actor,query):
             index=found.start()
             start=max(0,index-200);end=min(len(content),start+1000)
             matches.append({'record_id':record.id,'version':record.version,'start':start,'end':end})
-            if len(matches)>=5:break
-    return rehydrate(db,actor,{'mode':mode,'matches':matches},app.vault)
+            if len(matches)>=20:break
+    ranking='not_configured'
+    try:
+        reranker=app.registry.resolve(db,'model.rerank@v1',cloud=False)
+    except HTTPException:
+        reranker=None
+    if reranker is not None and not matches:
+        ranking='not_needed'
+    if reranker is not None and matches:
+        # Provider 接触正文之前重新鉴权；不发送未授权、秘密或过期分块。
+        candidates=authorized_chunks(db,actor,matches,app.vault)
+        try:
+            await app.policy.check(actor,'model.rerank@v1')
+            result=await app.registry.invoke(db,actor,reranker,'model.rerank@v1',
+                {'query':query,'documents':[item['excerpt'] for item in candidates]},'document-rerank:'+uid())
+            from .reranking import ordered_indices
+            matches=[matches[index] for index in ordered_indices(result,len(matches))]
+            ranking='applied'
+        except Exception:
+            # 故障时仍返回经过授权的原排序，并明确报告未应用重排。
+            ranking='unavailable'
+    # 耗时推理后再次读取规范记录，授权撤回、删除或版本变化不能返回旧正文。
+    return rehydrate(db,actor,{'mode':mode,'matches':matches,'reranking':ranking},app.vault)
 
 
 from fastapi import APIRouter,Depends,Request
@@ -133,6 +160,7 @@ class KnowledgeMatch(Contract):
 
 class KnowledgeResponse(Contract):
     mode:Literal['pgvector_chunks','authorized_literal']
+    reranking:Literal['not_configured','not_needed','applied','unavailable']='not_configured'
     matches:list[KnowledgeMatch]=Field(max_length=5)
 
 class SearchQuery(Contract):

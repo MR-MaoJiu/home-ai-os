@@ -2400,6 +2400,17 @@
             ],
             "title": "Mode"
           },
+          "reranking": {
+            "type": "string",
+            "enum": [
+              "not_configured",
+              "not_needed",
+              "applied",
+              "unavailable"
+            ],
+            "title": "Reranking",
+            "default": "not_configured"
+          },
           "matches": {
             "items": {
               "$ref": "#/components/schemas/KnowledgeMatch"

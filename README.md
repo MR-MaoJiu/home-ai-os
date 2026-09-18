@@ -28,7 +28,7 @@
 | 隐私 | 云能力限制、公开资料最小调用、披露记录 | 完整 NER、本地复核、占位符往返还原；私人内容上云保持拒绝 |
 | 自动化 | 多步骤 Cron、固定条件判断、数据事件工作流、持久 JetStream 消费、投递去重、冷却排队、因果循环限制 | Skill 补偿、更多事件类型、规模与故障演练 |
 | 插件 | 显式映射、凭据隔离、停用、配置回滚 | sandboxd、gVisor、网络沙箱、签名/SBOM、完整卸载验证 |
-| 模型 | llama.cpp、MLX 固定权重本地生成与真实工具调用；OpenAI 兼容协议 | vLLM 硬件验收、云账户集成、独立 Reranker、视觉模型 |
+| 模型 | llama.cpp、MLX 固定权重本地生成与真实工具调用；本地中英文 Reranker；OpenAI 兼容协议 | vLLM 硬件验收、云账户集成、视觉模型 |
 | 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；CosyVoice、家居自动化因果关联/物理设备、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流、App Intent 提醒提交、活动跳转、系统提醒受控写入 | APNs、后台调度及 Siri/快捷指令真机验收、逐 Token 文本流 |
 | 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
@@ -677,7 +677,7 @@ Agent 新增 `search_documents` 工具，检索结果给出最多五个有界片
 
 iOS 文件导入现在实际上传加密附件并创建解析任务，不再仅保存一段 Base64 数据。旧 `document.import` 文件再次上传时，会校验内容并保留记录 ID 和已有密级进行版本迁移；删除墓碑不自动恢复。`GET /api/v1/files/{id}/content` 提供授权原文件下载，禁止浏览器缓存及 MIME 嗅探。
 
-当前检索采用精确向量排序，并非已经完成大规模 ANN/Reranker 优化。解析成功也不代表所有分块立即完成；索引由 worker 持续推进。升级需要执行迁移 `0005` 并重启 API、任务与索引 worker。
+当前检索采用精确向量召回，并支持可选本地 Reranker 对最多 20 个授权候选重排；大规模 ANN 与持续负载验收仍待完成。解析成功也不代表所有分块立即完成；索引由 worker 持续推进。升级需要执行迁移 `0005` 并重启 API、任务与索引 worker。
 
 验收命令：
 
@@ -1082,7 +1082,7 @@ MLX 官方 HTTP 服务属于开发服务，本地回环监听、过滤环境和�
 |---|---|
 | 完整隐私出站 | NER、本地复核、占位符映射及往返还原仍需实现并验证；私人内容上云继续拒绝 |
 | Agent/Skill | 云费用预算、补偿工作流、更多自主工具及复杂失败恢复仍需完成 |
-| 其他模型能力 | CosyVoice、独立 Reranker、视觉模型真实接入；vLLM 需兼容服务器硬件 |
+| 其他模型能力 | CosyVoice、视觉模型真实接入；vLLM 需兼容服务器硬件 |
 | 家居自动化 | 观察事件到自动化的因果关联、防回环与物理设备操作验收 |
 | iOS 系统能力 | APNs、后台文件传输、真机权限/调度、Siri 与实际通知送达；需要签名团队及 iPhone |
 | 生产插件 | Linux rootless/gVisor、受限网络、签名/SBOM、升级失败回滚与卸载清除的完整验收 |
@@ -1091,3 +1091,56 @@ MLX 官方 HTTP 服务属于开发服务，本地回环监听、过滤环境和�
 | 外部账户 | 真实邮件、Home Assistant 物理实体、APNs、云模型和平台 SMTP 等按用途安全配置 |
 
 本地 AI 不依赖官方平台账户或付费状态。Home AI Connect 的运营配置与实现继续保存在独立闭源项目；本仓库中的集成验证不能代替其真实收款开通、邮件送达、正式账号和家庭远程部署验收。
+
+
+## 本地文档重排：召回、鉴权、评分与回读
+
+重排是可拆卸的 `model.rerank@v1` 能力。当前实现采用 [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base)，支持中英文，固定修订 `2cfc18c9415c912f9d8155881c133215df768a70`。模型遵循上游 MIT 许可，具体以该固定修订模型说明为准；权重不随本仓库分发。实现使用 Transformers 的序列分类模型，按查询与文档对计算实际相关性分数，不是关键词计数或预制排序。
+
+### 安装与启动
+
+独立 Python 3.12 环境的完整版本见 `providers/locks/reranker-macos-py312.txt`；主依赖固定 Torch 2.11.0、Transformers 5.17.0。六个运行必需文件的字节数和 SHA-256 记录在 `providers/models/bge-reranker-base.json`。只加载 safetensors，不加载 pickle 模型或远程 Python 代码。
+
+```sh
+python3.12 -m venv state/venvs/reranker
+state/venvs/reranker/bin/pip install -r providers/locks/reranker-macos-py312.txt
+HF_HUB_DISABLE_IMPLICIT_TOKEN=1 state/venvs/reranker/bin/hf download BAAI/bge-reranker-base config.json model.safetensors sentencepiece.bpe.model special_tokens_map.json tokenizer.json tokenizer_config.json README.md --revision 2cfc18c9415c912f9d8155881c133215df768a70 --local-dir state/models/bge-reranker-base --max-workers 2
+.venv/bin/python scripts/run_reranker.py
+```
+
+启动先校验全部六个运行文件，服务监听 `127.0.0.1:8109`，自动创建仅本机可读的 `state/provider-secrets/reranker.token`。进程不继承 Core 数据库或主密钥，强制本地模型、禁遥测，并安装 Python 网络出站门禁。此门禁不能替代 Linux/gVisor 的操作系统隔离；开发服务不直接对公网开放。
+
+另开终端，为实际成员登记：
+
+```sh
+.venv/bin/python scripts/register_local_reranker.py --user <成员ID>
+```
+
+脚本先验证认证与真实排序，再把服务令牌写入该成员加密 Secret，创建并启用 `reranker.<成员ID>`。其他成员不会借用这个 Secret，需要独立授权登记。健康接口的 `alive` 只说明桥接进程响应；登记的推理探测才证明模型当时实际可用。
+
+### 检索执行流程
+
+1. Core 验证用户查询，在当前家庭和 PostgreSQL RLS 作用域内做向量检索，取最多 20 个版本有效且非 SECRET 的候选；没有可用向量结果时执行授权文字检索。
+2. 对候选逐一从规范账本读取，重新验证拥有权/共享授权、删除状态、版本、分块范围与模型可读分类。只发送查询和这些片段给本地重排 Provider。
+3. Provider 每次最多 20 个片段，每段最多 1000 字符、查询最多 2000 字符；每对输入最多 512 Token，超出按分词器规则截断。CPU 单请求、每批两对输入，避免抢占生成模型的 Metal 资源。
+4. Core 要求结果是完整且不重复的候选序号，分数必须是有限的 0–1 数值。模型返回的新正文、链接或资源 ID 都不能替换规范内容。
+5. Core 依分数排序后选前五条，再次检查权限和版本并读取规范片段。推理期间撤权、删除或修改不能继续返回旧正文。Agent 的来源引用与任务依赖仍使用 Core 生成的真实记录 ID 和版本。
+
+`POST /api/v1/knowledge/search` 保留原来的 `mode`，额外返回 `reranking`：
+
+| 状态 | 含义 |
+|---|---|
+| `not_configured` | 当前成员没有可用本地重排 Provider |
+| `not_needed` | 已配置重排，但没有候选 |
+| `applied` | 真实模型评分与结果校验成功 |
+| `unavailable` | 重排被策略拒绝、服务故障或响应不符合契约；保留原检索顺序 |
+
+停用或卸载重排服务不删除规范数据与向量索引。故障不会触发云端重排，也不会将原有排序伪装成模型评分成功。检索范围、分块截断及模型判断都有局限；通过样例验收不构成任意文档的准确率保证。
+
+### 已验证与待验收
+
+```sh
+HOMEAI_RERANKER_TEST=1 HOMEAI_INTEGRATION=1 HOMEAI_KNOWLEDGE_TEST=1 .venv/bin/pytest -q server/tests/test_reranker_live.py server/tests/test_knowledge_live.py server/tests/test_knowledge.py
+```
+
+已通过真实中英文相关性、未认证请求拒绝、Core pgvector 重排、跨成员不可见、共享撤回、删除、停用和真实 HTTP 故障降级，以及原有 Docling 文档流程回归。生产沙箱、长文排序质量评估、大规模负载及多成员容量规划仍待验收。

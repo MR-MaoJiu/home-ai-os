@@ -81,15 +81,16 @@ if os.environ.get("HOMEAI_ADAPTER") == "graphiti":
     from .egress_guard import install_graphiti_guard
     install_graphiti_guard()
 
-if os.environ.get("HOMEAI_ADAPTER") == "funasr":
+if os.environ.get("HOMEAI_ADAPTER") in {"funasr", "reranker"}:
     from .egress_guard import install_guard
-    install_guard(set(), "FunASR")
+    install_guard(set(), os.environ["HOMEAI_ADAPTER"])
 
 app = FastAPI(title="Home AI Provider bridge", dependencies=[Depends(authenticate)])
 docling_lock = asyncio.Semaphore(1)
 memory_lock = asyncio.Semaphore(1)
 graphiti_lock = asyncio.Semaphore(1)
 speech_lock = asyncio.Semaphore(1)
+reranker_lock = asyncio.Semaphore(1)
 
 
 @app.get("/health")
@@ -97,7 +98,7 @@ def health():
     result = {"status": "alive", "adapter": os.environ.get("HOMEAI_ADAPTER", "unconfigured")}
     if result["adapter"] == "mail":
         result["subject_id"] = os.environ.get("MAIL_SUBJECT_ID")
-    if result["adapter"] in {"mem0", "graphiti", "funasr"}:
+    if result["adapter"] in {"mem0", "graphiti", "funasr", "reranker"}:
         from .egress_guard import stats
         result["egress"] = dict(stats)
     return result
@@ -107,6 +108,10 @@ def health():
 async def invoke(operation: str, call: Call):
     adapter = os.environ.get("HOMEAI_ADAPTER")
     try:
+        if adapter == "reranker" and operation == "rerank":
+            from .reranker_adapter import rerank
+            async with reranker_lock:
+                return await asyncio.to_thread(rerank, call)
         if adapter == "docling" and operation == "parse":
             async with docling_lock:
                 return await asyncio.to_thread(parse_document, call)
