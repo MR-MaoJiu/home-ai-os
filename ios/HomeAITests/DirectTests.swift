@@ -25,6 +25,44 @@ final class DirectTests: XCTestCase {
     }
 
     @MainActor
+    func testPollingCancellationAndIdleKeepSameConnection() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let encoded = env["HOMEAI_DIRECT_REMOTE_PAIR_FILE_BASE64"], let data = Data(base64Encoded: encoded) else { throw XCTSkip("需要真实家庭服务配对载荷") }
+        struct Fixture: Decodable { let pairing: PairingCode }
+        let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+        let previousIdle = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer { UIApplication.shared.isIdleTimerDisabled = previousIdle }
+        let api = APIClient(persistConnection: false)
+        let started = Date()
+        try await api.pair(fixture.pairing)
+        print("DIRECT_TIMING total_pair_ms=\(Int(Date().timeIntervalSince(started)*1000))")
+        func sessionID() async throws -> String {
+            let data = try await api.request("GET", "/api/v1/direct/evidence")
+            let result = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return try XCTUnwrap(result["session"] as? String)
+        }
+        let original = try await sessionID()
+        for _ in 0..<3 {
+            try await api.expireAccessForAcceptance()
+            let polling = Task { try await api.request("GET", "/api/v1/direct/task-snapshot") }
+            try await Task.sleep(for: .milliseconds(20))
+            polling.cancel();_ = await polling.result
+            let current = try await sessionID()
+            XCTAssertEqual(current,original,"取消监听不能关闭共享直连")
+        }
+        print("DIRECT_STABILITY cancellation_preserved_session")
+        try await Task.sleep(for: .seconds(75))
+        let resumed = Date()
+        let current = try await sessionID()
+        XCTAssertEqual(current,original,"空闲后应复用同一通道")
+        print("DIRECT_STABILITY idle_75s_same_session resume_ms=\(Int(Date().timeIntervalSince(resumed)*1000))")
+        let identityData = try await api.request("GET", "/api/v1/me")
+        let me = try XCTUnwrap(JSONSerialization.jsonObject(with: identityData) as? [String: Any])
+        _ = try await api.request("DELETE", "/api/v1/devices/" + (try XCTUnwrap(me["device_id"] as? String)))
+    }
+
+    @MainActor
     func testRecoveredConnectionClearsOnlyItsOwnFailure() async {
         let api = APIClient(persistConnection: false)
         let state = AppState(api: api)

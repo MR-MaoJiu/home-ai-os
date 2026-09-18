@@ -54,6 +54,7 @@ actor APIClient {
     private var pairingAttempt = UUID()
     private let directGate = AsyncOperationGate()
     private var directPublicOnly = false
+    private var fullGatheringNextAttempt = false
     private var directTransport: DirectTransport?
     private var directEvents: [UUID: Task<Void, Never>] = [:]
     private var eventSockets: [UUID: URLSessionWebSocketTask] = [:]
@@ -67,6 +68,11 @@ actor APIClient {
     }
 
     #if DEBUG
+    func expireAccessForAcceptance() throws {
+        guard !persistConnection, connection != nil else { throw APIError.message("只允许隔离验收会话强制刷新") }
+        connection?.expiresAt = .distantPast
+    }
+
     /// 仅用于隔离真机验收，复用已配对设备；不覆盖用户的持久连接。
     func restoreAcceptanceConnection(_ saved: Connection, devicePublicKey: String) throws {
         guard !persistConnection, try identity.publicPEM() == devicePublicKey, saved.directAccess?.transport_policy == "direct_only" else {
@@ -246,7 +252,7 @@ actor APIClient {
         directPublicOnly = requirePublicPath
         connection?.prefersDirect = true
         try persist()
-        let transport = try await DirectTransport(stunURLs: access.stun_urls, requirePublicPath: requirePublicPath)
+        let transport = try await DirectTransport(stunURLs: access.stun_urls, requirePublicPath: requirePublicPath, gatherAllCandidates: fullGatheringNextAttempt)
         guard started == generation else { await transport.close(); throw APIError.message("连接身份已切换") }
         await directTransport?.close()
         guard started == generation else { await transport.close(); throw APIError.message("连接身份已切换") }
@@ -266,12 +272,18 @@ actor APIClient {
                 if let response = try JSONSerialization.jsonObject(with: data) as? [String: Any], let answer = response["envelope"] as? [String: Any] {
                     try await transport.accept(JSONSerialization.data(withJSONObject: answer), serverPublicKey: publicKey)
                     guard started == generation else { throw APIError.message("连接已切换") }
+                    fullGatheringNextAttempt = false
                     return
                 }
                 try await Task.sleep(for: .seconds(1))
             }
             throw APIError.message("家庭服务器离线或当前网络无法直连；不会使用中继")
-        } catch { await transport.close(); throw error }
+        } catch {
+            // 快照候选无法建立连接时，下次收集完整候选；不重放业务请求。
+            if !Task.isCancelled, !(error is CancellationError), await transport.candidateSnapshotWasEarly { fullGatheringNextAttempt = true }
+            await transport.close()
+            throw error
+        }
     }
 
     private func reconnectDirectIfNeeded() async throws {

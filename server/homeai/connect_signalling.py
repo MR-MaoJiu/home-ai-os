@@ -6,6 +6,7 @@ import json
 import math
 import secrets
 import time
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 import httpx
@@ -71,6 +72,19 @@ def effective_stun(app,config):
     return validate_stun_urls(config.get('stun_urls',app.settings.direct_stun_urls))
 
 
+@asynccontextmanager
+async def signal_client(app):
+    shared=getattr(app,'connect_http_client',None)
+    if shared is not None:
+        yield shared
+    else:
+        async with httpx.AsyncClient(timeout=20,trust_env=False,follow_redirects=False) as client:
+            yield client
+
+async def without_cookies(request):
+    request.headers.pop('cookie',None)
+
+
 class Broker:
     def __init__(self, app, config):
         self.app, self.config = app, config
@@ -88,7 +102,7 @@ class Broker:
         headers = {'content-type': 'application/json', 'x-connect-id': self.config['instance_id'],
                    'x-connect-credential': self.config['credential'], 'x-connect-time': timestamp, 'x-connect-nonce': nonce,
                    'x-connect-signature': base64.b64encode(key.sign(proof.encode(), ec.ECDSA(hashes.SHA256()))).decode()}
-        async with httpx.AsyncClient(timeout=20, trust_env=False, follow_redirects=False) as client:
+        async with signal_client(self.app) as client:
             async with client.stream(method, self.base+path, content=raw, headers=headers) as response:
                 response.raise_for_status()
                 content = bytearray()
@@ -106,6 +120,8 @@ async def run_agent(app):
     permit_until = 0
     application_check = 0
     manager = sessions(app)
+    client=httpx.AsyncClient(timeout=20,trust_env=False,follow_redirects=False,event_hooks={'request':[without_cookies]},limits=httpx.Limits(max_connections=8,max_keepalive_connections=4,keepalive_expiry=60))
+    app.state.connect_http_client=client
     try:
         while True:
             try:
@@ -182,3 +198,5 @@ async def run_agent(app):
             await asyncio.sleep(2)
     finally:
         await manager.close_source('platform')
+        if getattr(app.state,'connect_http_client',None) is client:del app.state.connect_http_client
+        await client.aclose()

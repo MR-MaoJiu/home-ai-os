@@ -67,3 +67,30 @@ async def test_direct_core_auth_sync_and_revocation(tmp_path):
         await manager.close()
         await peer.close()
         bob.request('DELETE', '/api/v1/devices/' + bob.device_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.environ.get('HOMEAI_DIRECT_LONG_INTEGRATION')!='1',reason='需要执行超过五分钟的真实长连接验收')
+async def test_connection_survives_idle_and_five_minutes(tmp_path):
+    import time
+    from homeai.direct_transport import DirectPeer
+    settings=Settings(state_dir=tmp_path,direct_enabled=True)
+    settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
+    app=create_app(settings,vault=Vault(os.urandom(32)))
+    actor=SignedClient(TestClient(app),app.state.db,household=str(uuid.uuid4()))
+    _,key=identity(app.state);peer=DirectPeer(actor.key,key.public_key());manager=sessions(app)
+    try:
+        offer=await peer.offer();answer=await manager.negotiate(actor.device_id,offer);await peer.accept(answer)
+        bridge=DirectHTTPClient(peer);identifier=peer.session;started=time.monotonic()
+        async def check():
+            metadata,data=await bridge.request('GET','/api/v1/direct/evidence',headers=actor.headers('GET','/api/v1/direct/evidence',b''))
+            assert metadata['status']==200,data
+            assert json.loads(data)['session']==identifier
+        await check();print('LONG_DIRECT established',flush=True)
+        await asyncio.sleep(75)
+        await check();print('LONG_DIRECT idle_75s_survived',flush=True)
+        while time.monotonic()-started<315:
+            await asyncio.sleep(20);await check()
+        print('LONG_DIRECT lifetime_over_315s_same_session',flush=True)
+    finally:
+        await manager.close();await peer.close();actor.request('DELETE','/api/v1/devices/'+actor.device_id)

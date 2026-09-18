@@ -10,20 +10,24 @@ final class DirectTransport: NSObject, RTCPeerConnectionDelegate, RTCDataChannel
     private var channel: RTCDataChannel!
     private var inbox: [Data] = []
     private var closed = false
-    private var busy = false
+    private let requestGate = AsyncOperationGate()
     private var sessionID: String?
     private var offerDigest: String?
     private var answerAccepted = false
     private let identity = DeviceIdentity()
     private let requirePublicPath: Bool
+    private let gatherAllCandidates: Bool
+    private var firstPublicCandidateAt: Date?
+    private(set) var candidateSnapshotWasEarly = false
     private let frameSize = 1024
     private let maxMessage = 16384
     private let window = 64
     private let maximumBody = 30 * 1024 * 1024
     private let ack = Data([0]) + Data("homeai-ack-v1".utf8)
 
-    init(stunURLs: [String] = [], requirePublicPath: Bool = false) throws {
+    init(stunURLs: [String] = [], requirePublicPath: Bool = false, gatherAllCandidates: Bool = false) throws {
         self.requirePublicPath = requirePublicPath
+        self.gatherAllCandidates = gatherAllCandidates
         guard stunURLs.count <= 2, stunURLs.allSatisfy({ $0.hasPrefix("stun:") && $0.count <= 256 && !$0.contains("@") && !$0.contains("?") && !$0.contains("#") && !$0.contains("\n") && !$0.contains("\r") }) else { throw APIClient.APIError.message("只允许 STUN，禁止 TURN 中继") }
         super.init()
         let config = RTCConfiguration()
@@ -83,6 +87,7 @@ final class DirectTransport: NSObject, RTCPeerConnectionDelegate, RTCDataChannel
 
     func offer() async throws -> Data {
         guard sessionID == nil else { throw error("不能重复使用直连协商") }
+        let started = Date()
         sessionID = (UUID().uuidString + UUID().uuidString).replacingOccurrences(of: "-", with: "").lowercased()
         do {
             let sdp: String = try await withCheckedThrowingContinuation { continuation in
@@ -93,13 +98,23 @@ final class DirectTransport: NSObject, RTCPeerConnectionDelegate, RTCDataChannel
                 }
             }
             try await setDescription(sdp, local: true)
-            try await waitUntil({ peer.iceGatheringState == .complete }, seconds: 40, reason: "直连地址收集超时，请检查 STUN 与网络")
+            try await waitUntil({
+                if peer.iceGatheringState == .complete { return true }
+                guard !gatherAllCandidates, Date().timeIntervalSince(started) >= 1,
+                      let firstPublicCandidateAt, Date().timeIntervalSince(firstPublicCandidateAt) >= 0.25 else { return false }
+                return peer.localDescription?.sdp.contains(" typ srflx") == true
+            }, seconds: 40, reason: "直连地址收集超时，请检查 STUN 与网络")
+            // RFC 8838 第 13 节允许提前结束候选收集；签名快照发出后不追加候选。
+            candidateSnapshotWasEarly = peer.iceGatheringState != .complete
             guard var complete = peer.localDescription?.sdp else { throw error("直连描述缺失") }
             if !complete.contains("a=end-of-candidates") { complete += "a=end-of-candidates\r\n" }
             if requirePublicPath { complete = Self.publicCandidates(complete) }
             try Self.validateSDP(complete)
             let payload: [String: Any] = ["version": 1, "session": sessionID!, "type": "offer", "sdp": complete,
                                           "expires": Int(Date().timeIntervalSince1970) + 60, "offer_digest": NSNull()]
+            #if DEBUG
+            print("DIRECT_TIMING gather_ms=\(Int(Date().timeIntervalSince(started) * 1000))")
+            #endif
             let encoded = try Self.canonical(payload)
             offerDigest = DeviceIdentity.hash(encoded)
             let signature = try identity.sign(Data("homeai-direct-sdp:v1\n".utf8) + encoded)
@@ -163,10 +178,22 @@ final class DirectTransport: NSObject, RTCPeerConnectionDelegate, RTCDataChannel
     }
 
     func request(_ request: URLRequest) async throws -> (Data, Int) {
-        try await waitUntil({ !busy }, seconds: 180)
-        busy = true
+        try await requestGate.acquire()
+        do { try Task.checkCancellation() }
+        catch { await requestGate.release(); throw error }
+        // 已发送的报文必须收完，取消监听不能留下半帧或关闭共享通道。
+        let transfer = Task { @MainActor in try await self.performRequest(request) }
+        let result: Result<(Data, Int), Error>
+        do { result = .success(try await transfer.value) }
+        catch { result = .failure(error) }
+        await requestGate.release()
+        // 已完成的响应必须交给上层提交状态，尤其不能丢失刷新后的凭据。
+        // 监听任务在响应处理完毕后退出；排队期间的取消仍会立即生效。
+        return try result.get()
+    }
+
+    private func performRequest(_ request: URLRequest) async throws -> (Data, Int) {
         let deadline = Date().addingTimeInterval(180)
-        defer { busy = false }
         do {
             guard answerAccepted, let url = request.url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { throw error("直连尚未就绪") }
             let path = components.percentEncodedPath + (components.percentEncodedQuery.map { "?" + $0 } ?? "")
@@ -224,7 +251,12 @@ final class DirectTransport: NSObject, RTCPeerConnectionDelegate, RTCDataChannel
     nonisolated func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
-    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
+        guard candidate.sdp.contains(" typ srflx") else { return }
+        Task { @MainActor in
+            if firstPublicCandidateAt == nil { firstPublicCandidateAt = Date() }
+        }
+    }
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) { dataChannel.close() }
 }

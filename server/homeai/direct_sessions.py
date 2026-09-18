@@ -154,6 +154,6 @@ def evidence(request: Request, actor=Depends(authenticate)):
         raise HTTPException(409, '此请求没有经过直连数据通道')
     # 固定 aiortc 1.15.0 的诊断字段，仅返回候选类型与地址分类，不公开 IP。
     pairs = peer.pc.sctp.transport.transport._connection._nominated.values()
-    return {'transport': 'udp-dtls', 'connection': peer.pc.connectionState,
+    return {'transport': 'udp-dtls', 'connection': peer.pc.connectionState, 'session': peer.session,
             'pairs': [{'local_type': pair.local_candidate.type, 'remote_type': pair.remote_candidate.type,
                        'remote_private': ipaddress.ip_address(pair.remote_candidate.host).is_private} for pair in pairs]}

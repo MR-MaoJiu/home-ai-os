@@ -98,6 +98,8 @@ final class AppState {
     var taskStates: [TaskStateEvent.Item] = []
     var taskEventRevision = UUID()
     private var eventRun: Task<Void, Never>?
+    private var eventRunID: UUID?
+    private var eventConnectionRevision: UUID?
     private var backgroundRun: (UUID, Task<Void, Never>)?
     var connected = false
     // 配对凭据与实际连通状态分开，避免离线时仍显示绿灯。
@@ -120,6 +122,7 @@ final class AppState {
     func stopForegroundEvents() async {
         eventRun?.cancel()
         eventRun = nil
+        eventRunID = nil; eventConnectionRevision = nil
         serverReachable = false
         await api.stopTaskEvents()
         taskEventStatus = "后台暂停实时连接"
@@ -127,9 +130,17 @@ final class AppState {
 
     func startForegroundEvents() {
         guard pairingFeedback != .connecting else { return }
+        if let eventRun, !eventRun.isCancelled, eventConnectionRevision == connectionRevision { return }
         eventRun?.cancel()
+        let identifier = UUID()
+        eventRunID = identifier; eventConnectionRevision = connectionRevision
         eventRun = Task { [weak self] in
             guard let self else { return }
+            defer {
+                if self.eventRunID == identifier {
+                    self.eventRun = nil; self.eventRunID = nil; self.eventConnectionRevision = nil
+                }
+            }
             var retries = 0
             while !Task.isCancelled && self.connected && UIApplication.shared.applicationState == .active {
                 do {

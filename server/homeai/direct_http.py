@@ -27,8 +27,8 @@ async def send_packet(peer, metadata, body):
                 raise ValueError('直连分帧确认不匹配')
 
 
-async def receive_packet(peer):
-    metadata = json.loads(await peer.receive(timeout=60))
+async def receive_packet(peer, header=None):
+    metadata = json.loads(await peer.receive(timeout=60) if header is None else header)
     received_at = time.time()
     if not isinstance(metadata, dict) or type(metadata.get('wire_version')) is not int or metadata['wire_version'] != 3 or type(metadata.get('size')) is not int or not 0 <= metadata['size'] <= MAX_BODY:
         raise ValueError('直连报文长度无效')
@@ -110,13 +110,27 @@ async def serve_http(peer, app, device_id):
     transport = httpx.ASGITransport(app=bound_app, raise_app_exceptions=False)
     try:
         async with httpx.AsyncClient(transport=transport, base_url='https://homeai.direct', follow_redirects=False, trust_env=False) as client:
-            async with asyncio.timeout(300):
-                while True:
-                    metadata, body, received_at = await receive_packet(peer)
+            await asyncio.wait_for(peer.opened.wait(),timeout=60)
+            while True:
+                # 空闲不是传输失败。等待下一请求期间仍检查许可和设备撤销。
+                try:
+                    header = await peer.receive(timeout=15)
+                except TimeoutError:
+                    from .db import Device
+                    peer.ensure_authorized()
+                    with app.state.db() as db:
+                        device = db.get(Device, device_id)
+                        if not device or device.revoked:
+                            raise PermissionError('设备已撤销')
+                    continue
+                # 超时限制属于单次请求，不应成为整条长连接的寿命。
+                async with asyncio.timeout(180):
+                    metadata, body, received_at = await receive_packet(peer, header=header)
                     target, headers = validate_request(metadata)
                     peer.ensure_authorized()
                     response = await client.request(metadata['method'], target, headers=headers, content=body)
                     await send_packet(peer, {'kind': 'response', 'id': metadata['id'], 'status': response.status_code,
                                             'headers': {'content-type': response.headers.get('content-type', 'application/octet-stream')}}, response.content)
+
     finally:
         await peer.close()
