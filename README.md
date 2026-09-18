@@ -31,7 +31,7 @@
 | 模型 | llama.cpp、MLX 固定权重本地生成与真实工具调用；本地中英文 Reranker、Qwen2-VL 照片分析；OpenAI 兼容协议 | vLLM 硬件验收、云账户集成、视觉模型质量评估 |
 | 文档/语音/搜索/家居/邮件 | Docling 七格式解析、whisper.cpp/FunASR 中英文转写、CosyVoice 内置音色合成、SearXNG 真实搜索及审批披露、Postfix/Dovecot 邮件协议闭环、Home Assistant 实体授权与软件辅助开关控制；其余适配器代码 | Linux/生产沙箱验收；真机语音播放、家居自动化因果关联/物理设备、真实外部邮箱账户 |
 | iOS | 五页、配对、数据导入、语音入口、证书校验、加密同步缓存、分页与增量恢复、签名 WSS 任务状态流、App Intent 提醒提交、活动跳转、系统提醒受控写入 | APNs、后台调度及 Siri/快捷指令真机验收、逐 Token 文本流 |
-| 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；稳定服务器身份、换证书/地址验证；已有真实连通/撤销记录 | 家庭域名 ACME 自动申请续期、长期断网与配额故障演练 |
+| 远程 | 主动 frp 隧道、实例签名、租约、TLS 透传；稳定服务器身份、换证书/地址验证；已有真实连通/撤销记录 | 正式 DNS/CA 签发、证书激活与定时续期、长期断网与配额故障演练 |
 | 运维 | 独立迁移账号、加密备份、隔离库恢复与删除日志重放 | 每日备份调度、异机/密钥恢复、RPO/RTO、生产隔离验收 |
 
 ## 系统架构
@@ -78,7 +78,8 @@ flowchart TB
 | `server/homeai/policy.py`、`privacy.py` | 核心风险等级、OPA、云出站限制 |
 | `server/homeai/home_observer.py`、`home_events.py` | 家居订阅、租约、加密最新状态、断线恢复与观察 API |
 | `server/homeai/providers.py` | 端点/能力映射、凭据注入、实际 HTTP/MCP 调用 |
-| `server/homeai/remote.py`、`remote_agent.py` | 独立服务器身份、绑定、短租约、frpc 生命周期 |
+| `server/homeai/remote.py`、`remote_agent.py`、`server_identity.py` | 稳定服务器身份、绑定、短租约、frpc 生命周期 |
+| `server/homeai/acme_certificates.py`、`acme_dns.py` | 持久 ACME 订单、私钥保管、绑定实例的 DNS 验证与证书暂存 |
 | `providers/homeai_providers/` | 第三方 SDK 桥；独立安装依赖 |
 | `admin-web/` | 管理后台源码；构建结果由 Core 同源部署 |
 | `ios/` | SwiftUI、Keychain、设备签名和系统数据连接器 |
@@ -1086,7 +1087,7 @@ MLX 官方 HTTP 服务属于开发服务，本地回环监听、过滤环境和�
 | 家居自动化 | 观察事件到自动化的因果关联、防回环与物理设备操作验收 |
 | iOS 系统能力 | APNs、后台文件传输、真机权限/调度、Siri 与实际通知送达；需要签名团队及 iPhone |
 | 生产插件 | Linux rootless/gVisor、受限网络、签名/SBOM、升级失败回滚与卸载清除的完整验收 |
-| 远程证书 | 家庭端 ACME 自动申请续期、过期失败处理、长期断网与配额恢复 |
+| 远程证书 | 正式 CA/DNS 验收、证书激活及定时续期、过期失败处理、长期断网与配额恢复 |
 | 生产运维 | 每日备份/保留/异机副本、密钥恢复、持续写入一致性、目标机器 RPO/RTO |
 | 外部账户 | 真实邮件、Home Assistant 物理实体、APNs、云模型和平台 SMTP 等按用途安全配置 |
 
@@ -1338,3 +1339,63 @@ sequenceDiagram
 - 加密备份已经包含 `server-identity.enc`。恢复只放入隔离恢复目录，不覆盖运行中的身份；切换服务前应核对并恢复同一身份密文，同时保留匹配的原主密钥。TLS 证书可以重新签发，服务器身份不能随意重建。
 
 已通过真实 HTTPS 原生测试：第二版配对、不同 TLS 私钥的证书切换、旧连接显式升级、同步命名空间保持、错误证书绑定/不同身份公钥/错误随机值/过期挑战拒绝。加密备份实际恢复后身份内容一致。家庭 ACME 自动签发续期、真机网络切换、身份密钥灾难恢复全流程和正式公网场景仍待验收。
+
+
+## 家庭端 ACME DNS-01 申请与中断恢复
+
+已接入[官方 ACME 客户端](https://acme-python.readthedocs.io/en/stable/api/client.html) `acme 5.8.0`，可为当前绑定实例申请证书并暂存结果。家庭端生成并持有 ACME 账户私钥和 TLS 私钥；Cloudflare Token 仍只在独立连接平台中。**运行证书激活、服务重载和定时续期尚未完成**，本节不是已完成自动证书部署的声明。
+
+### 已绑定实例的申请入口
+
+先在 Home AI Connect 配置 DNS 服务、完成实例权益和家庭绑定。读取绑定的实例域名时，客户端会先取得服务端验证过的短期租约；本地配置不能自行声明已付费或改成其他家庭域名。当前开发机器的官方远程绑定处于未启用状态，因此本轮没有执行正式平台签发。
+
+明确接受所选 CA 服务条款后，在家庭服务器执行：
+
+```sh
+# 默认使用 Let's Encrypt staging，结果属于测试证书。
+.venv/bin/python scripts/request_certificate.py --agree-tos
+
+# 正式 CA 入口，需要对应正式环境验收。
+.venv/bin/python scripts/request_certificate.py --production --agree-tos
+```
+
+命令只申请当前绑定域名，没有任意 `--domain`、通配符、IP 证书或 DNS 记录修改参数。结果进入 `state/acme/<域名>/<生成标识>/`，包含 `server.key`、`fullchain.pem`、`manifest.json`，文件权限为 `0600`，生成目录为 `0700`。清单明确区分 `test_certificate` 和 `status=staged`；既有运行证书保持原样。
+
+### 协议、秘密与数据流程
+
+1. 读取家庭端加密绑定，使用稳定服务器身份对租约请求签名；平台检查实例、权益、到期与撤销状态。
+2. 独立生成 ACME 账户 RSA 私钥，并按 CA 目录地址分隔加密保存；TLS 叶证书使用家庭端新生成的 P-256 私钥。
+3. 创建只含一个已绑定 DNS 名称的 CSR，向固定 Let's Encrypt 正式或 staging HTTPS 目录发起订单。目录返回的所有后续端点必须属于同一 HTTPS 来源，不跟随重定向、不继承系统代理。
+4. DNS 发布只提交租约和验证值到平台 `/api/agent/dns/present`；平台自行确定 `_acme-challenge.<实例域名>`。家庭端不能传任意记录名、记录类型或 Cloudflare 记录 ID。
+5. 家庭端观察 TXT 传播后通知 CA 开始验证。取得证书后校验域名、私钥匹配、有效期和证书链，再暂存；完成后清理对应 TXT 值。
+6. 整个操作持有文件锁，避免本机并发申请。普通日志不包含账户私钥、实例凭据、租约或完整协议报文。
+
+### 失败、恢复与结果不明
+
+账户文件为 `account-<目录摘要>.enc`，未完成订单为 `operation.enc`，待清理 DNS 为 `dns-pending.enc`，均由家庭主密钥加密。账户私钥和待用 TLS 私钥在外部操作前保存。
+
+- 已知订单 URI 时，重启后查询并恢复原订单，复用原 CSR 和私钥；不会创建替代订单。
+- 新订单请求处于 `SUBMITTING` 且没有收到 URI 时，无法判断 CA 是否已经接受。命令停止并要求核对 CA 账户订单，不自动重新申请。
+- DNS 清理失败时保留密文清理日志。已经暂存的证书在下一次清理成功后返回，指纹和路径保持一致，不重复签发。
+- 已失效的 CA 订单、绑定撤销或另一域名的未完成订单需要先处理，不能通过改配置绕过。
+
+可用 `.venv/bin/python scripts/request_certificate.py --status` 离线查看阶段、域名、订单 URI 和错误类型，不输出私钥或实例凭据。明确的 `badNonce` 拒绝有界重试，其他结果不明仍停止。主错误与清理错误分别保存在密文日志中。
+
+目前没有自动核对未知新订单的运营界面，也未把整个 `state/acme/` 纳入现有资料备份/恢复流程。正式启用前还需完成这些运维能力；不要把本轮证书暂存等同于完整密钥恢复验收。
+
+### 可重现的真实协议测试
+
+测试使用 [Let's Encrypt Pebble](https://github.com/letsencrypt/pebble) `v2.10.1`，固定提交 `b1e1ca4f3c30abb64111adaca4544bc5374cc306`。这是实际 ACME 测试 CA 和实际 TCP/UDP DNS 服务，不是生产 CA。客户端验证其专用测试 CA 证书，不使用 `verify=False`。
+
+```sh
+git clone --depth 1 --branch v2.10.1 https://github.com/letsencrypt/pebble.git state/vendor/pebble
+.venv/bin/python scripts/run_acme_test_services.py
+```
+
+启动器校验提交、编译两个 Go 程序并只绑定本机端口：CA `51400`、管理 `51401`、DNS `51453`、DNS 管理 `51455`。启动环境清除外部 Pebble 配置，关闭授权复用，每次申请实际完成 DNS 验证；不允许用 `PEBBLE_VA_ALWAYS_VALID` 跳过验证。另一个终端执行：
+
+```sh
+HOMEAI_ACME_TEST=1 .venv/bin/pytest -q server/tests/test_acme_live.py
+```
+
+四项专项通过，包括三项真实 CA/DNS 集成：申请和再次申请、DNS 操作后真实 HTTP 错误的原订单恢复、清理 HTTP 错误后的同一证书恢复。还验证了未知订单请求停止新建及域名边界。测试不安装信任根，不覆盖业务证书；正式 Cloudflare 传播、Let's Encrypt 公网签发、激活重载与无人值守续期仍待验收。

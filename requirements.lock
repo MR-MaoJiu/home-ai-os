@@ -56,3 +56,13 @@ pyjwt==2.14.0
 referencing==0.37.0
 rpds-py==2026.6.3
 sse-starlette==3.4.11
+
+# ACME 客户端与 DNS 传播校验
+acme==5.8.0
+josepy==2.2.0
+pyOpenSSL==26.4.0
+pyrfc3339==2.1.0
+requests==2.34.2
+charset-normalizer==3.5.1
+urllib3==2.8.0
+dnspython==2.8.0
