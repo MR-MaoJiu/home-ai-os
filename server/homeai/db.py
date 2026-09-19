@@ -355,3 +355,21 @@ class SharingRule(Owned, Base):
     category: Mapped[str] = mapped_column(String)
     grantee_id: Mapped[str] = mapped_column(String)
     __table_args__ = (UniqueConstraint("owner_id", "category", "grantee_id"),)
+
+
+class BuiltinDeployment(Base):
+    __tablename__ = 'builtin_deployments'
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    variant: Mapped[str] = mapped_column(String)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String, default='queued')
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[float] = mapped_column(default=now)
+
+
+class AgentSkill(Owned, Base):
+    __tablename__ = 'agent_skills'
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -36,3 +36,15 @@ def test_setup_ticket_replay_and_cross_origin(system,alice):
     for _ in range(5):
         assert c.post('/api/v1/browser/login',json={'username':'admin','password':'wrong','code':'000000'},headers={'Origin':'https://testserver'}).status_code==401
     assert c.post('/api/v1/browser/login',json={'username':'admin','password':'wrong','code':'000000'},headers={'Origin':'https://testserver'}).status_code==429
+
+
+def test_code_only_login_and_replay(system,alice):
+    from homeai.db import BrowserAccount
+    c,result=bootstrap(system,alice)
+    # 初始化确认和登录使用不同时间窗，验证动态码不可重放。
+    with system[2]() as db:
+        account=db.get(BrowserAccount,'admin');account.totp_enabled=True;db.commit()
+    code=pyotp.TOTP(result['secret']).now()
+    r=c.post('/api/v1/browser/login',json={'username':'admin','code':code},headers={'Origin':'https://testserver'})
+    assert r.status_code==200,r.text
+    assert c.post('/api/v1/browser/login',json={'username':'admin','code':code},headers={'Origin':'https://testserver'}).status_code==401

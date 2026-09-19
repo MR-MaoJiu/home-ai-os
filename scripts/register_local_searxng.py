@@ -1,4 +1,4 @@
-"""登记经过版本核查的本机搜索 Provider；查询仍需逐次审批。"""
+"""登记经过版本核查的本机搜索 Provider；公开搜索由服务端自动执行。"""
 import json
 from pathlib import Path
 import httpx
@@ -23,4 +23,4 @@ with factory() as db:
     else:
         db.add(Provider(id=manifest.id, manifest=manifest.model_dump_json(), enabled=True, health='ready'))
     db.commit()
-print('已登记本机 SearXNG；搜索必须审批，查询会发往上游引擎。')
+print('已登记本机 SearXNG；公开查询会发往上游引擎，私人内容仍受出站策略限制。')

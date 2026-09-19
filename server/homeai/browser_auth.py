@@ -29,7 +29,7 @@ class Setup(BaseModel):
 class Login(BaseModel):
     model_config=ConfigDict(extra='forbid')
     username:str=Field(max_length=80)
-    password:str=Field(max_length=256)
+    password:str=Field(default='',max_length=256)
     code:str=Field(default='',max_length=8)
 
 
@@ -66,11 +66,11 @@ def get_browser_actor(request, setup=False):
         device=db.get(Device,session.device_id)
         user=db.get(Principal,session.user_id)
         if not device or device.revoked or not user:raise HTTPException(401,'网页设备已撤销')
-        sensitive = request.method not in {'GET','HEAD','OPTIONS'} and request.url.path.startswith(('/api/v1/secrets','/api/v1/providers','/api/v1/members','/api/v1/devices','/api/v1/pairing/address','/api/v1/remote/stun','/api/v1/remote/applications','/api/v1/remote/disable','/api/v1/remote/migrate','/api/v1/remote/resume','/api/v1/remote/refresh-node'))
+        sensitive = request.method not in {'GET','HEAD','OPTIONS'} and request.url.path.startswith(('/api/v1/builtins','/api/v1/integrations','/api/v1/secrets','/api/v1/providers','/api/v1/members','/api/v1/devices','/api/v1/pairing/address','/api/v1/remote/stun','/api/v1/remote/applications','/api/v1/remote/disable','/api/v1/remote/migrate','/api/v1/remote/resume','/api/v1/remote/refresh-node'))
         sensitive = sensitive or (request.method == 'POST' and request.url.path.startswith('/api/v1/tasks/') and request.url.path.endswith('/reconcile'))
         if sensitive:
             proof=db.get(Nonce,'web-stepup:'+session.digest)
-            if not proof or proof.expires_at<=now():raise HTTPException(403,'需要重新验证密码与动态验证码')
+            if not proof or proof.expires_at<=now():raise HTTPException(403,'需要重新验证动态验证码')
         return Actor(user.id,user.household_id,device.id,user.role)
 
 
@@ -86,7 +86,8 @@ def consume_totp(account,code,vault):
 
 
 def limit_key(request,username):
-    return digest(((request.client.host if request.client else 'unknown')+':'+username.lower()).encode())
+    # 动态码是主要登录凭据，按账号限流，不能通过切换来源 IP 绕过。
+    return digest(('browser-account:'+username.lower()).encode())
 
 
 def limit_check(db,key):
@@ -156,7 +157,7 @@ def login(body:Login,request:Request,response:Response):
         key=limit_key(request,username)
         attempt=limit_check(db,key)
         account=db.scalar(select(BrowserAccount).where(BrowserAccount.username==username).with_for_update())
-        try:valid=ph.verify(account.password_hash if account else DUMMY_HASH,body.password)
+        try:valid=not body.password or ph.verify(account.password_hash if account else DUMMY_HASH,body.password)
         except VerificationError:valid=False
         if not account or not valid or not account.totp_enabled or not consume_totp(account,body.code,request.app.state.vault):
             failed(db,key,attempt)
@@ -183,7 +184,7 @@ def logout(request:Request,response:Response):
     return {'signed_out':True}
 
 class Reauthenticate(BaseModel):
-    password:str=Field(max_length=256)
+    password:str=Field(default='',max_length=256)
     code:str=Field(pattern=r'^\d{6}$')
 
 @router.post('/reauth')
@@ -192,7 +193,7 @@ def reauthenticate(body:Reauthenticate,request:Request):
     with request.app.state.db() as db:
         account=db.scalar(select(BrowserAccount).where(BrowserAccount.user_id==actor.user_id).with_for_update())
         key=limit_key(request,account.username);attempt=limit_check(db,key)
-        try:valid=ph.verify(account.password_hash,body.password)
+        try:valid=not body.password or ph.verify(account.password_hash,body.password)
         except VerificationError:valid=False
         if not valid or not consume_totp(account,body.code,request.app.state.vault):
             failed(db,key,attempt);raise HTTPException(401,'重新验证失败')

@@ -180,3 +180,58 @@ Home AI Connect 在独立闭源项目维护，不放入此仓库。
 ## 许可证
 
 采用 `LicenseRef-Home-AI-OS-Attribution-1.0`，允许使用、修改、商用、闭源再分发和自行托管。对外发布的衍生产品或托管服务须保留“基于 Home AI OS”及指向本项目的可点击链接。详见 [LICENSE](LICENSE) 和 [第三方许可](THIRD_PARTY_NOTICES.md)；不宣称是标准 MIT 或已通过 OSI 认证。
+
+
+## 新电脑启用内置服务
+
+Provider 数据库为空表示尚未登记服务，不需要复制其他电脑的数据库或凭据。打开“模型与凭据”即可看到内置目录：
+
+- **联网搜索**：SearXNG，固定容器镜像。需要安装并启动 Docker。
+- **本地模型**：Qwen3 0.6B Q8（下载约 0.64 GB）或 Qwen3 4B Q4（约 2.50 GB）。实际运行还需要额外内存；0.6B 适合轻量验证，复杂工具规划优先选 4B。先按 [llama.cpp 官方指南](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md) 安装 `llama-server` 并加入 PATH。模型来自 [Qwen 官方 GGUF 仓库](https://huggingface.co/Qwen/Qwen3-4B-GGUF)，下载固定提交的文件并校验 SHA256。
+
+除了 API、任务 Worker，在项目根目录启动内置部署器：
+
+```bash
+PYTHONPATH=server .venv/bin/python scripts/run_builtin_services.py
+```
+
+然后在“模型与凭据”选择服务与模型大小，点击“启用／应用选择”。部署器负责下载和启动；界面显示等待部署、启动中、可用或具体失败原因。只有实际健康检查通过才登记为可用。部署器未运行时会明确提示，申请不会伪装成已经启动。重启机器后需要将此进程与其他服务一起启动；首次下载需要访问模型仓库和容器仓库。停用会禁止 Core 调用；SearXNG 容器可继续存在供本机使用，若不再需要可在服务器执行 `docker compose -f deploy/compose.searxng.yml stop`。
+
+内置部署器是可信本机运维进程，只接受固定目录选项，不接受网页提交的 Shell 或任意下载 URL。API 无需获得 Docker Socket。当前生产隔离尚未验收，生产模式仍拒绝通过开发部署器启用。
+
+## MCP 与 Skill
+
+“模型与凭据”提供 MCP 地址和可选访问令牌，连接后读取真实工具目录。管理员核对参数契约，明确映射到 Core 能力，再保存并启用 Provider。目录指纹变化会停止调用，必须重新核对；不能把任意工具名称伪装成已有能力。现阶段支持 Streamable HTTP；stdio 服务使用 `scripts/run_mcp_stdio.py` 的固定配置桥接器，其对外协议为 Core HTTP Provider，不是 Streamable HTTP；不能把桥接地址直接填入 MCP 表单。当前网页 MCP 表单用于 Streamable HTTP 接入。工具仍由服务端 Agent 调度，并保留审批、审计和出站策略。
+
+Skill 支持导入带 `name`、`description` YAML 头部的 `SKILL.md`。保存后默认停用；启用后作为本家庭 Agent 的处理指引，不赋予额外工具权限。当前入口执行指令型 Skill，不运行附带脚本或任意安装命令。确定性、多步骤及定时任务继续使用“自动化”的声明式工作流。Skill 可停用、删除，删除不会移除家庭资料或记忆。
+
+## 部署凭据与动态码登录
+
+以下三类凭据用途不同，不能互换：
+
+| 凭据 | 来源 | 用途 |
+|---|---|---|
+| 数据加密主密钥 | `init-key` 生成于服务器 | 解密家庭资料；不得粘贴到网页登录或 iOS 验证器 |
+| 初始化凭据 | 本机 `web-setup` / `web-recover` 输出 | 五分钟内、一次性初始化或恢复网页账号 |
+| TOTP 动态码密钥 | 管理网页初始化成功后一次性展示 | 导入 iOS 验证器，离线生成每 30 秒更新的六位动态码 |
+
+首次安装依次执行已有环境与数据库初始化步骤，再在项目根目录：
+
+```bash
+PYTHONPATH=server .venv/bin/python -m homeai.cli init-key
+PYTHONPATH=server .venv/bin/python -m homeai.cli bootstrap --name 家庭管理员
+# 将上一步输出的 user_id 填入以下命令，勿填写 pairing_token。
+PYTHONPATH=server .venv/bin/python -m homeai.cli web-setup --user <user_id>
+```
+
+已有安装不要重复执行 `init-key` 或 `bootstrap`。`web-setup` 输出中的 `setup_ticket` 是此命令生成的网页初始化凭据，有效期 300 秒：打开家庭 HTTPS `/admin/`，选择“首次部署”，填写此凭据、用户名和备用密码。页面随后展示 TOTP 密钥，将其导入 iOS“设置 → 管理端动态码”，或标准验证器，并填入生成的动态码完成绑定。完成绑定前不能访问管理功能。凭据过期时重新运行 `web-setup`，不要删除数据库。
+
+日常管理登录输入**用户名＋当前动态码**即可；已有客户端若同时提交密码，服务端仍校验该密码。敏感配置变更需要重新输入一个未使用的动态码，验证后有效 5 分钟。同一动态码不能重复使用；刚登录后再次验证时等待下一周期。连续错误会限流。iOS 在本机 Keychain 保存 TOTP 密钥，显示验证码前验证设备身份，离开前台隐藏；生成动态码不要求与家庭服务器连接。
+
+丢失验证器时，只能由持有服务器本机访问权的人执行：
+
+```bash
+PYTHONPATH=server .venv/bin/python -m homeai.cli web-recover --user <user_id>
+```
+
+用新的一次性凭据完成初始化流程，重新绑定 TOTP；旧动态码密钥和旧网页会话随恢复失效。不要将初始化凭据、TOTP 密钥、主密钥、模型 API Key 或 `.env.local` 提交到 Git。

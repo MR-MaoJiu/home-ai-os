@@ -3,6 +3,13 @@ import AppIntents
 @testable import HomeAI
 
 final class IntentTests: XCTestCase {
+    func testStandardTOTPVector() throws {
+        let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+        XCTAssertEqual(try AdminTOTP.code(secret, at: Date(timeIntervalSince1970: 59)), "287082")
+        XCTAssertEqual(try AdminTOTP.code(secret, at: Date(timeIntervalSince1970: 1111111109)), "081804")
+        XCTAssertThrowsError(try AdminTOTP.secret("not-a-valid-secret"))
+    }
+
     @MainActor
     func testOpenIntentUsesSharedNavigation() async throws {
         IntentRouter.shared.destination = .ai

@@ -75,4 +75,8 @@ def main():
                 print('第二版配对信息已写入指定私有文件，有效期 5 分钟。')
             else:print(encoded)
         else:
-            print(json.dumps({"user_id": user.id, "household_id": user.household_id, "pairing_token": token, "expires_in": 300}, ensure_ascii=False))
+            print(json.dumps({"user_id": user.id, "household_id": user.household_id, ("setup_ticket" if args.command in {"web-setup", "web-recover"} else "pairing_token"): token, "expires_in": 300}, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    main()

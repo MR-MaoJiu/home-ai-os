@@ -53,7 +53,7 @@ async def test_real_stdio_catalog_drift_and_file_integrity(tmp_path,monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_real_streamable_http_and_unmapped_tool(tmp_path):
+async def test_real_streamable_http_and_unmapped_tool(tmp_path,system,alice):
     import socket
     settings=config(tmp_path)
     with socket.socket() as probe:
@@ -79,6 +79,10 @@ async def test_real_streamable_http_and_unmapped_tool(tmp_path):
                     with pytest.raises(HTTPException) as denied:
                         await checked_call(session,'unknown',{},fingerprint)
                     assert denied.value.status_code==403
+            response=alice.request('POST','/api/v1/integrations/mcp/inspect',{'manifest':{'id':'mcp.inspect','version':'1','adapter':'mcp','endpoint':url,'allowed_hosts':['127.0.0.1'],'capabilities':{}}})
+            assert response.status_code==200,response.text
+            assert response.json()['catalog_sha256']==fingerprint
+            assert {tool['name'] for tool in response.json()['tools']}=={'read_text','parse_utf8'}
     finally:
         process.terminate()
         try:process.wait(timeout=10)

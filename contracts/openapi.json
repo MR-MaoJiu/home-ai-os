@@ -128,6 +128,219 @@
         }
       }
     },
+    "/api/v1/builtins": {
+      "get": {
+        "tags": [
+          "内置服务"
+        ],
+        "summary": "Catalog",
+        "operationId": "catalog_api_v1_builtins_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/builtins/{identifier}": {
+      "put": {
+        "tags": [
+          "内置服务"
+        ],
+        "summary": "Configure",
+        "operationId": "configure_api_v1_builtins__identifier__put",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Selection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/mcp/inspect": {
+      "post": {
+        "tags": [
+          "能力接入"
+        ],
+        "summary": "Inspect",
+        "operationId": "inspect_api_v1_integrations_mcp_inspect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Inspect"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/skills": {
+      "get": {
+        "tags": [
+          "能力接入"
+        ],
+        "summary": "Skills",
+        "operationId": "skills_api_v1_integrations_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "能力接入"
+        ],
+        "summary": "Add Skill",
+        "operationId": "add_skill_api_v1_integrations_skills_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/skills/{identifier}/{action}": {
+      "post": {
+        "tags": [
+          "能力接入"
+        ],
+        "summary": "Manage Skill",
+        "operationId": "manage_skill_api_v1_integrations_skills__identifier___action__post",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "summary": "Live",
@@ -3208,6 +3421,19 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "Inspect": {
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/ProviderManifest"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "manifest"
+        ],
+        "title": "Inspect"
+      },
       "KnowledgeMatch": {
         "properties": {
           "record_id": {
@@ -3300,7 +3526,8 @@
           "password": {
             "type": "string",
             "maxLength": 256,
-            "title": "Password"
+            "title": "Password",
+            "default": ""
           },
           "code": {
             "type": "string",
@@ -3312,8 +3539,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "username",
-          "password"
+          "username"
         ],
         "title": "Login"
       },
@@ -3676,7 +3902,8 @@
           "password": {
             "type": "string",
             "maxLength": 256,
-            "title": "Password"
+            "title": "Password",
+            "default": ""
           },
           "code": {
             "type": "string",
@@ -3686,7 +3913,6 @@
         },
         "type": "object",
         "required": [
-          "password",
           "code"
         ],
         "title": "Reauthenticate"
@@ -3804,6 +4030,25 @@
         ],
         "title": "SecretInput"
       },
+      "Selection": {
+        "properties": {
+          "variant": {
+            "type": "string",
+            "title": "Variant"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "variant"
+        ],
+        "title": "Selection"
+      },
       "Setup": {
         "properties": {
           "ticket": {
@@ -3858,6 +4103,27 @@
           "steps"
         ],
         "title": "Skill"
+      },
+      "SkillInput": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Content"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "SkillInput"
       },
       "SourceLookup": {
         "properties": {

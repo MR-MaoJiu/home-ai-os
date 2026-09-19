@@ -48,6 +48,10 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.state.registry = registry or Registry(app.state.vault)
     from .sharing import router as sharing_router
     app.include_router(sharing_router)
+    from .builtins import router as builtin_router
+    app.include_router(builtin_router)
+    from .integrations import router as integration_router
+    app.include_router(integration_router)
     v = app.state.vault
     auth = Depends(authenticate)
 

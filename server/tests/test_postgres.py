@@ -99,3 +99,14 @@ def test_real_continuous_sharing_rls():
         finally:
             alice.request('DELETE','/api/v1/devices/'+alice.device_id)
     app.state.db.kw['bind'].dispose()
+
+
+def test_real_agent_skill_household_policy():
+    from test_integrations import test_instruction_skill_scope_and_disable
+    settings=Settings();settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
+    app=create_app(settings)
+    with TestClient(app) as client:
+        alice=SignedClient(client,app.state.db,role='infrastructure_owner')
+        try:test_instruction_skill_scope_and_disable((app,client,app.state.db),alice)
+        finally:alice.request('DELETE','/api/v1/devices/'+alice.device_id)
+    app.state.db.kw['bind'].dispose()

@@ -1,6 +1,8 @@
 import SwiftUI
 import PhotosUI
 import VisionKit
+import CryptoKit
+import LocalAuthentication
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
@@ -64,6 +66,9 @@ struct SettingsView: View {
                 PhotosPicker("选择一张照片同步", selection: $selectedPhoto, matching: .images)
                 if !syncMessage.isEmpty { Text(syncMessage).font(.caption).foregroundStyle(.secondary) }
             }.disabled(!state.connected || state.busy)
+            Section("管理端登录") {
+                NavigationLink("管理端动态码") { AdminCodeView() }
+            }
             Section("关于") {
                 Link("基于 Home AI OS · 查看源码", destination: URL(string: "https://github.com/MR-MaoJiu/home-ai-os")!)
             }
@@ -165,5 +170,91 @@ private struct AppIconSettingsSection: View {
         .disabled(changing || !UIApplication.shared.supportsAlternateIcons)
         .accessibilityLabel(title)
         .accessibilityValue(selectedIcon == iconName ? "已选中" : "未选中")
+    }
+}
+
+/// 标准 TOTP 验证器；密钥只保存在此设备 Keychain，不上传家庭服务端。
+struct AdminCodeView: View {
+    @Environment(\.scenePhase) private var phase
+    @State private var credential = ""
+    @State private var saved = ""
+    @State private var error: String?
+    @State private var unlocked = false
+    private let key = "admin-totp-secret"
+    var body: some View {
+        List {
+            Section {
+                Text("导入家庭管理端初始化时显示的动态码密钥或 otpauth 地址。五分钟初始化凭据、iPhone 配对码、数据加密主密钥都不能用于生成动态码。").font(.caption)
+                SecureField("动态码密钥或 otpauth:// 地址", text: $credential).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button("保存并显示动态码") { Task { await save() } }.disabled(credential.isEmpty)
+                if let error { Text(error).foregroundStyle(.red) }
+            }
+            if !saved.isEmpty {
+                Section("管理端登录验证码") {
+                    if unlocked && phase == .active {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text((try? AdminTOTP.code(saved, at: context.date)) ?? "无效凭据").font(.largeTitle.monospacedDigit()).textSelection(.enabled)
+                            Text("剩余 \(30 - Int(context.date.timeIntervalSince1970) % 30) 秒，已使用的动态码不能重复登录。").font(.caption)
+                        }
+                    } else { Button("验证身份后查看") { Task { unlocked = await authorize() } } }
+                    Button("移除此设备保存的密钥", role: .destructive) { Task {
+                        guard await authorize() else { return }
+                        do { try DeviceIdentity.save(Data(), name: key); saved = ""; unlocked = false }
+                        catch { self.error = error.localizedDescription }
+                    } }
+                }
+            }
+        }.navigationTitle("管理端动态码")
+            .task { saved = DeviceIdentity.read(key).flatMap { String(data: $0, encoding: .utf8) } ?? "" }
+            .onChange(of: phase) { _, value in if value != .active { unlocked = false } }
+    }
+    private func authorize() async -> Bool {
+        do { return try await LAContext().evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "查看家庭管理端动态码") }
+        catch { self.error = error.localizedDescription; return false }
+    }
+    private func save() async {
+        do {
+            let normalized = try AdminTOTP.secret(credential)
+            guard await authorize() else { return }
+            try DeviceIdentity.save(Data(normalized.utf8), name: key)
+            saved = normalized; credential = ""; unlocked = true; error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+enum AdminTOTP {
+    static func secret(_ input: String) throws -> String {
+        var raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.lowercased().hasPrefix("otpauth:") {
+            guard let url = URLComponents(string: raw), url.scheme == "otpauth", url.host == "totp" else { throw failure }
+            let items = url.queryItems ?? []
+            func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+            guard (value("algorithm") ?? "SHA1").uppercased() == "SHA1", (value("digits") ?? "6") == "6", (value("period") ?? "30") == "30", let secret = value("secret") else { throw failure }
+            raw = secret
+        }
+        raw = raw.uppercased().filter { !$0.isWhitespace }.replacingOccurrences(of: "=", with: "")
+        guard raw.count >= 16, raw.count <= 128 else { throw failure }
+        _ = try decode(raw)
+        return raw
+    }
+    static var failure: NSError { NSError(domain: "HomeAI.TOTP", code: 1, userInfo: [NSLocalizedDescriptionKey: "请输入有效的 Base32 动态码密钥；支持 SHA1、6 位、30 秒的标准 TOTP。"]) }
+    static func decode(_ value: String) throws -> Data {
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+        var buffer = 0, bits = 0
+        var bytes: [UInt8] = []
+        for char in value {
+            guard let index = alphabet.firstIndex(of: char) else { throw failure }
+            buffer = (buffer << 5) | index; bits += 5
+            if bits >= 8 { bits -= 8; bytes.append(UInt8((buffer >> bits) & 255)); buffer &= (1 << bits) - 1 }
+        }
+        return Data(bytes)
+    }
+    static func code(_ secret: String, at date: Date) throws -> String {
+        var counter = UInt64(max(0, date.timeIntervalSince1970) / 30).bigEndian
+        let data = withUnsafeBytes(of: &counter) { Data($0) }
+        let mac = Array(HMAC<Insecure.SHA1>.authenticationCode(for: data, using: SymmetricKey(data: try decode(secret))))
+        let offset = Int(mac.last! & 15)
+        let value = ((UInt32(mac[offset]) & 127) << 24) | (UInt32(mac[offset+1]) << 16) | (UInt32(mac[offset+2]) << 8) | UInt32(mac[offset+3])
+        return String(format: "%06u", value % 1_000_000)
     }
 }
