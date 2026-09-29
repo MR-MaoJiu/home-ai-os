@@ -57,6 +57,18 @@
   },
   "additionalProperties": false,
   "properties": {
+    "notification_revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notification Revision"
+    },
     "schema_version": {
       "const": "1.0",
       "default": "1.0",
