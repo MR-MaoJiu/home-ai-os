@@ -184,6 +184,9 @@ final class NativeOrchestrationTests: XCTestCase {
         let html = """
         <div id="value">原生隔离验收</div><script>
         window.qa={script:true,network:'pending',geo:'pending'};
+        alert('不应展示原生面板'); qa.alertCompleted=true;
+        qa.confirmDenied=confirm('不应确认')===false;
+        qa.promptDenied=prompt('不应输入')===null;
         fetch('https://example.invalid/homeai-isolation-check').then(()=>qa.network='unexpected').catch(()=>qa.network='blocked');
         navigator.geolocation.getCurrentPosition(()=>qa.geo='unexpected',()=>qa.geo='blocked');
         </script>
@@ -202,6 +205,9 @@ final class NativeOrchestrationTests: XCTestCase {
         }
         let result = try XCTUnwrap(output)
         XCTAssertEqual(result["script"] as? Bool, true)
+        XCTAssertEqual(result["alertCompleted"] as? Bool, true)
+        XCTAssertEqual(result["confirmDenied"] as? Bool, true)
+        XCTAssertEqual(result["promptDenied"] as? Bool, true)
         XCTAssertEqual(result["network"] as? String, "blocked")
         XCTAssertEqual(result["geo"] as? String, "blocked")
         XCTAssertFalse(try XCTUnwrap(browser).configuration.websiteDataStore.isPersistent)

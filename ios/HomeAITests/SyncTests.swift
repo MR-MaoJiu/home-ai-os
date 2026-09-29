@@ -276,9 +276,9 @@ extension ClientDisplayContractTests {
         guard env["HOMEAI_READONLY_CLIENT_CHECK"] == "1" || env["TEST_RUNNER_HOMEAI_READONLY_CLIENT_CHECK"] == "1" else {
             throw XCTSkip("仅在用户授权的真机上只读检查系统通知状态")
         }
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let rawStatus = await ClientNotifications.notificationAuthorizationRawValue()
         let authorization: String
-        switch settings.authorizationStatus {
+        switch UNAuthorizationStatus(rawValue: rawStatus) ?? .notDetermined {
         case .authorized: authorization = "authorized"
         case .provisional: authorization = "provisional"
         case .denied: authorization = "denied"
@@ -297,8 +297,11 @@ extension ClientDisplayContractTests {
         guard let notificationID = env["HOMEAI_APNS_VERIFICATION_ID"] ?? env["TEST_RUNNER_HOMEAI_APNS_VERIFICATION_ID"], UUID(uuidString: notificationID) != nil else {
             throw XCTSkip("需要本机提供的单次验收通知标识；本测试只读系统已送达通知")
         }
-        let delivered = await UNUserNotificationCenter.current().deliveredNotifications()
-        let matching = delivered.contains { $0.request.content.userInfo["notification_id"] as? String == notificationID }
+        let matching: Bool = await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getDeliveredNotifications { @Sendable delivered in
+                continuation.resume(returning: delivered.contains { $0.request.content.userInfo["notification_id"] as? String == notificationID })
+            }
+        }
         // 已点击或清除的通知不会留在 delivered 列表，未匹配不能据此判定投递失败。
         print("APNS_DEVICE_DELIVERY_READ matching_delivered=\(matching)")
     }
@@ -338,5 +341,34 @@ extension ClientDisplayContractTests {
         let notification = try JSONDecoder().decode(ClientNotification.self, from: await api.request("GET", "/api/v1/notifications/" + notificationID, expectedNamespace: namespace))
         XCTAssertEqual(notification.id, notificationID)
         print("NOTIFICATION_EXISTING_ROUTE_OK completion_on_main=true authenticated_read=true")
+    }
+}
+
+
+extension ClientDisplayContractTests {
+    func testNotificationCompletionConsumesCallbackOnceOnMainThread() async {
+        let callback = expectation(description: "完成闭包只消费一次")
+        callback.assertForOverFulfill = true
+        let completion = MainThreadNotificationCompletion {
+            XCTAssertTrue(Thread.isMainThread)
+            callback.fulfill()
+        }
+        await Task.detached {
+            await completion.call()
+            await completion.call()
+        }.value
+        await fulfillment(of: [callback], timeout: 3)
+    }
+
+    func testMalformedNotificationStillCompletesOnMainThread() async {
+        let callback = expectation(description: "无效通知也完成回调")
+        callback.assertForOverFulfill = true
+        await Task.detached {
+            HomeAINotificationDelegate.finishNotificationResponse(identifier: "invalid-notification-id") {
+                XCTAssertTrue(Thread.isMainThread)
+                callback.fulfill()
+            }
+        }.value
+        await fulfillment(of: [callback], timeout: 3)
     }
 }

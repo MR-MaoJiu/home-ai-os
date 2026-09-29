@@ -93,11 +93,20 @@ final class ClientNotifications {
         await synchronize(api: AppServices.api)
     }
 
+    nonisolated static func notificationAuthorizationRawValue() async -> Int {
+        // 旧 SDK 的 UNNotificationSettings 不是 Sendable；先在系统回调内投影为值类型。
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { @Sendable settings in
+                continuation.resume(returning: settings.authorizationStatus.rawValue)
+            }
+        }
+    }
+
     func synchronize(api: APIClient) async {
         guard !syncing else { return }
         syncing = true; defer { syncing = false }
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        switch settings.authorizationStatus {
+        let authorizationValue = await Self.notificationAuthorizationRawValue()
+        switch UNAuthorizationStatus(rawValue: authorizationValue) ?? .notDetermined {
         case .authorized, .ephemeral: authorization = "authorized"
         case .provisional: authorization = "provisional"
         case .denied: authorization = "denied"
@@ -154,23 +163,42 @@ final class HomeAINotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
         Task { @MainActor in ClientNotifications.shared.registrationFailed() }
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-                                            withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void) {
-        Task { @MainActor in completionHandler([.banner, .sound, .list]) }
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let completion = MainThreadNotificationCompletion { completionHandler([.banner, .sound, .list]) }
+        Task { @MainActor in completion.call() }
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
-                                            withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
         Self.finishNotificationResponse(identifier: response.notification.request.content.userInfo["notification_id"] as? String,
                                         completion: completionHandler)
     }
 
-    nonisolated static func finishNotificationResponse(identifier: String?, completion: @escaping @Sendable () -> Void) {
+    nonisolated static func finishNotificationResponse(identifier: String?, completion: @escaping () -> Void) {
         // 冷启动通知完成回调会触发 UIKit 恢复状态，必须与页面路由一起在主线程完成。
         // 不使用 async 代理桥接，避免 await 返回后系统 completion 落到工作线程。
+        let completion = MainThreadNotificationCompletion(completion)
         Task { @MainActor in
-            defer { completion() }
+            defer { completion.call() }
             guard let identifier, let id = UUID(uuidString: identifier) else { return }
             // 推送仅携带通知标识，详情仍通过已配对身份向家庭服务器读取。
             ClientNotifications.shared.pendingNotificationID = id.uuidString.lowercased()
         }
+    }
+}
+
+/// 兼容旧 SDK 的非 Sendable completion：发布后仅在主线程取出并执行一次。
+/// 锁保护跨队列保存/消费，不将系统闭包本身声明为可任意并发调用。
+final class MainThreadNotificationCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var callback: (() -> Void)?
+    init(_ callback: @escaping () -> Void) { self.callback = callback }
+
+    @MainActor func call() {
+        let callback = lock.withLock {
+            let value = self.callback
+            self.callback = nil
+            return value
+        }
+        callback?()
     }
 }
