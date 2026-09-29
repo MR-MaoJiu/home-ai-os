@@ -1824,6 +1824,43 @@
         }
       }
     },
+    "/api/v1/files/{record_id}/details": {
+      "get": {
+        "summary": "File Details",
+        "operationId": "file_details_api_v1_files__record_id__details_get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/files/{record_id}/content": {
       "get": {
         "summary": "File Content",

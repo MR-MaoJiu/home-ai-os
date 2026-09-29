@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 @main struct HomeAIApp: App {
+    init() { ProtectedRecordPreview.removeAbandonedFiles() }
     @State private var state = AppState()
     @UIApplicationDelegateAdaptor(HomeAINotificationDelegate.self) private var notifications
     @Environment(\.scenePhase) private var phase

@@ -15,15 +15,23 @@ class VisibilityInput(BaseModel):
 def change_record(db,actor,record,value):
     if record.deleted:raise HTTPException(404,'资料已删除')
     if value=='family' and (record.kind.startswith('memory.') or record.sensitivity=='SECRET'):raise HTTPException(403,'聊天记忆和秘密资料不能设为家庭资料')
+    if value=='family' and record.kind=='document.parsed' and record.source=='document_parse':
+        parent=own(db,Record,record.source_id,actor)
+        if parent.deleted or parent.visibility!='family':raise HTTPException(403,'解析正文不能扩大原文件的范围，请先设置原文件共享')
     previous=record.visibility
-    if previous==value:return
+    if previous==value:
+        # 兼容旧版曾允许独立共享的正文，重复收回原件也必须同步收回它。
+        if record.kind in {'document.file','document.import'}:
+            for child in db.scalars(select(Record).where(Record.owner_id==actor.user_id,Record.source=='document_parse',Record.source_id==record.id,Record.deleted.is_(False))):
+                change_record(db,actor,child,value)
+        return
     members=list(db.scalars(select(Principal.id).where(Principal.household_id==actor.household_id,Principal.id!=actor.user_id)))
     record.visibility=value;db.flush()
     if value=='personal':invalidate_snapshots(db,actor,members)
     notify_recipients(db,actor,'record.changed' if value=='family' else 'record.revoked',record.id,members)
     emit(db,actor,'record.changed',record.id)
     audit(db,actor,'data.visibility',record.id,{'visibility':value})
-    if record.kind=='document.file':
+    if record.kind in {'document.file','document.import'}:
         for child in db.scalars(select(Record).where(Record.owner_id==actor.user_id,Record.source=='document_parse',Record.source_id==record.id,Record.deleted.is_(False))):
             change_record(db,actor,child,value)
 

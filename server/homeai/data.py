@@ -1,6 +1,7 @@
 import json
 from fastapi import HTTPException
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, exists
+from sqlalchemy.orm import aliased
 from .db import Record, Revision, Grant, Audit, Outbox, uid, now, scope
 from .crypto import canonical, digest
 
@@ -28,6 +29,11 @@ def accessible(db, actor, include_deleted=False):
     scope(db, actor.user_id, actor.household_id)
     granted = select(Grant.record_id).where(Grant.grantee_id == actor.user_id, Grant.household_id == actor.household_id)
     query = select(Record).where(Record.household_id == actor.household_id, or_(Record.owner_id == actor.user_id, and_(Record.visibility == "family", Record.sensitivity != "SECRET", ~Record.kind.like("memory.%"))))
+    parent = aliased(Record)
+    parent_visible = exists(select(parent.id).where(parent.id == Record.source_id, parent.owner_id == Record.owner_id,
+        parent.household_id == actor.household_id, parent.deleted.is_(False), parent.kind.in_(['document.file', 'document.import']),
+        or_(parent.owner_id == actor.user_id, and_(parent.visibility == 'family', parent.sensitivity != 'SECRET'))))
+    query = query.where(or_(Record.kind != 'document.parsed', Record.source != 'document_parse', parent_visible))
     if db.info.get("family_automation"):
         query=query.where(Record.visibility=="family",~Record.kind.like("memory.%"))
     return query if include_deleted else query.where(Record.deleted.is_(False))

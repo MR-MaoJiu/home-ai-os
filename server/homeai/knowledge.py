@@ -70,7 +70,8 @@ def authorized_chunks(db,actor,items,vault):
         record=read_record(db,actor,match['record_id'])
         if record.kind!='document.parsed' or record.sensitivity=='SECRET':raise HTTPException(403,'文档不能进入模型')
         if record.version!=match['version']:raise HTTPException(409,'文档已变化，请重新检索')
-        payload=serialize(record,vault)['payload'];content=payload.get('markdown','')
+        from .documents import checked_payload
+        payload=checked_payload(db,actor,record,vault);content=payload.get('markdown','')
         ensure_model_safe(content)
         start,end=match['start'],match['end']
         if not isinstance(content,str) or not 0<=start<end<=len(content) or end-start>1000:raise HTTPException(502,'文档分块范围无效')

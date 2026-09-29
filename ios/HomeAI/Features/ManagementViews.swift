@@ -320,71 +320,185 @@ struct MemberMemoryView: View {
     }
 }
 
-private struct MemberRecordDetail: View {
+struct MemberRecordDetail: View {
     @Environment(AppState.self) private var state
+    @Environment(\.scenePhase) private var phase
     let record: DataEntry
     let isOwner: Bool
+    private struct FileDetails: Codable { let record_id: String; let parsed: DataEntry?; let parse_status: String }
     @State private var detail: DataEntry?
+    @State private var fileDetails: FileDetails?
+    @State private var photo: UIImage?
     @State private var error: String?
     @State private var loading = false
     @State private var needsRefresh = false
     @State private var unavailable = false
-    private var displayed: DataEntry { detail ?? record }
+    @State private var active = true
+    @State private var namespace: String?
+    @State private var attachmentBusy = false
+    @State private var attachmentOperation: Task<Void, Never>?
+    @State private var preview: ProtectedRecordPreview?
+    @State private var fullText: RecordTextContent?
     @State private var visibility = "personal"
     @State private var saving = false
+    private var displayed: DataEntry { detail ?? record }
+    private var isFile: Bool { ["document.file", "document.import"].contains(displayed.kind) }
+    private var recordKey: String { "record:" + record.id + ":" + String(record.version ?? 0) }
+
     var body: some View {
         List {
             if unavailable {
-                ContentUnavailableView("资料不可用", systemImage: "lock", description: Text("资料已删除或不再共享给你。"))
+                ContentUnavailableView("资料不可用", systemImage: "lock", description: Text(error ?? "资料已删除或不再共享给你。"))
             } else {
-            if loading { ProgressView("正在读取完整资料…") }
-            if let error { Text(error).foregroundStyle(.red) }
-            LabeledContent("类型", value: record.kind)
-            if isOwner && record.sensitivity != "SECRET" {
-                Picker("可见范围", selection: Binding(get: { visibility }, set: { selected in Task { await change(selected) } })) {
-                    Text("仅自己").tag("personal")
-                    Text("家庭所有成员").tag("family")
-                }.disabled(saving)
-            } else { LabeledContent("可见范围", value: record.isFamily ? "家庭所有成员" : "仅自己") }
-            ForEach(displayed.payload.keys.filter { $0 != "content_base64" }.sorted(), id: \.self) { key in
-                VStack(alignment: .leading) {
-                    Text(key).foregroundStyle(.secondary)
-                    Text(displayed.payload[key]?.description ?? "").textSelection(.enabled)
+                if loading { ProgressView("正在更新完整资料…") }
+                if let error { Text(error).foregroundStyle(.red) }
+                if displayed.kind == "photo.selected" {
+                    Section("照片") {
+                        if let photo { Image(uiImage: photo).resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: 420).accessibilityLabel("当前照片的实际内容") }
+                        else { Text("图片预览暂不可用，可打开原图或导出查看。").foregroundStyle(.secondary) }
+                        Button("打开原图", systemImage: "arrow.up.left.and.arrow.down.right") { open(field: "/content_base64") }.disabled(attachmentBusy)
+                    }
+                }
+                if isFile {
+                    Section("原文件") {
+                        Text(displayed.title).textSelection(.enabled)
+                        Button("打开原文件", systemImage: "doc.text.magnifyingglass") { open() }.disabled(attachmentBusy)
+                        if attachmentBusy { ProgressView("正在读取原文件…") }
+                    }
+                    if let fileDetails {
+                        Section("文件全文") {
+                            if fileDetails.parse_status == "ready", let parsed = fileDetails.parsed {
+                                let text = parsed.payload["markdown"]?.description ?? parsed.payload["content"]?.description ?? ""
+                                if text.count > 4000 {
+                                    Button("阅读全文（\(text.count) 字）", systemImage: "text.document") { fullText = RecordTextContent(title: "文件全文", text: text) }
+                                } else { Text(text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                            } else {
+                                Text(fileDetails.parse_status == "stale" ? "原件已更新，旧解析内容已隐藏。可打开原文件查看。" : "暂无解析文本，可打开原文件查看完整内容。").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                Section("资料信息") {
+                    LabeledContent("类型", value: displayed.kind)
+                    if let version = displayed.version { LabeledContent("版本", value: String(version)) }
+                    if let source = displayed.source { LabeledContent("来源", value: source) }
+                    DisclosureGroup("来源标识") {
+                        Text("资料：" + displayed.id).textSelection(.enabled)
+                        if let sourceID = displayed.source_id { Text("来源：" + sourceID).textSelection(.enabled) }
+                    }
+                    if isOwner && displayed.sensitivity != "SECRET" {
+                        Picker("可见范围", selection: Binding(get: { visibility }, set: { selected in Task { await change(selected) } })) {
+                            Text("仅自己").tag("personal")
+                            Text("家庭所有成员").tag("family")
+                        }.disabled(saving)
+                    } else { LabeledContent("可见范围", value: displayed.isFamily ? "家庭所有成员" : "仅自己") }
+                    RecordPayloadView(payload: displayed.payload, excludedKeys: isFile || displayed.kind == "photo.selected" ? ["content_base64"] : [], onAttachment: { path in open(field: path) }, onText: { name, text in fullText = RecordTextContent(title: name, text: text) })
                 }
             }
+        }
+        .navigationTitle(unavailable ? "资料不可用" : displayed.title)
+        .onAppear { active = true; visibility = record.visibility ?? "personal" }
+        .task(id: record.id + ":" + String(record.version ?? 0)) { await loadDetails() }
+        .refreshable { await loadDetails() }
+        .sheet(item: $preview, onDismiss: { closePreview() }) { RecordFilePreview(item: $0) }
+        .sheet(item: $fullText) { RecordLongTextView(content: $0) }
+        .onDisappear { active = false; attachmentOperation?.cancel(); closePreview() }
+        .onChange(of: phase) { _, phase in if phase == .background { attachmentOperation?.cancel(); closePreview() } }
+        .onChange(of: state.dataEventRevision) { _, _ in Task { await loadDetails() } }
+        .onChange(of: state.connectionRevision) { _, _ in clearSensitiveDisplay() }
+        .onChange(of: state.connected) { _, connected in if !connected { clearSensitiveDisplay() } }
+    }
+
+    private func closePreview() { preview?.remove(); preview = nil; fullText = nil }
+    private func clearSensitiveDisplay() {
+        attachmentOperation?.cancel(); closePreview()
+        detail = nil; photo = nil; fileDetails = nil; unavailable = true
+    }
+    private func binaryKey(_ entry: DataEntry, field: String?) -> String {
+        "attachment:" + entry.id + ":" + String(entry.version ?? 0) + ":" + (field ?? "original")
+    }
+    private func apply(_ entry: DataEntry) {
+        detail = entry; visibility = entry.visibility ?? "personal"
+        if entry.kind == "photo.selected", let encoded = entry.payload["content_base64"]?.description,
+           let bytes = Data(base64Encoded: encoded), let image = RecordAttachment.image(bytes) { photo = image }
+        else { photo = nil }
+    }
+    private func deny(_ failure: Error) async {
+        error = failure.localizedDescription
+        if case APIClient.APIError.http(let code, _) = failure, [401, 403, 404, 409].contains(code) {
+            let previous = displayed
+            clearSensitiveDisplay()
+            if code == 409 { error = "原件已更新，旧解析正文已隐藏，请查看或重新解析原文件。" }
+            if let namespace {
+                await ClientViewCache.shared.remove(key: recordKey, namespace: namespace)
+                await ClientViewCache.shared.remove(key: "file-details:" + previous.id + ":" + String(previous.version ?? 0), namespace: namespace)
+                for field in Set(["original", "/content_base64"] + previous.payload.keys.filter { $0.hasSuffix("_base64") }.map { "/" + $0 }) {
+                    await ClientViewCache.shared.remove(key: "attachment:" + previous.id + ":" + String(previous.version ?? 0) + ":" + field, namespace: namespace)
+                }
             }
-        }.navigationTitle(unavailable ? "资料不可用" : record.title).onAppear { visibility = record.visibility ?? "personal" }
-            .task(id: record.id + ":" + String(record.version ?? 0)) { if record.payload_deferred == true { await loadDetails() } }
-            .onChange(of: state.dataEventRevision) { _, _ in Task { detail = nil; await loadDetails() } }
+        }
     }
     private func loadDetails() async {
         guard !loading else { needsRefresh = true; return }
         loading = true
         defer {
             loading = false
-            if needsRefresh && !Task.isCancelled && state.connected {
-                needsRefresh = false
-                Task { await loadDetails() }
+            if needsRefresh && !Task.isCancelled && state.connected && active {
+                needsRefresh = false; Task { await loadDetails() }
             }
         }
         let revision = state.dataEventRevision
+        let connection = state.connectionRevision
         do {
-            let namespace = try await state.api.syncNamespace()
-            let key = "record:" + record.id + ":" + String(record.version ?? 0)
-            if let cached = await ClientViewCache.shared.read(key: key, namespace: namespace), let value = try? JSONDecoder().decode(DataEntry.self, from: cached), await state.api.cachedNamespace() == namespace { detail = value }
-            let raw = try await state.api.request("GET", "/api/v1/data/" + record.id, expectedNamespace: namespace)
-            guard !Task.isCancelled, state.dataEventRevision == revision, await state.api.cachedNamespace() == namespace else { return }
-            detail = try JSONDecoder().decode(DataEntry.self, from: raw); error = nil; unavailable = false
-            try? await ClientViewCache.shared.write(raw, key: key, namespace: namespace)
-        } catch {
-            if case APIClient.APIError.http(let code, _) = error, [401, 403, 404].contains(code) {
-                detail = nil; unavailable = true
-                if let namespace = await state.api.cachedNamespace() {
-                    await ClientViewCache.shared.remove(key: "record:" + record.id + ":" + String(record.version ?? 0), namespace: namespace)
-                }
+            let current = try await state.api.syncNamespace(); namespace = current
+            if detail == nil, let cached = await ClientViewCache.shared.read(key: recordKey, namespace: current),
+               let value = try? JSONDecoder().decode(DataEntry.self, from: cached), await state.api.cachedNamespace() == current { apply(value) }
+            let raw = try await state.api.request("GET", "/api/v1/data/" + record.id, expectedNamespace: current)
+            guard active, !Task.isCancelled, state.dataEventRevision == revision, state.connectionRevision == connection, await state.api.cachedNamespace() == current else { return }
+            let complete = try JSONDecoder().decode(DataEntry.self, from: raw)
+            if let previous = detail?.version, previous != complete.version { closePreview(); fileDetails = nil }
+            apply(complete); error = nil; unavailable = false
+            try? await ClientViewCache.shared.write(raw, key: "record:" + complete.id + ":" + String(complete.version ?? 0), namespace: current)
+            if isFile {
+                let parsedKey = "file-details:" + complete.id + ":" + String(complete.version ?? 0)
+                if fileDetails == nil, let cached = await ClientViewCache.shared.read(key: parsedKey, namespace: current) { fileDetails = try? JSONDecoder().decode(FileDetails.self, from: cached) }
+                let parsed = try await state.api.request("GET", "/api/v1/files/" + complete.id + "/details", expectedNamespace: current)
+                guard active, !Task.isCancelled, state.dataEventRevision == revision, state.connectionRevision == connection, await state.api.cachedNamespace() == current else { return }
+                fileDetails = try JSONDecoder().decode(FileDetails.self, from: parsed)
+                try? await ClientViewCache.shared.write(parsed, key: parsedKey, namespace: current)
             }
-            self.error = error.localizedDescription
-        }
+        } catch { if !Task.isCancelled && state.connectionRevision == connection { await deny(error) } }
+    }
+    private func open(field: String? = nil) {
+        guard !attachmentBusy else { return }
+        attachmentOperation = Task { await openAttachment(field: field) }
+    }
+    private func openAttachment(field: String?) async {
+        attachmentBusy = true; defer { attachmentBusy = false }
+        let connection = state.connectionRevision
+        let revision = state.dataEventRevision
+        do {
+            let current = try await state.api.syncNamespace(); namespace = current
+            // 下载/导出前重新读取权限和版本，缓存不能替代服务器授权判断。
+            let raw = try await state.api.request("GET", "/api/v1/data/" + record.id, expectedNamespace: current)
+            let verified = try JSONDecoder().decode(DataEntry.self, from: raw)
+            guard active, !Task.isCancelled, state.connectionRevision == connection, state.dataEventRevision == revision, await state.api.cachedNamespace() == current else { return }
+            apply(verified)
+            let key = binaryKey(verified, field: field)
+            let data: Data
+            if let cached = await ClientViewCache.shared.read(key: key, namespace: current) { data = cached }
+            else if let field, let encoded = RecordAttachment.encodedValue(path: field, payload: verified.payload), let decoded = Data(base64Encoded: encoded) { data = decoded }
+            else { data = try await state.api.request("GET", "/api/v1/files/" + verified.id + "/content", expectedNamespace: current) }
+            guard data.count <= RecordAttachment.maximumBytes else { throw APIClient.APIError.message("附件超过当前客户端的 20 MB 预览限制") }
+            if field == nil, let expected = verified.payload["sha256"]?.description, expected.count == 64, DeviceIdentity.hash(data) != expected.lowercased() {
+                await ClientViewCache.shared.remove(key: key, namespace: current)
+                throw APIClient.APIError.message("文件完整性校验失败，请重新打开下载")
+            }
+            guard active, !Task.isCancelled, state.connectionRevision == connection, state.dataEventRevision == revision, await state.api.cachedNamespace() == current else { return }
+            try? await ClientViewCache.shared.write(data, key: key, namespace: current)
+            closePreview()
+            preview = try ProtectedRecordPreview(data: data, name: verified.payload["name"]?.description ?? verified.title, mime: verified.payload["mime_type"]?.description)
+        } catch { if !Task.isCancelled && state.connectionRevision == connection { await deny(error) } }
     }
     private func change(_ value: String) async {
         guard !saving else { return }; saving = true; defer { saving = false }

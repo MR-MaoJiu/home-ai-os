@@ -46,3 +46,47 @@ def persist(db, actor, source_id, source_version, result, app):
     from .visibility import change_record
     change_record(db,actor,record,source.visibility)
     return {'record_id': record.id, 'source_id': source.id, 'status': 'parsed', 'markdown': result['markdown']}
+
+
+def checked_payload(db, actor, record, vault, payload=None):
+    """完整解析正文必须仍对应当前可读的原件，不能把过期正文当作新版本。"""
+    if payload is None:payload = serialize(record, vault)['payload']
+    if record.kind == 'document.parsed' and record.source == 'document_parse':
+        source = read_record(db, actor, record.source_id)
+        if source.owner_id != record.owner_id or source.kind not in {'document.file', 'document.import'}:
+            raise HTTPException(404, '文档来源不可用')
+        if payload.get('source_version') != source.version:
+            raise HTTPException(409, '原文件已更新，解析正文需要重新生成；请查看原文件')
+    return payload
+
+
+def details(db, actor, identifier, app):
+    from .data import accessible
+    from .sync_order import lock_changes
+    lock_changes(db)
+    source = read_record(db, actor, identifier)
+    if source.kind not in {'document.file', 'document.import'}:
+        raise HTTPException(422, '此记录不是文档文件')
+    parsed = db.scalar(accessible(db, actor).where(Record.owner_id == source.owner_id,
+        Record.source == 'document_parse', Record.source_id == source.id, Record.kind == 'document.parsed'))
+    if parsed is None:
+        return {'record_id': source.id, 'parsed': None, 'parse_status': 'not_available'}
+    value=serialize(parsed,app.vault)
+    try:
+        checked_payload(db, actor, parsed, app.vault,value['payload'])
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            return {'record_id': source.id, 'parsed': None, 'parse_status': 'stale'}
+        raise
+    return {'record_id': source.id, 'parsed': value, 'parse_status': 'ready'}
+
+
+def content_type(contents, filename):
+    """实际文件签名优先；下载始终attachment，网页及脚本不以内联方式执行。"""
+    import mimetypes
+    if contents.startswith(b'\xff\xd8\xff'): return 'image/jpeg'
+    if contents.startswith(b'\x89PNG\r\n\x1a\n'): return 'image/png'
+    if contents.startswith((b'GIF87a', b'GIF89a')): return 'image/gif'
+    if contents.startswith(b'%PDF-'): return 'application/pdf'
+    if contents[:4] == b'RIFF' and contents[8:12] == b'WEBP': return 'image/webp'
+    return mimetypes.guess_type(filename)[0] or 'application/octet-stream'

@@ -158,7 +158,11 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     @app.get("/api/v1/data/{record_id}")
     def get_record(record_id: str, actor: Actor = auth):
         with app.state.db() as db:
-            return serialize(read_record(db, actor, record_id), v)
+            from .documents import checked_payload
+            record=read_record(db,actor,record_id)
+            value=serialize(record,v)
+            value['payload']=checked_payload(db,actor,record,v,value['payload'])
+            return value
 
     @app.delete("/api/v1/data/{record_id}")
     def delete_record(record_id: str, actor: Actor = auth):
@@ -221,6 +225,11 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             db.commit()
             return serialize(record, v)
 
+    @app.get("/api/v1/files/{record_id}/details")
+    def file_details(record_id: str, actor: Actor = auth):
+        from .documents import details
+        with app.state.db() as db:return details(db,actor,record_id,app.state)
+
     @app.get("/api/v1/files/{record_id}/content")
     def file_content(record_id: str, actor: Actor = auth):
         from fastapi.responses import Response
@@ -228,7 +237,7 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
         with app.state.db() as db:
             record = read_record(db, actor, record_id)
             metadata = serialize(record, v)['payload']
-            if record.kind == 'document.import':
+            if record.kind in {'document.import','photo.selected'}:
                 encoded = metadata.get('content_base64', '')
             elif record.kind == 'document.file':
                 path = settings.state_dir / 'blobs' / record.id
@@ -240,7 +249,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             if len(contents) > settings.max_upload_bytes: raise HTTPException(413, '文件超过限制')
             filename = metadata.get('name', 'attachment')
             filename = filename[:200] if isinstance(filename, str) else 'attachment'
-            return Response(contents, media_type='application/octet-stream', headers={'Content-Disposition': "attachment; filename*=UTF-8''" + quote(filename, safe=''), 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
+            from .documents import content_type
+            read_record(db,actor,record_id)
+            return Response(contents, media_type=content_type(contents,filename), headers={'Content-Disposition': "attachment; filename*=UTF-8''" + quote(filename, safe=''), 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
 
     @app.post("/api/v1/files/{record_id}/parse", status_code=202)
     def parse_file(record_id: str, actor: Actor = auth):
