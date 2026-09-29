@@ -248,7 +248,8 @@ extension ClientDisplayContractTests {
         let api = AppServices.api
         await api.restoreConnectionIfNeeded()
         let namespace = try await api.syncNamespace()
-        let conversations = try JSONDecoder().decode([StoredConversation].self, from: await api.request("GET", "/api/v1/conversations", expectedNamespace: namespace))
+        struct ConversationSummary: Decodable { let id: String }
+        let conversations = try JSONDecoder().decode([ConversationSummary].self, from: await api.request("GET", "/api/v1/conversations", expectedNamespace: namespace))
         let data = try JSONDecoder().decode(DataPage.self, from: await api.request("GET", "/api/v1/data", expectedNamespace: namespace))
         let memories = try JSONDecoder().decode([DataEntry].self, from: await api.request("GET", "/api/v1/memory/entries", expectedNamespace: namespace))
         XCTAssertTrue(memories.allSatisfy { $0.kind == "memory.fact" && !$0.isFamily })

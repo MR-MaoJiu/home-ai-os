@@ -9,6 +9,7 @@ struct Connection: Codable, Sendable {
     var expiresAt: Date
     var tlsKeyFingerprint: String? = nil
     var deviceID: String? = nil
+    var ownerID: String? = nil
     var serverID: String? = nil
     var serverPublicKey: String? = nil
     var namespaceAnchor: String? = nil
@@ -38,6 +39,9 @@ struct TaskStateEvent: Decodable, Sendable {
     let tasks: [Item]
     let has_more: Bool
     let notification_revision: String?
+    let data_revision: Int?
+    let memory_revision: Int?
+    let automation_revision: Int?
 }
 
 struct TaskEventSubscription: Sendable {
@@ -52,6 +56,10 @@ actor APIClient {
     private var session: URLSession?
     private var generation = UUID()
     private let renewalGate = AsyncOperationGate()
+    private let identityGate = AsyncOperationGate()
+    private var rejectedNamespace: String?
+    private var authorizationSerial = 0
+    private var authorizationFailureHandler: (@Sendable (String) async -> Void)?
     private var pairingAttempt = UUID()
     private let directGate = AsyncOperationGate()
     private var directPublicOnly = false
@@ -98,6 +106,7 @@ actor APIClient {
     }
 
     func pair(_ code: PairingCode) async throws {
+        rejectedNamespace = nil
         if let expires = code.expires_at, expires <= Date().timeIntervalSince1970 { throw APIError.message("配对二维码已过期，请在管理端重新生成") }
         if code.schema_version == "3.0" { try await pairRemote(code); return }
         let attempt = UUID()
@@ -361,28 +370,48 @@ actor APIClient {
         }
     }
 
-    func syncNamespace() async throws -> String {
-        if connection?.deviceID == nil {
-            let started = generation
-            struct Me: Decodable { let device_id: String }
-            let data = try await request("GET", "/api/v1/me")
-            guard started == generation else { throw APIError.message("连接已切换，请重试") }
-            connection?.deviceID = try JSONDecoder().decode(Me.self, from: data).device_id
-            try persist()
-        }
-        guard let saved = connection, let device = saved.deviceID else { throw APIError.message("请先配对") }
+    func pairedNamespace() -> String? {
+        guard let saved = connection, let device = saved.deviceID else { return nil }
         return DeviceIdentity.hash(Data((saved.namespaceIdentity + ":" + device).utf8))
     }
 
+    func cachedNamespace() -> String? {
+        guard rejectedNamespace == nil else { return nil }
+        return pairedNamespace()
+    }
+
+    func setAuthorizationFailureHandler(_ handler: @escaping @Sendable (String) async -> Void) {
+        authorizationFailureHandler = handler
+    }
+
+    func syncNamespace() async throws -> String {
+        if connection?.deviceID == nil || rejectedNamespace != nil { try await loadIdentityIfNeeded() }
+        guard let value = cachedNamespace() else { throw APIError.message("请先配对") }
+        return value
+    }
+
     struct OwnerIdentity: Sendable { let userID: String; let namespace: String }
+    func cachedOwnerIdentity(expectedNamespace: String) -> OwnerIdentity? {
+        guard cachedNamespace() == expectedNamespace, let saved = connection, let owner = saved.ownerID else { return nil }
+        return OwnerIdentity(userID: owner, namespace: DeviceIdentity.hash(Data((saved.namespaceIdentity + ":owner:" + owner).utf8)))
+    }
+
     func ownerIdentity(expectedNamespace: String) async throws -> OwnerIdentity {
+        if let cached = cachedOwnerIdentity(expectedNamespace: expectedNamespace) { return cached }
+        try await loadIdentityIfNeeded()
+        guard let cached = cachedOwnerIdentity(expectedNamespace: expectedNamespace) else { throw APIError.message("连接已切换") }
+        return cached
+    }
+
+    private func loadIdentityIfNeeded() async throws {
         let started = generation
-        struct Me: Decodable { let user_id: String }
-        let data = try await request("GET", "/api/v1/me", expectedNamespace: expectedNamespace)
-        let me = try JSONDecoder().decode(Me.self, from: data)
-        guard started == generation, let saved = connection else { throw APIError.message("连接已切换") }
-        let namespace = DeviceIdentity.hash(Data((saved.namespaceIdentity + ":owner:" + me.user_id).utf8))
-        return OwnerIdentity(userID: me.user_id, namespace: namespace)
+        try await identityGate.withPermit { try await self.fetchIdentityIfNeeded(generation: started) }
+    }
+
+    private func fetchIdentityIfNeeded(generation started: UUID) async throws {
+        guard started == generation else { throw APIError.message("连接已切换") }
+        if connection?.ownerID != nil, connection?.deviceID != nil, rejectedNamespace == nil { return }
+        _ = try await request("GET", "/api/v1/me")
     }
 
     private func persist() throws {
@@ -390,24 +419,53 @@ actor APIClient {
     }
 
     func request(_ method: String, _ path: String, body: Data? = nil, expectedNamespace: String? = nil, contentType: String = "application/json") async throws -> Data {
-        if let expectedNamespace {
-            guard let saved = connection, let device = saved.deviceID,
-                  DeviceIdentity.hash(Data((saved.namespaceIdentity + ":" + device).utf8)) == expectedNamespace else {
-                throw APIError.message("同步连接已切换，请重新开始")
-            }
-        }
+        if let expectedNamespace, pairedNamespace() != expectedNamespace { throw APIError.message("同步连接已切换，请重新开始") }
         let started = generation
-        if connection?.prefersDirect == true {
-            try await directGate.withPermit { try await self.reconnectDirectIfNeeded() }
-            guard started == generation else { throw APIError.message("直连恢复期间身份已变化") }
+        let namespace = pairedNamespace()
+        let authorizationAtStart = authorizationSerial
+        do {
+            if connection?.prefersDirect == true {
+                try await directGate.withPermit { try await self.reconnectDirectIfNeeded() }
+                guard started == generation else { throw APIError.message("直连恢复期间身份已变化") }
+            }
+            guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对家庭服务器") }
+            if saved.expiresAt.timeIntervalSinceNow < 60 && path != "/api/v1/session/renew" {
+                saved = try await renewalGate.withPermit { try await self.renewIfNeeded(generation: started) }
+            }
+            let data: Data
+            do {
+                data = try await send(method, path, body: body, token: saved.token, base: base, session: session, expectedGeneration: started, contentType: contentType)
+            } catch APIError.http(401, _) where path != "/api/v1/session/renew" {
+                // 401 表示认证阶段已拒绝，刷新一次后重试；业务 403 不撤销设备身份。
+                let rejectedToken = saved.token
+                saved = try await renewalGate.withPermit { try await self.renewRejectedAccess(token: rejectedToken, generation: started) }
+                data = try await send(method, path, body: body, token: saved.token, base: base, session: session, expectedGeneration: started, contentType: contentType)
+            }
+            guard started == generation else { throw APIError.message("连接已切换，请重试") }
+            guard authorizationAtStart == authorizationSerial else { throw APIError.message("授权状态已变化，请重新验证") }
+            if method == "GET", path == "/api/v1/me" {
+                struct Me: Decodable { let user_id: String; let device_id: String }
+                let verified = try JSONDecoder().decode(Me.self, from: data)
+                connection?.ownerID = verified.user_id
+                connection?.deviceID = verified.device_id
+                rejectedNamespace = nil
+                if let verifiedNamespace = pairedNamespace() { await ClientViewCache.shared.authorize(namespace: verifiedNamespace) }
+                try persist()
+            }
+            return data
+        } catch {
+            if started == generation, case APIError.http(let code, _) = error, Self.invalidatesCredentials(status: code), let namespace {
+                let firstRejection = rejectedNamespace != namespace
+                rejectedNamespace = namespace
+                if firstRejection { authorizationSerial += 1 }
+                connection?.ownerID = nil
+                try? persist()
+                await ClientViewCache.shared.invalidate(namespace: namespace, revoked: true)
+                await DeviceDataSync().invalidate(namespace: namespace)
+                if firstRejection { await authorizationFailureHandler?(namespace) }
+            }
+            throw error
         }
-        guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对家庭服务器") }
-        if saved.expiresAt.timeIntervalSinceNow < 60 && path != "/api/v1/session/renew" {
-            saved = try await renewalGate.withPermit { try await self.renewIfNeeded(generation: started) }
-        }
-        let data = try await send(method, path, body: body, token: saved.token, base: base, session: session, expectedGeneration: started, contentType: contentType)
-        guard started == generation else { throw APIError.message("连接已切换，请重试") }
-        return data
     }
 
     /// 前台状态流只推送标识与进度，业务结果必须继续调用鉴权接口。
@@ -508,6 +566,14 @@ actor APIClient {
         let record = try JSONDecoder().decode(Identifier.self, from: await request("POST", "/api/v1/files", body: body, expectedNamespace: namespace, contentType: "multipart/form-data; boundary=\(boundary)"))
         let task = try JSONDecoder().decode(Identifier.self, from: await request("POST", "/api/v1/files/\(record.id)/parse", expectedNamespace: namespace))
         return task.id
+    }
+
+    nonisolated static func invalidatesCredentials(status: Int) -> Bool { status == 401 }
+
+    private func renewRejectedAccess(token: String, generation started: UUID) async throws -> Connection {
+        guard started == generation else { throw APIError.message("连接已切换") }
+        if connection?.token == token { connection?.expiresAt = .distantPast }
+        return try await renewIfNeeded(generation: started)
     }
 
     private func renewIfNeeded(generation started: UUID) async throws -> Connection {

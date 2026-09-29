@@ -179,6 +179,9 @@ class TaskState(Contract):
 
 
 class TaskStateNotification(Contract):
+    data_revision: int | None = None
+    memory_revision: int | None = None
+    automation_revision: int | None = None
     notification_revision: str | None = None
     schema_version: Literal['1.0'] = '1.0'
     type: Literal['task.snapshot', 'heartbeat']

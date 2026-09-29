@@ -415,3 +415,9 @@ class PushDelivery(Owned, Base):
     retry_at: Mapped[float] = mapped_column(default=0)
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
     accepted_at: Mapped[float | None] = mapped_column(nullable=True)
+
+
+class DefaultConversation(Owned, Base):
+    __tablename__ = 'default_conversations'
+    __table_args__ = (UniqueConstraint('owner_id'),)
+    conversation_id: Mapped[str] = mapped_column(String)

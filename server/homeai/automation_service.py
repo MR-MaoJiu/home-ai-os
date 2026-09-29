@@ -6,9 +6,9 @@ from uuid import uuid5,NAMESPACE_URL
 from croniter import croniter
 from fastapi import HTTPException
 from sqlalchemy import select,or_
-from .db import Automation,AutomationDelivery,Device,Task,uid,now,scope
+from .db import Automation,AutomationDelivery,Device,Task,Principal,uid,now,scope
 from .security import Actor
-from .data import audit
+from .data import audit,emit
 
 
 def executor(db,actor):
@@ -18,6 +18,14 @@ def executor(db,actor):
         db.add(Device(id=identifier,user_id=actor.user_id,public_key='',name='服务端自动化执行器'));db.flush()
     elif device.revoked:raise HTTPException(403,'服务端自动化执行身份已撤销')
     return Actor(actor.user_id,actor.household_id,identifier,actor.role)
+
+
+def changed(db,actor,rule):
+    emit(db,actor,'automation.updated',rule.id)
+    if rule.visibility=='family':
+        from .sync_order import notify_recipients
+        members=list(db.scalars(select(Principal.id).where(Principal.household_id==actor.household_id)))
+        notify_recipients(db,actor,'automation.updated',rule.id,members)
 
 
 def create(app,db,actor,args,identifier=None):
@@ -35,7 +43,7 @@ def create(app,db,actor,args,identifier=None):
     row=db.get(Automation,identifier)
     if row:return row
     row=Automation(id=identifier,owner_id=actor.user_id,household_id=actor.household_id,name=name,cron=expression,timezone=zone,visibility=visibility,enabled=True,next_run=next_run,skill=app.vault.seal({'device_id':actor.device_id,'steps':[]},actor.user_id+':automation:'+identifier),instruction=app.vault.seal(instruction,actor.user_id+':automation-instruction:'+identifier))
-    db.add(row);audit(db,actor,'automation.create',identifier,{'visibility':visibility});db.flush()
+    db.add(row);audit(db,actor,'automation.create',identifier,{'visibility':visibility});changed(db,actor,row);db.flush()
     return row
 
 

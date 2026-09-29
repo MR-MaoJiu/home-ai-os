@@ -57,6 +57,42 @@
   },
   "additionalProperties": false,
   "properties": {
+    "data_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Data Revision"
+    },
+    "memory_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Memory Revision"
+    },
+    "automation_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Automation Revision"
+    },
     "notification_revision": {
       "anyOf": [
         {

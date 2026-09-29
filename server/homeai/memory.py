@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, delete, text
 from .db import MemoryCandidate, MemoryVector, DerivedJob, Record, uid, scope, now
 from .security import Actor, authenticate, own
-from .data import read_record, ingest, serialize, audit, accessible
+from .data import read_record, ingest, serialize, audit, accessible, emit
 from .contracts import DataRecord
 
 router = APIRouter(prefix='/api/v1/memory', tags=['记忆'])
@@ -38,6 +38,7 @@ def confirm(candidate_id: str, decision: str, request: Request, actor: Actor = D
         if decision not in {'confirm','reject'}:raise HTTPException(422,'无效决定')
         if decision=='reject':
             item.status='REJECTED'
+            emit(db,actor,'memory.updated',item.id)
             item.content=request.app.state.vault.seal('',actor.user_id+':candidate:'+item.id)
             db.commit()
             return {'status':'REJECTED'}
@@ -169,7 +170,7 @@ def create_chat_candidate(app,db,actor,conversation_id,turn_id,content,identifie
     old=db.get(MemoryCandidate,identifier)
     if old:return old
     row=MemoryCandidate(id=identifier,household_id=actor.household_id,owner_id=actor.user_id,conversation_id=conversation.id,turn_id=turn.id,source_ids='[]',content=app.vault.seal(content,actor.user_id+':candidate:'+identifier))
-    db.add(row);audit(db,actor,'memory.chat_candidate',row.id);db.flush()
+    db.add(row);audit(db,actor,'memory.chat_candidate',row.id);emit(db,actor,'memory.updated',row.id);db.flush()
     return row
 
 @router.post('/from-conversation')

@@ -5,7 +5,14 @@ import UIKit
 @MainActor @Observable
 final class AppState {
     let api: APIClient
-    init(api: APIClient = AppServices.api) { self.api = api }
+    init(api: APIClient = AppServices.api) {
+        self.api = api
+        Task { [weak self] in
+            await api.setAuthorizationFailureHandler { [weak self] namespace in
+                await self?.invalidateAuthorization(namespace: namespace)
+            }
+        }
+    }
 
     enum PairingFeedback: Equatable {
         case idle, connecting, success, failure(String)
@@ -91,6 +98,25 @@ final class AppState {
         }
     }
     private let dataSync = DeviceDataSync()
+    private struct AutomationRefresh: Sendable { let entries: [AutomationEntry]; let startedAt: Date }
+    private let automationWork = SharedClientOperation<AutomationRefresh>()
+    private var dataInvalidatedAt = Date.distantPast
+    private var automationInvalidatedAt = Date.distantPast
+    private var dataFollowup: Task<Void, Never>?
+    private var automationFollowup: Task<Void, Never>?
+    private var foregroundRun: Task<Void, Never>?
+    private var recordsNamespace: String?
+    private var lastDataSync: Date?
+    private var lastAutomationSync: Date?
+    private var automationsNamespace: String?
+    private var invalidatedNamespace: String?
+    private var dataRevision: Int?
+    private var memoryRevision: Int?
+    private var automationRevision: Int?
+    var dataEventRevision = UUID()
+    var memoryEventRevision = UUID()
+    var automationEventRevision = UUID()
+    var automationStatus = ""
     var syncStatus = ""
     var backgroundSyncStatus = ""
     var systemReminderStatus = ""
@@ -162,6 +188,24 @@ final class AppState {
                                 self.notificationRevision = event.notification_revision
                                 self.taskEventRevision = UUID()
                             }
+                            let dataChanged = self.dataRevision != nil && self.dataRevision != event.data_revision
+                            let memoryChanged = self.memoryRevision != nil && self.memoryRevision != event.memory_revision
+                            let automationChanged = self.automationRevision != nil && self.automationRevision != event.automation_revision
+                            self.dataRevision = event.data_revision
+                            self.memoryRevision = event.memory_revision
+                            self.automationRevision = event.automation_revision
+                            if dataChanged {
+                                self.dataInvalidatedAt = Date()
+                                await ClientViewCache.shared.invalidate(namespace: namespace)
+                                self.dataEventRevision = UUID()
+                                Task { try? await self.loadData(force: true) }
+                            }
+                            if memoryChanged { self.memoryEventRevision = UUID() }
+                            if automationChanged {
+                                self.automationInvalidatedAt = Date()
+                                self.automationEventRevision = UUID()
+                                Task { try? await self.loadAutomations(force: true) }
+                            }
                             self.taskEventStatus = event.has_more ? "显示最近 100 个任务状态" : "任务状态已连接"
                             retries = 0
                         }
@@ -180,7 +224,7 @@ final class AppState {
                         self.serverReachable = true
                         await self.confirmConnectionRecovered()
                     }
-                    catch let APIClient.APIError.http(code, _) where code == 401 || code == 403 {
+                    catch let APIClient.APIError.http(code, _) where code == 401 {
                         self.connected = false
                         self.activity = []; self.approvals = []; self.taskStates = []
                         self.taskEventStatus = "授权已失效，请重新配对"
@@ -201,15 +245,42 @@ final class AppState {
     }
 
     func resumeForeground() async {
+        if let foregroundRun { await foregroundRun.value; return }
+        let operation = Task { [weak self] in await self?.performForegroundRefresh() }
+        let task = Task { _ = await operation.value }
+        foregroundRun = task
+        await task.value
+        foregroundRun = nil
+    }
+
+    private func performForegroundRefresh() async {
         guard pairingFeedback != .connecting else { return }
         await restore()
         guard connected, UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else { return }
         startForegroundEvents()
-        await ClientNotifications.shared.synchronize(api: api)
+        // 缓存和资料同步不等待 APNs 注册，避免无关网络请求拖住首屏。
+        let notification = Task { await ClientNotifications.shared.synchronize(api: api) }
         do { try await loadData() }
         catch is CancellationError { }
         catch let error as URLError where error.code == .cancelled { }
-        catch { if syncStatus != "授权已失效" { syncStatus = "同步未完成，可下拉重试" } }
+        catch { if syncStatus != "授权已失效" { syncStatus = records.isEmpty ? "同步未完成，可下拉重试" : "显示缓存，更新未完成" } }
+        await notification.value
+    }
+
+    func invalidateAuthorization(namespace: String) async {
+        guard await api.pairedNamespace() == namespace else { return }
+        records = []; automations = []; activity = []; approvals = []; taskStates = []
+        dataFollowup?.cancel(); dataFollowup = nil
+        automationFollowup?.cancel(); automationFollowup = nil
+        recordsNamespace = nil; lastDataSync = nil; lastAutomationSync = nil; automationsNamespace = nil
+        connected = false; serverReachable = false; syncStatus = "授权已失效"
+        if invalidatedNamespace != namespace {
+            invalidatedNamespace = namespace
+            connectionRevision = UUID()
+        }
+        await dataSync.invalidate(namespace: namespace)
+        await ClientViewCache.shared.invalidate(namespace: namespace)
+        await stopForegroundEvents()
     }
 
     func refreshInBackground() async {
@@ -222,12 +293,13 @@ final class AppState {
             await self.restore()
             guard self.connected, !Task.isCancelled else { return }
             do {
+                let namespace = try await self.api.syncNamespace()
                 let result = try await self.dataSync.synchronize(api: self.api)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, await self.api.cachedNamespace() == namespace else { return }
                 self.records = result.records
                 self.backgroundSyncStatus = result.offline ? "网络不可用，保留缓存等待下次同步" : "后台同步已完成"
             } catch {
-                if case APIClient.APIError.http(let code, _) = error, [401, 403].contains(code) {
+                if case APIClient.APIError.http(let code, _) = error, code == 401 {
                     self.records = []
                     self.connected = false
                     _ = BackgroundSync.schedule(enabled: false)
@@ -249,14 +321,35 @@ final class AppState {
         catch { self.error = error.localizedDescription }
     }
 
-    func loadData() async throws {
+    func loadData(force: Bool = false) async throws {
+        let namespace = try await api.syncNamespace()
+        if recordsNamespace != namespace {
+            records = []; recordsNamespace = namespace; lastDataSync = nil
+            if let cached = await dataSync.cachedSnapshot(api: api), await api.cachedNamespace() == namespace {
+                records = cached.records; syncStatus = "显示本机缓存，正在检查更新"
+            }
+        }
+        if !force, let lastDataSync, Date().timeIntervalSince(lastDataSync) < 3 { return }
         do {
-            let result = try await dataSync.synchronize(api: api)
+            var result = try await dataSync.synchronize(api: api)
+            // 合并的工作可能早于刚收到的失效事件，结束后必须追补一次。
+            if !result.offline, (result.startedAt ?? .distantPast) < dataInvalidatedAt {
+                result = try await dataSync.synchronize(api: api)
+            }
+            guard !Task.isCancelled, await api.cachedNamespace() == namespace else { return }
+            if !result.offline, (result.startedAt ?? .distantPast) < dataInvalidatedAt, dataFollowup == nil {
+                dataFollowup = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                    self?.dataFollowup = nil
+                    try? await self?.loadData(force: true)
+                }
+            }
             records = result.records
+            if !result.offline { lastDataSync = Date(); invalidatedNamespace = nil }
             syncStatus = result.offline ? "离线：显示上次同步缓存" : "已完成增量同步"
-
         } catch let APIClient.APIError.http(code, message) {
-            if [401, 403].contains(code) { records = []; connected = false; syncStatus = "授权已失效" }
+            if code == 401 { await invalidateAuthorization(namespace: namespace) }
+            else if code == 403 { records = []; syncStatus = "当前资料访问被拒绝" }
             throw APIClient.APIError.http(code, message)
         }
     }
@@ -272,9 +365,46 @@ final class AppState {
         activity = entries
         approvals = pending
     }
-    func loadAutomations() async throws {
-        let data = try await api.request("GET", "/api/v1/automations")
-        automations = try JSONDecoder().decode([AutomationEntry].self, from: data)
+    private func refreshAutomations(namespace: String) async throws -> AutomationRefresh {
+        try await automationWork.run(key: namespace) {
+            let startedAt = Date()
+            let data = try await self.api.request("GET", "/api/v1/automations", expectedNamespace: namespace)
+            let decoded = try JSONDecoder().decode([AutomationEntry].self, from: data)
+            guard await self.api.cachedNamespace() == namespace else { throw APIClient.APIError.message("连接已切换") }
+            try? await ClientViewCache.shared.write(data, key: "automations", namespace: namespace)
+            return AutomationRefresh(entries: decoded, startedAt: startedAt)
+        }
+    }
+
+    func loadAutomations(force: Bool = false) async throws {
+        let namespace = try await api.syncNamespace()
+        if automationsNamespace != namespace { automations = []; automationsNamespace = namespace; lastAutomationSync = nil }
+        if automations.isEmpty, let cached = await ClientViewCache.shared.read(key: "automations", namespace: namespace),
+           let values = try? JSONDecoder().decode([AutomationEntry].self, from: cached), await api.cachedNamespace() == namespace {
+            automations = values; automationStatus = "显示缓存，正在检查更新"
+        }
+        if !force, let lastAutomationSync, Date().timeIntervalSince(lastAutomationSync) < 3 { return }
+        do {
+            var result = try await refreshAutomations(namespace: namespace)
+            if result.startedAt < automationInvalidatedAt { result = try await refreshAutomations(namespace: namespace) }
+            guard !Task.isCancelled, await api.cachedNamespace() == namespace else { return }
+            if result.startedAt < automationInvalidatedAt, automationFollowup == nil {
+                automationFollowup = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                    self?.automationFollowup = nil
+                    try? await self?.loadAutomations(force: true)
+                }
+            }
+            automations = result.entries; lastAutomationSync = Date(); automationStatus = ""
+        } catch {
+            if case APIClient.APIError.http(let code, _) = error, code == 401 { await invalidateAuthorization(namespace: namespace) }
+            else if case APIClient.APIError.http(403, _) = error {
+                automations = []
+                await ClientViewCache.shared.remove(key: "automations", namespace: namespace)
+                automationStatus = "当前自动化访问被拒绝"
+            } else if !automations.isEmpty { automationStatus = "显示缓存，更新未完成" }
+            throw error
+        }
     }
 }
 
@@ -288,6 +418,7 @@ struct DataEntry: Codable, Identifiable, Sendable {
     let source_id: String?
     let cloud_policy: String?
     let visibility: String?
+    let payload_deferred: Bool?
     var isFamily: Bool { visibility == "family" }
     let payload: [String: JSONValue]
     var title: String { payload["title"]?.description ?? payload["name"]?.description ?? kind }
@@ -295,7 +426,7 @@ struct DataEntry: Codable, Identifiable, Sendable {
 struct DataPage: Decodable { let records: [DataEntry] }
 struct ActivityEntry: Decodable, Identifiable { let id: String; let action: String; let resource_id: String; let created_at: Double }
 struct ActivityPage: Decodable { let entries: [ActivityEntry] }
-struct AutomationEntry: Decodable, Identifiable {
+struct AutomationEntry: Codable, Identifiable, Sendable {
     let id: String
     let name: String
     let cron: String
@@ -312,7 +443,7 @@ struct AutomationEntry: Decodable, Identifiable {
         return ["record.changed": "数据新增或更新", "record.deleted": "数据删除", "record.revoked": "共享授权撤回"][event_type ?? ""] ?? "数据事件"
     }
 }
-struct ApprovalEntry: Decodable, Identifiable { let id: String; let task_id: String?; let capability: String; let arguments: [String: JSONValue] }
+struct ApprovalEntry: Codable, Identifiable, Sendable { let id: String; let task_id: String?; let capability: String; let arguments: [String: JSONValue] }
 
 indirect enum JSONValue: Codable, Sendable, CustomStringConvertible {
     case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null

@@ -110,3 +110,27 @@ def test_real_agent_skill_household_policy():
         try:test_instruction_skill_scope_and_disable((app,client,app.state.db),alice)
         finally:alice.request('DELETE','/api/v1/devices/'+alice.device_id)
     app.state.db.kw['bind'].dispose()
+
+
+def test_default_conversation_concurrent_devices():
+    from concurrent.futures import ThreadPoolExecutor
+    from homeai.db import DefaultConversation
+    settings=Settings();settings.database_url=settings.database_url.rsplit('/',1)[0]+'/homeai_test'
+    app=create_app(settings)
+    with TestClient(app) as client:
+        user=SignedClient(client,app.state.db,household=str(uuid.uuid4()))
+        try:
+            def request_default(_):
+                response=user.request('POST','/api/v1/conversations/default')
+                assert response.status_code==200,response.text
+                return response.json()['id']
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                ids=list(executor.map(request_default,range(12)))
+            assert len(set(ids))==1
+            with app.state.db() as db:
+                assert db.scalar(select(DefaultConversation).where(DefaultConversation.owner_id==user.user_id)) is None
+                principal=db.get(__import__('homeai.db',fromlist=['Principal']).Principal,user.user_id)
+                scope(db,user.user_id,principal.household_id)
+                assert db.scalar(select(DefaultConversation).where(DefaultConversation.owner_id==user.user_id)).conversation_id==ids[0]
+        finally:user.request('DELETE','/api/v1/devices/'+user.device_id)
+    app.state.db.kw['bind'].dispose()

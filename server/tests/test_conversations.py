@@ -86,3 +86,47 @@ def test_intent_is_orchestrated_by_server_and_history_is_available(system,alice)
     page=alice.request('GET','/api/v1/conversations/'+first.json()['conversation_id']).json()
     assert page['turns'][0]['task_id']==first.json()['id']
     assert alice.request('POST','/api/v1/conversations/'+first.json()['conversation_id']+'/messages',{'client_key':str(uuid.uuid4()),'content':'x','timezone':'not/a/zone'}).status_code==422
+
+
+def test_default_conversation_reuses_existing_and_stays_stable(system,alice):
+    previous=new_chat(alice)
+    first=send(alice,previous,'已有内容').json()
+    finish(system,alice,first['task_id'],'已有回答')
+    result=alice.request('POST','/api/v1/conversations/default')
+    assert result.status_code==200,result.text
+    assert result.json()['id']==previous
+    new_chat(alice)  # 旧接口保留的其他会话不会替换持续会话。
+    assert alice.request('POST','/api/v1/conversations/default').json()['id']==previous
+    bob=SignedClient(system[1],system[2])
+    assert bob.request('POST','/api/v1/conversations/default').json()['id']!=previous
+
+
+def test_chat_incremental_updates_and_permission_reset(system,alice):
+    from homeai.data import emit
+    identifier=alice.request('POST','/api/v1/conversations/default').json()['id']
+    first=send(alice,identifier,'第一轮').json()
+    page=alice.request('GET','/api/v1/conversations/'+identifier).json()
+    url=f"/api/v1/conversations/{identifier}/updates?after=1&etag={page['etag']}"
+    unchanged=alice.request('GET',url).json()
+    assert unchanged['unchanged'] and not unchanged['reset'] and unchanged['turns']==[]
+    finish(system,alice,first['task_id'],'完成回答')
+    with system[2]() as db:
+        scope(db,alice.user_id,'h1');emit(db,Actor(alice.user_id,'h1',alice.device_id,'adult'),'task.updated',first['task_id']);db.commit()
+    updated=alice.request('GET',url).json()
+    assert updated['turns'][0]['assistant_text']=='完成回答' and not updated['reset']
+    # 权限或来源数据变更必须令整个旧聊天缓存失效，包括不在最近40轮的页。
+    put(alice,record(source_id='changed-source'))
+    invalidated=alice.request('GET',f"/api/v1/conversations/{identifier}/updates?after=1&etag={updated['etag']}").json()
+    assert invalidated['reset'] and invalidated['turns']==[]
+    bob=SignedClient(system[1],system[2])
+    assert bob.request('GET',url).status_code==404
+
+
+def test_reminder_intents_append_to_default_chat(system,alice):
+    identifier=alice.request('POST','/api/v1/conversations/default').json()['id']
+    body={'idempotency_key':str(uuid.uuid4()),'title':'持续会话提醒'}
+    first=alice.request('POST','/api/v1/input/reminder',body)
+    assert first.status_code==202,first.text
+    assert first.json()['conversation_id']==identifier
+    assert alice.request('POST','/api/v1/input/reminder',body).json()==first.json()
+    assert len(alice.request('GET','/api/v1/conversations/'+identifier).json()['turns'])==1

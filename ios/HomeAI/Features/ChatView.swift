@@ -1,9 +1,8 @@
 import SwiftUI
 
-struct StoredConversation: Decodable, Identifiable { let id: String; let title: String; let updated_at: Double }
-struct ChatWebSource: Decodable { let title: String; let url: String }
-struct ChatRecordSource: Decodable { let record_id: String; let title: String; let version: Int? }
-struct StoredChatTurn: Decodable, Identifiable {
+struct ChatWebSource: Codable { let title: String; let url: String }
+struct ChatRecordSource: Codable { let record_id: String; let title: String; let version: Int? }
+struct StoredChatTurn: Codable, Identifiable {
     let id: String
     let sequence: Int
     let client_key: String
@@ -23,6 +22,34 @@ struct StoredConversationPage: Decodable {
     let turns: [StoredChatTurn]
     let has_more: Bool
     let next_before: Int?
+    let etag: String?
+}
+struct StoredConversationUpdates: Decodable {
+    let turns: [StoredChatTurn]
+    let etag: String
+    let reset: Bool
+    let unchanged: Bool
+}
+struct ChatSnapshot: Codable {
+    let conversationID: String
+    let ownerNamespace: String
+    let turns: [StoredChatTurn]
+    let before: Int?
+    let etag: String?
+    let after: Int
+
+    /// 更新相同轮次可替换处理中状态和已撤权的旧回答，不重复添加消息。
+    static func merge(_ current: [StoredChatTurn], updates: [StoredChatTurn]) -> [StoredChatTurn] {
+        var values = Dictionary(current.map { ($0.id, $0) }, uniquingKeysWith: { _, newest in newest })
+        for turn in updates { values[turn.id] = turn }
+        return values.values.sorted { $0.sequence < $1.sequence }
+    }
+    var bounded: ChatSnapshot {
+        let recent = Array(turns.suffix(200))
+        return ChatSnapshot(conversationID: conversationID, ownerNamespace: ownerNamespace, turns: recent,
+                            before: recent.count < turns.count ? recent.first?.sequence : before,
+                            etag: etag, after: after)
+    }
 }
 struct PendingChatSend: Codable {
     let conversationID: String
@@ -38,13 +65,18 @@ struct ChatView: View {
     @State private var namespace: String?
     @State private var ownerNamespace = ""
     @State private var selected: String?
-    @State private var conversations: [StoredConversation] = []
     @State private var turns: [StoredChatTurn] = []
     @State private var pendingApprovals: [ApprovalEntry] = []
-    @State private var showHistory = false
-    @State private var historyHasMore = false
-    @State private var loadingHistory = false
-    @State private var loading = false
+    @State private var olderRun: UUID?
+    @State private var etag: String?
+    @State private var after = 0
+    @State private var defaultResolved = false
+    @State private var notice: String?
+    @State private var refreshRun: UUID?
+    @State private var refreshRequested = false
+    @State private var trailingRefresh: Task<Void, Never>?
+    @State private var isVisible = true
+    @State private var viewGeneration = UUID()
     @State private var bootstrapRun: UUID?
     @State private var sending = false
     @State private var error: String?
@@ -53,24 +85,27 @@ struct ChatView: View {
     @State private var voice = VoiceCapture()
     @State private var router = IntentRouter.shared
     private var pendingKey: String { "chat.pending:" + ownerNamespace }
-    private var selectedKey: String { "chat.selected:" + ownerNamespace }
+    private let cacheKey = "chat.default"
+    private var loading: Bool { refreshRun != nil }
+    private var loadingOlder: Bool { olderRun != nil }
     private var running: Bool { turns.contains { $0.pending } }
 
     var body: some View {
         VStack(spacing: 0) {
             if let error { Text(error).foregroundStyle(.red).font(.caption).padding() }
+            if let notice { Text(notice).foregroundStyle(.secondary).font(.caption).padding(.horizontal) }
             if (loading || bootstrapRun != nil) && turns.isEmpty { ProgressView("正在读取服务端会话历史…").padding() }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
-                        if let before { Button("加载更早消息") { Task { await loadOlder(before) } } }
+                        if let before { Button(loadingOlder ? "正在加载…" : "加载更早消息") { Task { await loadOlder(before) } }.disabled(loadingOlder) }
                         if turns.isEmpty && !loading && bootstrapRun == nil { ContentUnavailableView("你的家庭助手", systemImage: "house.and.flag", description: Text("直接提问即可。服务端保存对话，并按需要检索资料、联网搜索和调用工具。")) }
                         ForEach(turns) { turn in turnCard(turn).id(turn.id) }
                         let visibleIDs = Set(turns.flatMap { $0.approvals.map(\.id) })
                         ForEach(pendingApprovals.filter { !visibleIDs.contains($0.id) }) { approval in approvalCard(approval) }
                     }.padding()
                 }
-                .onChange(of: turns.count) { _, _ in if let last = turns.last { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onChange(of: turns.last?.id) { _, _ in if let last = turns.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
             HStack(alignment: .bottom) {
                 Button { Task { await voiceInput() } } label: { Image(systemName: voice.recording ? "stop.circle.fill" : "mic.circle").font(.title) }
@@ -78,24 +113,23 @@ struct ChatView: View {
                     .accessibilityLabel(voice.recording ? "结束录音" : "语音输入")
                 TextField("问问 Home AI", text: $input, axis: .vertical).disabled(sending || voice.recording).lineLimit(1...6).padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 18))
                 Button { Task { await send() } } label: { Image(systemName: "arrow.up.circle.fill").font(.largeTitle) }
-                    .disabled(sending || running || namespace == nil || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(sending || running || namespace == nil || ownerNamespace.isEmpty || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("发送消息")
             }.padding()
         }
         .navigationTitle("Home AI")
-        .toolbar {
-            Button("历史对话", systemImage: "clock") { showHistory = true }.disabled(namespace == nil)
-            Button("新对话", systemImage: "square.and.pencil") { Task { await startNew() } }.disabled(namespace == nil || sending)
+        .onAppear { isVisible = true; viewGeneration = UUID() }
+        .onDisappear {
+            isVisible = false; viewGeneration = UUID(); bootstrapRun = nil
+            refreshRequested = false; refreshRun = nil; olderRun = nil
+            trailingRefresh?.cancel(); trailingRefresh = nil
         }
-        .sheet(isPresented: $showHistory) {
-            NavigationStack {
-                List {
-                    ForEach(conversations) { conversation in
-                        Button(conversation.title) { showHistory = false; Task { await choose(conversation.id) } }
-                    }
-                    if historyHasMore { Button("加载更多对话") { Task { await loadMoreConversations() } }.disabled(loadingHistory) }
-                }.navigationTitle("服务端历史对话")
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { showHistory = false } } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 6) {
+                    Circle().fill(state.connected && state.serverReachable ? Color.green : Color.gray).frame(width: 7, height: 7)
+                    Text(state.connected ? (state.serverReachable ? "在线" : "未连接") : "未配对").font(.caption)
+                }.accessibilityElement(children: .combine).accessibilityIdentifier("serverConnectionStatus")
             }
         }
         .task(id: "\(state.connected)-\(state.connectionRevision)") { await bootstrap() }
@@ -108,7 +142,15 @@ struct ChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await bootstrap() } } }
         .onChange(of: state.taskEventRevision) { _, _ in Task { await refresh() } }
-        .onChange(of: router.conversationID) { _, id in if let id { Task { await choose(id) } } }
+        .onChange(of: state.dataEventRevision) { _, _ in Task { await refresh() } }
+        .onChange(of: router.conversationID) { _, id in
+            guard id != nil else { return }
+            handleConversationRoute()
+            Task { await refresh() }
+        }
+        .onChange(of: state.serverReachable) { _, online in
+            if online && bootstrapRun == nil { Task { await bootstrap() } }
+        }
     }
 
     @ViewBuilder private func turnCard(_ turn: StoredChatTurn) -> some View {
@@ -147,124 +189,217 @@ struct ChatView: View {
         }.padding().background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
     }
     private func bootstrap() async {
-        guard state.connected else { namespace = nil; turns = []; conversations = []; bootstrapRun = nil; return }
+        guard state.connected else { clearView(); return }
         let run = UUID(); bootstrapRun = run; error = nil
         defer { if bootstrapRun == run { bootstrapRun = nil } }
+        // 先读取与已配对身份绑定的加密快照，网络重连不会清空现有对话。
+        if let local = await state.api.cachedNamespace() {
+            guard !Task.isCancelled, bootstrapRun == run else { return }
+            if namespace != local { clearView(); namespace = local; bootstrapRun = run }
+            if turns.isEmpty, let bytes = await ClientViewCache.shared.read(key: cacheKey, namespace: local),
+               let snapshot = try? JSONDecoder().decode(ChatSnapshot.self, from: bytes), !Task.isCancelled, bootstrapRun == run, namespace == local {
+                selected = snapshot.conversationID; ownerNamespace = snapshot.ownerNamespace
+                turns = snapshot.turns; before = snapshot.before; etag = snapshot.etag; after = snapshot.after
+                restorePendingDraft()
+            }
+        }
         do {
             let current = try await state.api.syncNamespace()
             let owner = try await state.api.ownerIdentity(expectedNamespace: current)
             guard !Task.isCancelled, bootstrapRun == run else { return }
-            if ownerNamespace != owner.namespace { turns = []; selected = nil; pendingApprovals = [] }
+            if namespace != current || (!ownerNamespace.isEmpty && ownerNamespace != owner.namespace) { clearView(); bootstrapRun = run }
             namespace = current; ownerNamespace = owner.namespace
-            let list = try JSONDecoder().decode([StoredConversation].self, from: await state.api.request("GET", "/api/v1/conversations", expectedNamespace: current))
+            let identifier = try await defaultConversation(namespace: current)
             guard !Task.isCancelled, namespace == current, bootstrapRun == run else { return }
-            conversations = list; historyHasMore = list.count == 100
-            let pending = DeviceIdentity.read(pendingKey).flatMap { try? JSONDecoder().decode(PendingChatSend.self, from: $0) }
-            let saved = DeviceIdentity.read(selectedKey).flatMap { String(data: $0, encoding: .utf8) }.flatMap(UUID.init(uuidString:)).map { $0.uuidString.lowercased() }
-            let target = router.conversationID ?? pending?.conversationID ?? selected ?? saved ?? conversations.first?.id
-            if let target { await choose(target) }
-        } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-    }
-    private func choose(_ id: String) async {
-        if selected != id { turns = []; before = nil; input = "" }
-        selected = id
-        try? DeviceIdentity.save(Data(id.utf8), name: selectedKey)
-        await refresh(); pollID = UUID()
-        if router.conversationID == id { router.conversationID = nil }
-        if let data = DeviceIdentity.read(pendingKey), let pending = try? JSONDecoder().decode(PendingChatSend.self, from: data), pending.conversationID == id {
-            if turns.contains(where: { $0.client_key == pending.clientKey }) { try? DeviceIdentity.save(Data(), name: pendingKey) }
-            else { input = pending.content }
+            if selected != identifier { turns = []; before = nil; etag = nil; after = 0; input = "" }
+            selected = identifier; defaultResolved = true
+            handleConversationRoute(); restorePendingDraft()
+            await refresh()
+            if running { pollID = UUID() }
+        } catch {
+            guard !Task.isCancelled, bootstrapRun == run else { return }
+            await handleFailure(error)
         }
     }
-    private func refresh() async {
-        guard !loading, let namespace else { return }
-        loading = true; defer { loading = false }
-        let identifier = selected
-        var readingConversation = identifier != nil
-        do {
-            if let identifier {
-                let data = try await state.api.request("GET", "/api/v1/conversations/" + identifier, expectedNamespace: namespace)
-                readingConversation = false
-                let page = try JSONDecoder().decode(StoredConversationPage.self, from: data)
-                guard !Task.isCancelled, selected == identifier, self.namespace == namespace else { return }
-                let recentIDs = Set(page.turns.map(\.id))
-                turns = (turns.filter { !recentIDs.contains($0.id) && $0.sequence < (page.turns.first?.sequence ?? 0) } + page.turns).sorted { $0.sequence < $1.sequence }
-                if turns.first?.sequence == page.turns.first?.sequence { before = page.has_more ? page.next_before : nil }
+    private func clearView() {
+        namespace = nil; ownerNamespace = ""; selected = nil; turns = []; pendingApprovals = []
+        before = nil; etag = nil; after = 0; defaultResolved = false
+        bootstrapRun = nil; input = ""; notice = nil
+        refreshRun = nil; olderRun = nil; refreshRequested = false
+        trailingRefresh?.cancel(); trailingRefresh = nil
+    }
+    private func defaultConversation(namespace: String) async throws -> String {
+        struct Created: Decodable { let id: String }
+        return try JSONDecoder().decode(Created.self, from: await state.api.request("POST", "/api/v1/conversations/default", expectedNamespace: namespace)).id
+    }
+    private func handleConversationRoute() {
+        guard let requested = router.conversationID, let selected else { return }
+        if requested != selected { notice = "这条通知关联的历史对话仍保存在服务器；当前继续使用你的固定对话。" }
+        router.conversationID = nil
+    }
+    private func restorePendingDraft() {
+        guard !ownerNamespace.isEmpty, let selected,
+              let data = DeviceIdentity.read(pendingKey), let pending = try? JSONDecoder().decode(PendingChatSend.self, from: data), pending.conversationID == selected else { return }
+        if turns.contains(where: { $0.client_key == pending.clientKey }) { try? DeviceIdentity.save(Data(), name: pendingKey) }
+        else if input.isEmpty { input = pending.content }
+    }
+    private func saveCache(namespace: String) async {
+        guard isVisible, !Task.isCancelled, state.connected, self.namespace == namespace, let selected, !ownerNamespace.isEmpty else { return }
+        let revision = state.connectionRevision, generation = viewGeneration
+        let snapshot = ChatSnapshot(conversationID: selected, ownerNamespace: ownerNamespace, turns: turns, before: before, etag: etag, after: after).bounded
+        if let data = try? JSONEncoder().encode(snapshot) {
+            try? await ClientViewCache.shared.write(data, key: cacheKey, namespace: namespace)
+            if !isVisible || viewGeneration != generation || !state.connected || state.connectionRevision != revision || self.namespace != namespace {
+                await ClientViewCache.shared.remove(key: cacheKey, namespace: namespace)
             }
+        }
+    }
+    private func isCurrent(namespace: String, revision: UUID, generation: UUID) -> Bool {
+        isVisible && viewGeneration == generation && state.connectionRevision == revision
+            && self.namespace == namespace && state.connected && !Task.isCancelled
+    }
+    private func scheduleTrailingRefresh(namespace: String, revision: UUID, generation: UUID) {
+        guard refreshRequested, !loading, !loadingOlder else { return }
+        refreshRequested = false
+        guard isVisible, viewGeneration == generation, state.connectionRevision == revision,
+              self.namespace == namespace, state.connected else { return }
+        trailingRefresh = Task {
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+            await refresh()
+        }
+    }
+    private func fullPage(_ identifier: String, namespace: String) async throws {
+        let revision = state.connectionRevision, generation = viewGeneration
+        let data = try await state.api.request("GET", "/api/v1/conversations/" + identifier, expectedNamespace: namespace)
+        let page = try JSONDecoder().decode(StoredConversationPage.self, from: data)
+        guard isCurrent(namespace: namespace, revision: revision, generation: generation), selected == identifier else { return }
+        turns = page.turns; before = page.has_more ? page.next_before : nil
+        etag = page.etag; after = page.turns.last?.sequence ?? 0
+    }
+    private func refresh() async {
+        guard isVisible, !Task.isCancelled, defaultResolved, let namespace, let identifier = selected else { return }
+        if loading || loadingOlder { refreshRequested = true; return }
+        let run = UUID(), revision = state.connectionRevision, generation = viewGeneration
+        refreshRun = run
+        defer {
+            if refreshRun == run {
+                refreshRun = nil
+                scheduleTrailingRefresh(namespace: namespace, revision: revision, generation: generation)
+            }
+        }
+        var readingConversation = true
+        var needsCacheWrite = true
+        do {
+            if let etag {
+                var components = URLComponents()
+                components.path = "/api/v1/conversations/" + identifier + "/updates"
+                components.queryItems = [URLQueryItem(name: "after", value: String(after)), URLQueryItem(name: "etag", value: etag)]
+                let bytes = try await state.api.request("GET", components.string!, expectedNamespace: namespace)
+                let update = try JSONDecoder().decode(StoredConversationUpdates.self, from: bytes)
+                guard isCurrent(namespace: namespace, revision: revision, generation: generation), selected == identifier else { return }
+                if update.reset {
+                    // 来源权限变化时必须先清除旧答案，即使重新读取随后断网也不能继续显示。
+                    turns = []; pendingApprovals = []; before = nil; self.etag = nil; after = 0
+                    await ClientViewCache.shared.remove(key: cacheKey, namespace: namespace)
+                    guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+                    try await fullPage(identifier, namespace: namespace)
+                } else {
+                    needsCacheWrite = update.etag != etag || !update.turns.isEmpty
+                    turns = ChatSnapshot.merge(turns, updates: update.turns)
+                    self.etag = update.etag; after = turns.last?.sequence ?? after
+                }
+            } else { try await fullPage(identifier, namespace: namespace) }
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation), selected == identifier else { return }
+            restorePendingDraft()
+            if needsCacheWrite { await saveCache(namespace: namespace) }
+            readingConversation = false
             let pending = try await state.api.request("GET", "/api/v1/approvals", expectedNamespace: namespace)
-            guard !Task.isCancelled, self.namespace == namespace else { return }
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
             pendingApprovals = try JSONDecoder().decode([ApprovalEntry].self, from: pending)
             error = nil
         } catch {
-            guard !Task.isCancelled else { return }
-            if readingConversation, case APIClient.APIError.http(404, _) = error, let identifier, selected == identifier, self.namespace == namespace {
-                // 服务端清空会话后清除旧选择与对应草稿，配对凭据保持不变。
-                selected = nil; turns = []; before = nil; input = ""; pendingApprovals = []
-                conversations.removeAll { $0.id == identifier }
-                try? DeviceIdentity.save(Data(), name: selectedKey)
-                if let data = DeviceIdentity.read(pendingKey), let pending = try? JSONDecoder().decode(PendingChatSend.self, from: data), pending.conversationID == identifier {
-                    try? DeviceIdentity.save(Data(), name: pendingKey)
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+            if readingConversation, case APIClient.APIError.http(404, _) = error {
+                // 会话被服务器明确删除后重新获取固定入口，不在手机上生成另一会话。
+                turns = []; before = nil; etag = nil; after = 0; pendingApprovals = []
+                await ClientViewCache.shared.remove(key: cacheKey, namespace: namespace)
+                guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+                do {
+                    let replacement = try await defaultConversation(namespace: namespace)
+                    guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+                    selected = replacement
+                    try await fullPage(replacement, namespace: namespace)
+                    guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+                    await saveCache(namespace: namespace)
+                    self.error = nil
+                } catch {
+                    guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+                    await handleFailure(error)
                 }
-                self.error = nil
-            } else { self.error = error.localizedDescription }
+            } else { await handleFailure(error, conversationAccess: readingConversation) }
         }
     }
+    private func handleFailure(_ failure: Error, conversationAccess: Bool = true) async {
+        guard !Task.isCancelled else { return }
+        if case APIClient.APIError.http(let status, _) = failure {
+            if status == 401 {
+                if let namespace { await ClientViewCache.shared.invalidate(namespace: namespace) }
+                clearView()
+            } else if status == 403 && conversationAccess {
+                if let namespace { await ClientViewCache.shared.remove(key: cacheKey, namespace: namespace) }
+                clearView()
+            }
+        }
+        self.error = failure.localizedDescription
+    }
     private func loadOlder(_ sequence: Int) async {
-        guard let selected, let namespace else { return }
+        guard isVisible, !Task.isCancelled, !loading, !loadingOlder, let selected, let namespace else { return }
+        let run = UUID(), revision = state.connectionRevision, generation = viewGeneration
+        olderRun = run; refreshRequested = true
+        defer {
+            if olderRun == run {
+                olderRun = nil
+                scheduleTrailingRefresh(namespace: namespace, revision: revision, generation: generation)
+            }
+        }
         do {
             let page = try JSONDecoder().decode(StoredConversationPage.self, from: await state.api.request("GET", "/api/v1/conversations/" + selected + "?before=" + String(sequence), expectedNamespace: namespace))
-            guard self.selected == selected, self.namespace == namespace, !Task.isCancelled else { return }
-            let existing = Set(turns.map(\.id));turns = (page.turns.filter { !existing.contains($0.id) } + turns).sorted { $0.sequence < $1.sequence }
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation), self.selected == selected else { return }
+            turns = ChatSnapshot.merge(turns, updates: page.turns)
             before = page.has_more ? page.next_before : nil
-        } catch { self.error = error.localizedDescription }
-    }
-    private func loadMoreConversations() async {
-        guard let namespace, !loadingHistory else { return }
-        loadingHistory = true; defer { loadingHistory = false }
-        do {
-            let page = try JSONDecoder().decode([StoredConversation].self, from: await state.api.request("GET", "/api/v1/conversations?offset=" + String(conversations.count), expectedNamespace: namespace))
-            guard self.namespace == namespace else { return }
-            let existing = Set(conversations.map(\.id))
-            conversations += page.filter { !existing.contains($0.id) }
-            historyHasMore = page.count == 100
-        } catch { self.error = error.localizedDescription }
-    }
-    private func createConversation() async throws -> String {
-        guard let namespace else { throw APIClient.APIError.message("请先连接家庭服务器") }
-        struct Created: Decodable { let id: String }
-        let key = "chat.creating:" + ownerNamespace
-        let stored = DeviceIdentity.read(key).flatMap { String(data: $0, encoding: .utf8) }
-        let identifier = stored.flatMap(UUID.init(uuidString:))?.uuidString ?? UUID().uuidString
-        try DeviceIdentity.save(Data(identifier.utf8), name: key)
-        let body = try JSONSerialization.data(withJSONObject: ["client_id": identifier])
-        let result = try JSONDecoder().decode(Created.self, from: await state.api.request("POST", "/api/v1/conversations", body: body, expectedNamespace: namespace))
-        try DeviceIdentity.save(Data(), name: key)
-        guard self.namespace == namespace else { throw APIClient.APIError.message("连接已切换") }
-        return result.id
-    }
-    private func startNew() async {
-        do { let id = try await createConversation(); await bootstrap(); await choose(id); input = "" }
-        catch { self.error = error.localizedDescription }
+            await saveCache(namespace: namespace)
+        } catch {
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+            await handleFailure(error)
+        }
     }
     private func send() async {
-        guard let namespace, !sending else { return }
+        guard isVisible, !Task.isCancelled, let namespace, !ownerNamespace.isEmpty, !sending else { return }
+        let revision = state.connectionRevision, generation = viewGeneration
         sending = true; defer { sending = false }
         let pendingStorage = pendingKey
-        let selectionStorage = selectedKey
         do {
-            if selected == nil { selected = try await createConversation() }
+            if !defaultResolved {
+                let identifier = try await defaultConversation(namespace: namespace)
+                guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+                if selected != identifier { turns = []; before = nil; etag = nil; after = 0 }
+                selected = identifier; defaultResolved = true
+            }
             guard let selected else { return }
             let previous = DeviceIdentity.read(pendingStorage).flatMap { try? JSONDecoder().decode(PendingChatSend.self, from: $0) }
             let pending = previous?.conversationID == selected && previous?.content == input ? previous! : PendingChatSend(conversationID: selected, clientKey: UUID().uuidString, content: input, timezone: TimeZone.current.identifier)
             try DeviceIdentity.save(JSONEncoder().encode(pending), name: pendingStorage)
             let body = try JSONSerialization.data(withJSONObject: ["client_key": pending.clientKey, "content": pending.content, "timezone": pending.timezone])
-            _ = try await state.api.request("POST", "/api/v1/conversations/" + selected + "/messages", body: body, expectedNamespace: namespace)
+            let bytes = try await state.api.request("POST", "/api/v1/conversations/" + selected + "/messages", body: body, expectedNamespace: namespace)
+            let received = try JSONDecoder().decode(StoredChatTurn.self, from: bytes)
             try DeviceIdentity.save(Data(), name: pendingStorage)
-            try DeviceIdentity.save(Data(selected.utf8), name: selectionStorage)
-            guard self.namespace == namespace, self.selected == selected else { return }
-            input = ""; await refresh(); pollID = UUID()
-            conversations = try JSONDecoder().decode([StoredConversation].self, from: await state.api.request("GET", "/api/v1/conversations", expectedNamespace: namespace))
-        } catch { self.error = error.localizedDescription }
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation), self.selected == selected else { return }
+            input = ""; turns = ChatSnapshot.merge(turns, updates: [received]); after = max(after, received.sequence); error = nil
+            await saveCache(namespace: namespace); pollID = UUID()
+        } catch {
+            guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
+            await handleFailure(error)
+        }
     }
     private func decide(_ id: String, _ decision: String) async {
         guard let namespace else { return }

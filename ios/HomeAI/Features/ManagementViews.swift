@@ -119,7 +119,7 @@ struct DataView: View {
                 guard let data = try await photo.loadTransferable(type: Data.self) else { return }
                 let prepared = try PhotoPreparation.jpeg(data)
                 try await ConnectorSync(api: state.api).uploadRecord(source: "photos", sourceID: DeviceIdentity.hash(data), kind: "photo.selected", payload: ["name": .string("用户选择的照片"), "content_base64": .string(prepared.base64EncodedString())])
-                try await state.loadData()
+                try await state.loadData(force: true)
                 selectedPhoto = nil
             } }
         }
@@ -133,7 +133,7 @@ struct DataView: View {
                 let bytes = try handle.read(upToCount: 20 * 1024 * 1024 + 1) ?? Data()
                 guard bytes.count <= 20 * 1024 * 1024 else { throw APIClient.APIError.message("文件超过 20 MB") }
                 let task = try await state.api.uploadDocument(name: url.lastPathComponent, contents: bytes)
-                try await state.loadData()
+                try await state.loadData(force: true)
                 state.syncStatus = "文档解析已提交（\(task.prefix(8))），完成后可直接在 AI 页面提问"
             } }
         }
@@ -147,10 +147,10 @@ struct DataView: View {
                 } catch { currentUser = "" }
             }
             await reload()
-        }.refreshable { await reload() }
+        }.refreshable { await reload(force: true) }
     }
-    func reload() async { guard state.connected else { return }; await state.perform { try await state.loadData() } }
-    func remove(_ id: String) async { await state.perform { _ = try await state.api.request("DELETE", "/api/v1/data/" + id); try await state.loadData() } }
+    func reload(force: Bool = false) async { guard state.connected else { return }; await state.perform { try await state.loadData(force: force) } }
+    func remove(_ id: String) async { await state.perform { _ = try await state.api.request("DELETE", "/api/v1/data/" + id); try await state.loadData(force: true) } }
 }
 
 struct AutomationsView: View {
@@ -158,6 +158,7 @@ struct AutomationsView: View {
     @State private var scope = "personal"
     var body: some View {
         List {
+            if !state.automationStatus.isEmpty { Text(state.automationStatus).font(.caption).foregroundStyle(.secondary) }
             Picker("范围", selection: $scope) {
                 Text("我的").tag("personal")
                 Text("家庭").tag("family")
@@ -177,10 +178,10 @@ struct AutomationsView: View {
         .navigationTitle("自动化")
         .toolbar { NavigationLink { NotificationInboxView() } label: { Label("通知", systemImage: "bell") } }
         .task(id: state.connectionRevision) { await reload() }
-        .onChange(of: state.taskEventRevision) { _, _ in Task { await reload() } }
-        .refreshable { await reload() }
+        .onChange(of: state.automationEventRevision) { _, _ in Task { await reload(force: true) } }
+        .refreshable { await reload(force: true) }
     }
-    func reload() async { guard state.connected else { return }; await state.perform { try await state.loadAutomations() } }
+    func reload(force: Bool = false) async { guard state.connected else { return }; await state.perform { try await state.loadAutomations(force: force) } }
 }
 
 private struct AutomationRunsView: View {
@@ -235,14 +236,19 @@ struct FamilyMember: Decodable, Identifiable, Sendable { let id: String; let nam
 
 struct MemberMemoryView: View {
     @Environment(AppState.self) private var state
-    struct Candidate: Decodable, Identifiable { let id: String; let content: String }
+    struct Candidate: Codable, Identifiable { let id: String; let content: String }
+    private struct Snapshot: Codable { let entries: [DataEntry]; let candidates: [Candidate] }
+    @State private var lastRefresh: Date?
+    @State private var cached = false
     @State private var entries: [DataEntry] = []
     @State private var candidates: [Candidate] = []
     @State private var deciding = false
     @State private var error: String?
     @State private var loading = false
+    @State private var needsRefresh = false
     var body: some View {
         List {
+            if cached { Text("显示本机缓存，正在检查更新").font(.caption).foregroundStyle(.secondary) }
             if let error { Text(error).foregroundStyle(.red) }
             if loading && entries.isEmpty { ProgressView("正在读取记忆…") }
             if !entries.isEmpty {
@@ -269,26 +275,47 @@ struct MemberMemoryView: View {
                 ContentUnavailableView("暂无聊天记忆", systemImage: "brain", description: Text("在 AI 对话中告诉它需要记住的内容。记忆由服务器保存，仅你自己可见。"))
             }
         }.navigationTitle("记忆")
-            .task(id: state.connectionRevision) { entries = []; candidates = []; await load() }
-            .onChange(of: state.taskEventRevision) { _, _ in Task { await load() } }
-            .refreshable { await load() }
+            .task(id: state.connectionRevision) { entries = []; candidates = []; lastRefresh = nil; await load() }
+            .onChange(of: state.memoryEventRevision) { _, _ in Task { await load(force: true) } }
+            .onChange(of: state.dataEventRevision) { _, _ in Task { await load(force: true) } }
+            .refreshable { await load(force: true) }
     }
-    private func load() async {
-        guard !loading else { return }; loading = true; defer { loading = false }
+    private func load(force: Bool = false) async {
+        guard !loading else { if force { needsRefresh = true }; return }
+        loading = true
+        defer {
+            loading = false
+            if needsRefresh && !Task.isCancelled && state.connected {
+                needsRefresh = false
+                Task { await load(force: true) }
+            }
+        }
         do {
             let namespace = try await state.api.syncNamespace()
+            if entries.isEmpty && candidates.isEmpty, let raw = await ClientViewCache.shared.read(key: "memory", namespace: namespace), let saved = try? JSONDecoder().decode(Snapshot.self, from: raw), await state.api.cachedNamespace() == namespace {
+                entries = saved.entries; candidates = saved.candidates; cached = true
+            }
+            if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 3 { return }
             let bytes = try await state.api.request("GET", "/api/v1/memory/entries", expectedNamespace: namespace)
             let pending = try await state.api.request("GET", "/api/v1/memory/candidates", expectedNamespace: namespace)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, await state.api.cachedNamespace() == namespace else { return }
             entries = try JSONDecoder().decode([DataEntry].self, from: bytes)
-            candidates = try JSONDecoder().decode([Candidate].self, from: pending); error = nil
-        } catch { entries = []; candidates = []; self.error = error.localizedDescription }
+            candidates = try JSONDecoder().decode([Candidate].self, from: pending)
+            cached = false; lastRefresh = Date(); error = nil
+            try? await ClientViewCache.shared.write(JSONEncoder().encode(Snapshot(entries: entries, candidates: candidates)), key: "memory", namespace: namespace)
+        } catch {
+            if case APIClient.APIError.http(let code, _) = error, [401, 403].contains(code) {
+                entries = []; candidates = []; cached = false
+                if let namespace = await state.api.cachedNamespace() { await ClientViewCache.shared.remove(key: "memory", namespace: namespace) }
+            }
+            self.error = error.localizedDescription
+        }
     }
     private func decide(_ id: String, _ action: String) async {
         guard !deciding else { return }; deciding = true; defer { deciding = false }
         do {
             _ = try await state.api.request("POST", "/api/v1/memory/candidates/" + id + "/" + action)
-            await load()
+            await load(force: true)
         } catch { self.error = error.localizedDescription }
     }
 }
@@ -297,10 +324,21 @@ private struct MemberRecordDetail: View {
     @Environment(AppState.self) private var state
     let record: DataEntry
     let isOwner: Bool
+    @State private var detail: DataEntry?
+    @State private var error: String?
+    @State private var loading = false
+    @State private var needsRefresh = false
+    @State private var unavailable = false
+    private var displayed: DataEntry { detail ?? record }
     @State private var visibility = "personal"
     @State private var saving = false
     var body: some View {
         List {
+            if unavailable {
+                ContentUnavailableView("资料不可用", systemImage: "lock", description: Text("资料已删除或不再共享给你。"))
+            } else {
+            if loading { ProgressView("正在读取完整资料…") }
+            if let error { Text(error).foregroundStyle(.red) }
             LabeledContent("类型", value: record.kind)
             if isOwner && record.sensitivity != "SECRET" {
                 Picker("可见范围", selection: Binding(get: { visibility }, set: { selected in Task { await change(selected) } })) {
@@ -308,19 +346,51 @@ private struct MemberRecordDetail: View {
                     Text("家庭所有成员").tag("family")
                 }.disabled(saving)
             } else { LabeledContent("可见范围", value: record.isFamily ? "家庭所有成员" : "仅自己") }
-            ForEach(record.payload.keys.filter { $0 != "content_base64" }.sorted(), id: \.self) { key in
+            ForEach(displayed.payload.keys.filter { $0 != "content_base64" }.sorted(), id: \.self) { key in
                 VStack(alignment: .leading) {
                     Text(key).foregroundStyle(.secondary)
-                    Text(record.payload[key]?.description ?? "").textSelection(.enabled)
+                    Text(displayed.payload[key]?.description ?? "").textSelection(.enabled)
                 }
             }
-        }.navigationTitle(record.title).onAppear { visibility = record.visibility ?? "personal" }
+            }
+        }.navigationTitle(unavailable ? "资料不可用" : record.title).onAppear { visibility = record.visibility ?? "personal" }
+            .task(id: record.id + ":" + String(record.version ?? 0)) { if record.payload_deferred == true { await loadDetails() } }
+            .onChange(of: state.dataEventRevision) { _, _ in Task { detail = nil; await loadDetails() } }
+    }
+    private func loadDetails() async {
+        guard !loading else { needsRefresh = true; return }
+        loading = true
+        defer {
+            loading = false
+            if needsRefresh && !Task.isCancelled && state.connected {
+                needsRefresh = false
+                Task { await loadDetails() }
+            }
+        }
+        let revision = state.dataEventRevision
+        do {
+            let namespace = try await state.api.syncNamespace()
+            let key = "record:" + record.id + ":" + String(record.version ?? 0)
+            if let cached = await ClientViewCache.shared.read(key: key, namespace: namespace), let value = try? JSONDecoder().decode(DataEntry.self, from: cached), await state.api.cachedNamespace() == namespace { detail = value }
+            let raw = try await state.api.request("GET", "/api/v1/data/" + record.id, expectedNamespace: namespace)
+            guard !Task.isCancelled, state.dataEventRevision == revision, await state.api.cachedNamespace() == namespace else { return }
+            detail = try JSONDecoder().decode(DataEntry.self, from: raw); error = nil; unavailable = false
+            try? await ClientViewCache.shared.write(raw, key: key, namespace: namespace)
+        } catch {
+            if case APIClient.APIError.http(let code, _) = error, [401, 403, 404].contains(code) {
+                detail = nil; unavailable = true
+                if let namespace = await state.api.cachedNamespace() {
+                    await ClientViewCache.shared.remove(key: "record:" + record.id + ":" + String(record.version ?? 0), namespace: namespace)
+                }
+            }
+            self.error = error.localizedDescription
+        }
     }
     private func change(_ value: String) async {
         guard !saving else { return }; saving = true; defer { saving = false }
         await state.perform {
             _ = try await state.api.request("PUT", "/api/v1/data/" + record.id + "/visibility", body: JSONSerialization.data(withJSONObject: ["visibility": value]))
-            visibility = value; try await state.loadData()
+            visibility = value; try await state.loadData(force: true)
         }
     }
 }

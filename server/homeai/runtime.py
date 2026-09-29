@@ -91,7 +91,9 @@ async def _run_step(app, task_id, user_id=None):
             emit(db, actor, "task.updated", task.id)
             db.commit()
             return
-        task.status = "EXECUTING"
+        if task.status != "EXECUTING":
+            task.status = "EXECUTING"
+            emit(db,actor,"task.updated",task.id)
         db.commit()
         dispatched = False
         try:
@@ -234,6 +236,8 @@ async def _run_step(app, task_id, user_id=None):
                 if body.get('_automation_id'):raise HTTPException(403,'自动化不能自行停用其他规则')
                 automation=own(db,Automation,args.get('automation_id',''),actor)
                 automation.enabled=False
+                from .automation_service import changed
+                changed(db,actor,automation)
                 result={'automation_id':automation.id,'status':'disabled'}
             elif capability == 'memory.commit@v1':
                 from .db import ConversationTurn

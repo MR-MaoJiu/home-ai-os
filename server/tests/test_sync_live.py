@@ -36,7 +36,8 @@ def test_snapshot_then_changes_include_updates_and_sharing(clients):
     snapshot=alice.request('POST','/api/v1/sync/snapshot').json()
     put(alice,{'source':'test','source_id':'first','kind':'note','version':2,'payload':{'text':'version2'}})
     page=alice.request('GET',f"/api/v1/sync/snapshot/{snapshot['snapshot_id']}?limit=1").json()
-    assert page['records'][0]['payload']['text']=='version1'
+    # 固定的是记录 ID 集合；正文在每页读取时按最新权限与版本投影。
+    assert page['records'][0]['payload']['text']=='version2'
     assert alice.request('POST','/api/v1/sync/ack',{'snapshot_id':snapshot['snapshot_id'],'cursor':snapshot['watermark']}).status_code==200
     changes=alice.request('GET','/api/v1/sync/changes').json()
     assert changes['records'][0]['payload']['text']=='version2'

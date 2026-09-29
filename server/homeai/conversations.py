@@ -3,8 +3,8 @@ import json
 from uuid import UUID,uuid5,NAMESPACE_URL
 from fastapi import APIRouter,Depends,Request,HTTPException,Query
 from pydantic import BaseModel,ConfigDict,Field,field_validator
-from sqlalchemy import select,func
-from .db import Conversation,ConversationTurn,Task,Invocation,Approval,uid,now,scope
+from sqlalchemy import select,func,or_
+from .db import Conversation,ConversationTurn,DefaultConversation,Principal,Outbox,Task,Invocation,Approval,uid,now,scope
 from .security import authenticate,own
 from .crypto import digest,canonical
 from .contracts import TaskRequest
@@ -74,16 +74,72 @@ def create(body:Create,request:Request,actor=Depends(authenticate)):
         row=Conversation(id=identifier,owner_id=actor.user_id,household_id=actor.household_id,title=app.vault.seal('新对话',actor.user_id+':conversation:'+identifier))
         db.add(row);db.commit();return {'id':row.id}
 
+def default_conversation(app,db,actor):
+    scope(db,actor.user_id,actor.household_id)
+    # 串行化同一成员的首次绑定，多个设备不能各自建立默认会话。
+    db.scalar(select(Principal.id).where(Principal.id==actor.user_id).with_for_update())
+    saved=db.scalar(select(DefaultConversation).where(DefaultConversation.owner_id==actor.user_id))
+    current=db.get(Conversation,saved.conversation_id) if saved else None
+    if current and current.owner_id==actor.user_id:return current
+    current=db.scalar(select(Conversation).where(Conversation.owner_id==actor.user_id).order_by((Conversation.next_sequence>0).desc(),Conversation.updated_at.desc(),Conversation.id).limit(1))
+    if current is None:
+        identifier=uid()
+        current=Conversation(id=identifier,owner_id=actor.user_id,household_id=actor.household_id,title=app.vault.seal('我的对话',actor.user_id+':conversation:'+identifier))
+        db.add(current);db.flush()
+    if saved:saved.conversation_id=current.id
+    else:db.add(DefaultConversation(owner_id=actor.user_id,household_id=actor.household_id,conversation_id=current.id))
+    db.flush()
+    return current
+
+
+@router.post('/conversations/default')
+def get_default(request:Request,actor=Depends(authenticate)):
+    with request.app.state.db() as db:
+        row=default_conversation(request.app.state,db,actor)
+        db.commit();return {'id':row.id}
+
+
+def revision(db,actor):
+    event=db.scalar(select(func.max(Outbox.id)).where(Outbox.owner_id==actor.user_id)) or 0
+    authorization=db.scalar(select(func.max(Outbox.id)).where(Outbox.owner_id==actor.user_id,Outbox.kind.like('record.%'))) or 0
+    return event,authorization
+
+
+def revision_tag(event,authorization):return f'v1.{event}.{authorization}'
+
+
+@router.get('/conversations/{conversation_id}/updates')
+def updates(conversation_id:str,request:Request,after:int=Query(default=0,ge=0),etag:str=Query(default='',max_length=120),actor=Depends(authenticate)):
+    from .sync_order import lock_changes
+    with request.app.state.db() as db:
+        conversation=own(db,Conversation,conversation_id,actor);lock_changes(db)
+        event,authorization=revision(db,actor)
+        current=revision_tag(event,authorization)
+        try:
+            version,previous,previous_auth=etag.split('.')
+            previous=int(previous);previous_auth=int(previous_auth)
+            valid=version=='v1' and 0<=previous<=event and previous_auth==authorization and after<=conversation.next_sequence
+        except (ValueError,TypeError):valid=False
+        if not valid:return {'turns':[],'etag':current,'reset':True,'unchanged':False}
+        changed=select(Outbox.resource_id).where(Outbox.owner_id==actor.user_id,Outbox.id>previous,Outbox.kind.like('task.%'))
+        rows=list(db.scalars(select(ConversationTurn).where(ConversationTurn.owner_id==actor.user_id,ConversationTurn.conversation_id==conversation.id,or_(ConversationTurn.sequence>after,ConversationTurn.task_id.in_(changed))).order_by(ConversationTurn.sequence).limit(101)))
+        if len(rows)>100:return {'turns':[],'etag':current,'reset':True,'unchanged':False}
+        return {'turns':[turn_view(request.app.state,db,actor,row) for row in rows],'etag':current,'reset':False,'unchanged':not rows}
+
+
 @router.get('/conversations/{conversation_id}')
 def read(conversation_id:str,request:Request,before:int|None=None,actor=Depends(authenticate)):
     app=request.app.state
     with app.db() as db:
         conversation=own(db,Conversation,conversation_id,actor)
+        from .sync_order import lock_changes
+        lock_changes(db)
+        event,authorization=revision(db,actor)
         query=select(ConversationTurn).where(ConversationTurn.conversation_id==conversation.id,ConversationTurn.owner_id==actor.user_id)
         if before is not None:query=query.where(ConversationTurn.sequence<before)
         rows=list(db.scalars(query.order_by(ConversationTurn.sequence.desc()).limit(41)))
         more=len(rows)>40;rows=list(reversed(rows[:40]))
-        return {'id':conversation.id,'title':app.vault.open(conversation.title,actor.user_id+':conversation:'+conversation.id),'turns':[turn_view(app,db,actor,row) for row in rows],'has_more':more,'next_before':rows[0].sequence if rows else None}
+        return {'id':conversation.id,'etag':revision_tag(event,authorization),'title':app.vault.open(conversation.title,actor.user_id+':conversation:'+conversation.id),'turns':[turn_view(app,db,actor,row) for row in rows],'has_more':more,'next_before':rows[0].sequence if rows else None}
 
 @router.post('/conversations/{conversation_id}/messages',status_code=202)
 def message(conversation_id:str,body:Message,request:Request,actor=Depends(authenticate)):
@@ -95,8 +151,8 @@ def message(conversation_id:str,body:Message,request:Request,actor=Depends(authe
         if old:
             if old.request_hash!=fingerprint:raise HTTPException(409,'同一发送标识不能用于不同消息')
             return turn_view(app,db,actor,old)
-        latest=db.scalar(select(ConversationTurn).where(ConversationTurn.conversation_id==conversation.id).order_by(ConversationTurn.sequence.desc()).limit(1))
-        if latest and db.get(Task,latest.task_id).status not in TERMINAL:raise HTTPException(409,'上一条消息仍在处理，请等待、确认或取消后继续')
+        pending=db.scalar(select(ConversationTurn.id).join(Task,Task.id==ConversationTurn.task_id).where(ConversationTurn.conversation_id==conversation.id,ConversationTurn.owner_id==actor.user_id,Task.status.not_in(TERMINAL)).limit(1))
+        if pending:raise HTTPException(409,'会话中仍有任务在处理，请等待、确认或取消后继续')
         content=body.content.strip()
         if not content:raise HTTPException(422,'消息不能为空')
         task=submit(db,actor,TaskRequest(message=content,idempotency_key='chat:'+conversation.id+':'+body.client_key,timezone=body.timezone,max_model_tokens=131072),app.vault)
@@ -173,13 +229,13 @@ def reminder_intent(body:ReminderInput,request:Request,actor=Depends(authenticat
     if body.due_at is not None:arguments.update(due_at=body.due_at,notify_at_due=body.notify_at_due)
     elif body.notify_at_due:raise HTTPException(422,'通知需要明确的到期时间')
     arguments=normalize(arguments)
-    identifier=str(uuid5(NAMESPACE_URL,'homeai:reminder-intent:'+actor.user_id+':'+body.idempotency_key))
     with app.db() as db:
-        scope(db,actor.user_id,actor.household_id)
+        conversation=default_conversation(app,db,actor)
+        db.refresh(conversation,with_for_update=True)
         task=submit(db,actor,TaskRequest(idempotency_key='intent:'+body.idempotency_key,capability='reminder.create@v1',arguments=arguments,timezone=body.timezone),app.vault)
-        if not db.get(Conversation,identifier):
+        existing=db.scalar(select(ConversationTurn).where(ConversationTurn.task_id==task.id,ConversationTurn.owner_id==actor.user_id))
+        if not existing:
             text='创建提醒：'+body.title+(('，到期时间：'+body.due_at) if body.due_at else '')
-            turn_id=uid()
-            db.add(Conversation(id=identifier,owner_id=actor.user_id,household_id=actor.household_id,title=app.vault.seal(text[:40],actor.user_id+':conversation:'+identifier),next_sequence=1))
-            db.add(ConversationTurn(id=turn_id,owner_id=actor.user_id,household_id=actor.household_id,conversation_id=identifier,sequence=1,client_key=body.idempotency_key,request_hash=task.request_hash,user_message=app.vault.seal(text,actor.user_id+':chat-turn:'+turn_id),task_id=task.id))
-        db.commit();return {'id':task.id,'conversation_id':identifier}
+            turn_id=uid();conversation.next_sequence+=1;conversation.updated_at=now()
+            db.add(ConversationTurn(id=turn_id,owner_id=actor.user_id,household_id=actor.household_id,conversation_id=conversation.id,sequence=conversation.next_sequence,client_key='intent:'+body.idempotency_key,request_hash=task.request_hash,user_message=app.vault.seal(text,actor.user_id+':chat-turn:'+turn_id),task_id=task.id))
+        db.commit();return {'id':task.id,'conversation_id':existing.conversation_id if existing else conversation.id}

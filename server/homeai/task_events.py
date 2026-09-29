@@ -1,10 +1,10 @@
 """前台任务状态流：设备签名握手，连接期间重新鉴权，重连发送当前规范状态。"""
 import asyncio
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import select,func,or_
 from .crypto import digest
 from .contracts import TaskStateNotification
-from .db import Credential, Device, Principal, Task, Invocation, Notification, now, scope
+from .db import Credential, Device, Principal, Task, Invocation, Notification, Outbox, now, scope
 from .security import authenticate, own
 
 router = APIRouter(prefix='/api/v1', tags=['任务状态流'])
@@ -28,7 +28,12 @@ def snapshot(app, actor, token_digest, task_id):
         ids = [row.id for row in rows]
         steps = list(db.scalars(select(Invocation).where(Invocation.task_id.in_(ids)).order_by(Invocation.task_id, Invocation.step))) if ids else []
         notification=db.scalar(select(Notification.id).where(Notification.owner_id==actor.user_id,Notification.household_id==actor.household_id).order_by(Notification.created_at.desc(),Notification.id.desc()).limit(1))
-        return TaskStateNotification(type='task.snapshot', notification_revision=notification, has_more=has_more, tasks=[
+        def event_revision(condition):
+            return db.scalar(select(func.max(Outbox.id)).where(Outbox.owner_id==actor.user_id,condition)) or 0
+        data_revision=event_revision(Outbox.kind.like('record.%'))
+        memory_revision=event_revision(or_(Outbox.kind=='memory.updated',Outbox.record_kind=='memory.fact'))
+        automation_revision=event_revision(Outbox.kind=='automation.updated')
+        return TaskStateNotification(type='task.snapshot', data_revision=data_revision,memory_revision=memory_revision,automation_revision=automation_revision,notification_revision=notification, has_more=has_more, tasks=[
             {'id': row.id, 'status': row.status, 'cancel_requested': row.cancel_requested,
              'steps': [{'step': item.step, 'status': item.status} for item in steps if item.task_id == row.id]}
             for row in rows]).model_dump()

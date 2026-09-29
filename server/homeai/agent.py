@@ -114,7 +114,9 @@ async def advance(app, task_id, user_id):
                 raise HTTPException(409, '模型 Token 预算不足，未发起下一次请求')
             body['_model_token_charge'] = charged + reserve
             body['_model_rounds'] = rounds + 1
-            task.status = 'EXECUTING'
+            if task.status != 'EXECUTING':
+                task.status = 'EXECUTING'
+                emit(db,actor,'task.updated',task.id)
             task.request = app.vault.seal(body, user_id + ':task:' + task.id)
             db.commit()
             await app.policy.check(actor, 'model.generate@v1')

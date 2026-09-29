@@ -412,6 +412,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             row = Automation(id=uid(), household_id=actor.household_id, owner_id=actor.user_id, name=body.name, visibility=body.visibility, cron=body.cron, timezone=body.timezone, skill="", enabled=body.enabled, next_run=next_run, trigger_kind=body.trigger_kind, event_type=body.event_type, record_kind=body.record_kind, record_source=body.record_source, include_shared=body.include_shared, cooldown_seconds=body.cooldown_seconds)
             row.skill = v.seal({**body.skill.model_dump(), "device_id": actor.device_id}, actor.user_id + ":automation:" + row.id)
             db.add(row)
+            from .automation_service import changed
+            changed(db,actor,row)
             db.commit()
             return {"id": row.id}
 
@@ -436,6 +438,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             row = own(db, Automation, automation_id, actor)
             db.refresh(row, with_for_update=True)
             row.enabled = False
+            from .automation_service import changed
+            changed(db,actor,row)
             from .db import AutomationDelivery
             for delivery in db.scalars(select(AutomationDelivery).where(AutomationDelivery.automation_id == row.id, AutomationDelivery.status == "PENDING").with_for_update()):
                 delivery.status, delivery.reason = "CANCELED", "自动化已停用"

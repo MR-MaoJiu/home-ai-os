@@ -49,6 +49,8 @@ async def cycle(app, js=None):
                 bind_task(app,task,automation)
                 db.add(AutomationDelivery(owner_id=user_id,household_id=household,automation_id=automation.id,event_id='cron:'+str(automation.next_run),task_id=task.id,status='DISPATCHED'))
                 automation.next_run = croniter(automation.cron, datetime.now(ZoneInfo(automation.timezone))).get_next(float)
+                from .automation_service import changed
+                changed(db,actor,automation)
             db.commit()
         from .event_automations import dispatch
         dispatch(app, user_id, household, role)
