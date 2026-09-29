@@ -53,6 +53,48 @@ def submit(db, actor, request, vault, *, automation_chain=None, record_dependenc
     return task
 
 
+def withdraw_unexecuted_search_batch(db, actor, task, body, vault):
+    """搜索不可用后撤下同批未开始的计划，保留步骤编号、回执与已执行副作用。"""
+    if not body.get('_agent'):
+        return False
+    steps=body.get('steps',[])
+    rows={row.step:row for row in db.scalars(select(Invocation).where(Invocation.task_id==task.id))}
+    changed=False
+    for batch in body.get('_agent_batches',[]):
+        blocker=None
+        for index in batch.get('steps',[]):
+            if type(index) is not int or not 0<=index<len(steps):
+                raise HTTPException(409,'持久化计划与步骤不一致，禁止继续执行')
+            row=rows.get(index)
+            if row and row.capability=='web.search@v1' and row.status=='UNAVAILABLE':
+                blocker=index
+                continue
+            if blocker is None or (row and row.status!='PENDING'):
+                # 已开始、已成功或结果不明的调用沿用原回执和核对流程，不能改称未执行。
+                continue
+            step=steps[index]
+            if row is None:
+                identifier=uid()
+                arguments=step.get('arguments',{})
+                row=Invocation(id=identifier,household_id=actor.household_id,owner_id=actor.user_id,
+                    task_id=task.id,step=index,capability=step['capability'],arguments_hash=digest(canonical(arguments)),
+                    arguments=vault.seal(arguments,actor.user_id+':invocation:'+identifier),status='PENDING')
+                db.add(row);rows[index]=row
+            row.status='SKIPPED'
+            row.result=vault.seal({'status':'not_executed','reason':'preceding_search_unavailable',
+                'blocked_by_step':blocker,'requires_replanning':True},actor.user_id+':invocation-result:'+row.id)
+            for approval in db.scalars(select(Approval).where(Approval.invocation_id==row.id)):
+                approval.decision='CANCELED'
+            audit(db,actor,'capability.plan_withdrawn',row.id,{'capability':row.capability,'blocked_by_step':blocker})
+            changed=True
+    if changed:
+        body['_planner_feedback']='本批搜索没有取得可用结果，后续尚未开始的计划已撤下。not_executed回执表示没有执行，不能声称已完成；请根据此前真实结果与搜索故障重新规划，已完成操作不能重放。'
+        task.request=vault.seal(body,actor.user_id+':task:'+task.id)
+        emit(db,actor,'task.updated',task.id)
+        db.flush()
+    return changed
+
+
 async def _run_step(app, task_id, user_id=None):
     with app.db() as db:
         if user_id:
@@ -70,12 +112,18 @@ async def _run_step(app, task_id, user_id=None):
         actor = Actor(user.id, user.household_id, body["device_id"], user.role)
         device = db.get(Device, actor.device_id)
         steps = body.get("steps") or []
+        withdraw_unexecuted_search_batch(db,actor,task,body,app.vault)
         invocations = list(db.scalars(select(Invocation).where(Invocation.task_id == task.id).order_by(Invocation.step)))
-        completed = {item.step: item for item in invocations if item.status == "SUCCEEDED"}
-        finished = {item.step for item in invocations if item.status in {"SUCCEEDED", "SKIPPED"}}
+        completed = {item.step: item for item in invocations if item.status in {"SUCCEEDED", "UNAVAILABLE"}}
+        finished = {item.step for item in invocations if item.status in {"SUCCEEDED", "SKIPPED", "UNAVAILABLE"}}
         step_number = next((index for index in range(len(steps) or 1) if index not in finished), None)
         if step_number is None:
-            task.status = "SUCCEEDED"
+            if body.get('_agent'):
+                task.status='RECEIVED'
+            elif any(item.status=='UNAVAILABLE' for item in invocations):
+                task.status,task.error='FAILED','搜索未能完成；已执行步骤保持原状态，不会重放。'
+            else:
+                task.status='SUCCEEDED'
             emit(db, actor, "task.updated", task.id)
             db.commit()
             return
@@ -369,14 +417,20 @@ async def _run_step(app, task_id, user_id=None):
             capture_result_dependencies(db, actor, body, capability, result)
             task.request = app.vault.seal(body, user.id + ':task:' + task.id)
             invocation.result = app.vault.seal(result, user.id + ":invocation-result:" + invocation.id)
-            invocation.status = "SUCCEEDED"
+            search_unavailable=capability=='web.search@v1' and isinstance(result,dict) and result.get('status')=='unavailable'
+            invocation.status = "UNAVAILABLE" if search_unavailable else "SUCCEEDED"
             task.status = "CANCELED" if task.cancel_requested or device.revoked else ("RECEIVED" if body.get("_agent") or (steps and step_number + 1 < len(steps)) else "SUCCEEDED")
             if task.deadline <= now() and task.status != "CANCELED":
                 task.status, task.error = "FAILED", "任务截止时间已到，已完成步骤不会重放"
-            task.result = app.vault.seal(result, user.id + ":task-result:" + task.id)
+            if not search_unavailable or not task.result:
+                task.result = app.vault.seal(result, user.id + ":task-result:" + task.id)
+            if search_unavailable and not body.get('_agent') and task.status!='CANCELED':
+                task.status,task.error='FAILED','本轮搜索未取得可用结果；此前已取得的结果仍然保留。'
             if task.status == "CANCELED":
                 invocation.status, invocation.result, task.result = "CANCELED", None, None
-            audit(db, actor, "capability.complete", invocation.id, {"capability": capability})
+            elif search_unavailable and body.get('_agent'):
+                withdraw_unexecuted_search_batch(db,actor,task,body,app.vault)
+            audit(db, actor, "capability.unavailable" if search_unavailable else "capability.complete", invocation.id, {"capability": capability})
         except CloudConsentRequired as exc:
             from .client_actions import create_request
             # 披露确认只恢复原模型调用，不能将未执行的模型步骤伪装为已成功。

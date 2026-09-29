@@ -9,12 +9,12 @@ directory = root / 'state' / 'searxng'
 directory.mkdir(parents=True, exist_ok=True)
 path = directory / 'settings.yml'
 settings = {
-    'use_default_settings': {'engines': {'keep_only': ['duckduckgo', 'brave', 'wikipedia']}},
+    'use_default_settings': {'engines': {'keep_only': ['google', 'duckduckgo', 'brave', 'wikipedia']}},
     'general': {'debug': False, 'instance_name': 'Home AI Search'},
     'server': {'secret_key': secrets.token_urlsafe(48), 'limiter': False, 'public_instance': False, 'image_proxy': False},
     'search': {'formats': ['json'], 'safe_search': 2, 'autocomplete': ''},
     'outgoing': {'request_timeout': 8.0, 'max_request_timeout': 12.0},
-    'engines': [{'name': name, 'disabled': False} for name in ['duckduckgo', 'brave', 'wikipedia']],
+    'engines': [{'name': name, 'disabled': False} for name in ['google', 'duckduckgo', 'brave', 'wikipedia']],
 }
 try:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

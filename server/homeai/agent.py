@@ -60,11 +60,16 @@ async def advance(app, task_id, user_id):
         if not body.get('_agent'):
             return False
         db.info['family_automation']=body.get('_automation_scope')=='family'
+        actor = Actor(user_id, principal.household_id, body['device_id'], principal.role)
+        from .runtime import withdraw_unexecuted_search_batch
+        if withdraw_unexecuted_search_batch(db,actor,task,body,app.vault):
+            db.commit()
         invocations = list(db.scalars(select(Invocation).where(Invocation.task_id == task.id).order_by(Invocation.step)))
-        completed = {row.step: row for row in invocations if row.status == 'SUCCEEDED'}
+        completed = {row.step: row for row in invocations if row.status in {'SUCCEEDED','UNAVAILABLE','SKIPPED'}}
         if any(index not in completed for index in range(len(body['steps']))):
             return False
-        actor = Actor(user_id, principal.household_id, body['device_id'], principal.role)
+        # 撤下的计划从未调用工具；新计划保留新的步骤编号，调用预算只计真正安排执行的步骤。
+        active_steps=len(body['steps'])-sum(row.status=='SKIPPED' for row in invocations)
         device = db.get(Device, actor.device_id)
         planning_reservation = None
         try:
@@ -77,7 +82,7 @@ async def advance(app, task_id, user_id):
             rounds = body.get('_model_rounds', 0)
             if rounds >= body['max_steps'] + 2:
                 raise HTTPException(409, '模型规划轮次预算已用尽')
-            if len(body['steps']) >= body['max_steps'] and body.get('_final_round_used'):
+            if active_steps >= body['max_steps'] and body.get('_final_round_used'):
                 raise HTTPException(409, '工具步骤预算已用尽')
             from .result_access import check_dependencies
             check_dependencies(db, actor, body)
@@ -161,6 +166,7 @@ async def advance(app, task_id, user_id):
                 messages[-1]['content']=[{'type':'text','text':messages[-1]['content']},*image_parts]
             used_records.update(body.get('_record_dependencies',{}))
             web_sources=[]
+            searches=[]
             presentation_parts=[]
             for batch in body.get('_agent_batches', []):
                 messages.append(batch['message'])
@@ -169,6 +175,9 @@ async def advance(app, task_id, user_id):
                     if not row.result:
                         raise HTTPException(409, '工具结果已删除，禁止继续使用旧上下文')
                     result = app.vault.open(row.result, user_id + ':invocation-result:' + row.id)
+                    if row.status=='SKIPPED':
+                        messages.append({'role':'tool','tool_call_id':call['id'],'content':json.dumps(result,ensure_ascii=False)})
+                        continue
                     if row.capability=='presentation.render@v1':
                         presentation_parts.extend(result.get('parts',[]))
                         result={'status':'rendered','text':result.get('text',''),'note':'已生成受控展示卡片，无需再次生成'}
@@ -177,9 +186,10 @@ async def advance(app, task_id, user_id):
                         result = task_rehydrate(app,db,actor,body,result)
                         used_records.update(match['record_id'] for match in result['matches'])
                     if row.capability=='web.search@v1' and isinstance(result,dict):
-                        entries=result.get('results',[])[:5]
+                        searches.append(result)
+                        entries=result.get('results',[])[:10]
                         web_sources.extend({'title':item.get('title','')[:200],'url':item.get('url','')} for item in entries)
-                        result={**result,'results':[{**item,'content':item.get('content','')[:400]} for item in entries]}
+                        result={**result,'results':[{**item,'content':item.get('content','')[:400]} for item in entries[:5]]}
                     # 检索结果按记录 ID 回到账本重新授权，撤权后不能重新送给模型。
                     candidates = result.get('records') if isinstance(result, dict) else result if isinstance(result, list) else None
                     if isinstance(candidates, list):
@@ -205,7 +215,7 @@ async def advance(app, task_id, user_id):
             ensure_model_safe(encoded)
             if len(encoded) > 100000:
                 raise HTTPException(413, 'Agent 上下文超过限制')
-            remaining = body['max_steps'] - len(body['steps'])
+            remaining = body['max_steps'] - active_steps
             if body.get('_model_token_charge',0) + len(encoded.encode()) + body['max_output_tokens'] > body['max_model_tokens']:
                 raise HTTPException(409, '模型 Token 预算不足，未发起分类或规划请求')
             manifest, tools_enabled = await select_planner(app, db, actor, body)
@@ -217,6 +227,11 @@ async def advance(app, task_id, user_id):
             if body.pop('_answer_from_existing',False):
                 tools_enabled=False
                 messages[0]['content'] += ' 本轮只根据已取得的资料回答；若证据不足，明确说明未能完成的部分，不得虚构执行成功。'
+            if sum(item.get('status')=='unavailable' for item in searches)>=3:
+                tools_enabled=False
+                messages[0]['content'] += ' 连续多轮搜索未能正常完成，停止继续查询。基于已取得的来源作有限答复；没有来源时明确说明此次无法完成联网查询。'
+            if any(item.get('status')=='unavailable' for item in searches):
+                messages[0]['content'] += ' 某次补充搜索不可用不代表前面的来源不存在。可使用此前有效来源，但必须说明无法核实的部分，不能把缺少结果的主题编造成事实。'
             if remaining <= 0:
                 messages[0]['content'] += ' 工具预算已耗尽，只能总结已得到的结果；不能声称未执行的事项已完成。'
                 body['_final_round_used'] = True
@@ -276,14 +291,14 @@ async def advance(app, task_id, user_id):
                 message = response['choices'][0]['message']
                 from .conversations import revision
                 data_revision=revision(db,actor)[1]
-                stable_reads={'knowledge.search@v1','memory.search@v1','calendar.search@v1'}
+                stable_reads={'knowledge.search@v1','memory.search@v1','calendar.search@v1','web.search@v1'}
                 seen=set()
                 query_signatures={}
                 for position,(capability,arguments) in enumerate(proposals):
                     if capability not in stable_reads:continue
                     signature=digest(canonical([capability,arguments,data_revision,body.get('_task_grants',{})]))
                     previous=body.get('_read_queries',{}).get(signature)
-                    if signature in seen or previous in completed:
+                    if signature in seen or (previous in completed and completed[previous].status!='SKIPPED'):
                         body['_planner_feedback']='相同只读查询已有真实结果，资料版本未变化；不要重复执行。优先检查已给出的附件节选，确实缺少内容时改变检索关键词。'
                         body['_duplicate_reads']=body.get('_duplicate_reads',0)+1
                         body['_answer_from_existing']=body['_duplicate_reads']>=2
@@ -292,7 +307,7 @@ async def advance(app, task_id, user_id):
                         return True
                     seen.add(signature);query_signatures[position]=signature
                 calls, indexes = [], []
-                previous_effects = {digest(canonical(step)) for step in body['steps'] if CAPABILITIES[step['capability']][1]}
+                previous_effects = {digest(canonical(step)) for index,step in enumerate(body['steps']) if CAPABILITIES[step['capability']][1] and (index not in completed or completed[index].status!='SKIPPED')}
                 for position, (capability, arguments) in enumerate(proposals):
                     step = {'capability': capability, 'arguments': arguments}
                     signature = digest(canonical(step))
@@ -316,13 +331,19 @@ async def advance(app, task_id, user_id):
                 content=faithful_answer(app,db,actor,body,content)
                 response['choices'][0]['message']['content']=content
                 response['choices'][0]['message'].pop('reasoning_content',None)
-                if any(CAPABILITIES[step['capability']][1] for step in body['steps']) and not reviewing and remaining > 0:
+                if any(CAPABILITIES[step['capability']][1] and completed.get(index) and completed[index].status=='SUCCEEDED' for index,step in enumerate(body['steps'])) and not reviewing and remaining > 0:
                     body['_draft_answer'] = content
                     body['_review_step_count'] = len(body['steps'])
                     task.status = 'RECEIVED'
                 else:
                     body.pop('_draft_answer', None)
                     response['web_sources'] = list({item['url']:item for item in web_sources}.values())[:20]
+                    from .search_results import warnings as search_warnings
+                    notices=search_warnings(searches)
+                    response['search_warnings']=notices
+                    response['search_status']='partial' if notices and web_sources else 'unavailable' if notices else 'empty' if searches and not web_sources else 'ok'
+                    if notices:
+                        response['choices'][0]['message']['content'] += '\n\n搜索说明：'+ ' '.join(notices)
                     response['parts'] = presentation_parts[:8]
                     response['sources'] = []
                     for rid in sorted(used_records):
@@ -334,7 +355,8 @@ async def advance(app, task_id, user_id):
                         if source.source=='media_upload' and rid in body.get('_task_grants',{}):
                             response['parts'].append({'type':metadata.get('kind','file'),'record_id':rid,'version':source.version,'task_id':task.id,'title':title})
                     task.result = app.vault.seal(response, user_id + ':task-result:' + task.id)
-                    task.status = 'SUCCEEDED'
+                    task.status = 'FAILED' if searches and not web_sources and any(item.get('status')=='unavailable' for item in searches) else 'SUCCEEDED'
+                    if task.status=='FAILED':task.error='本次未取得可核实的搜索来源，上游搜索暂不可用。已完成的其他步骤不会重放。'
             task.request = app.vault.seal(body, user_id + ':task:' + task.id)
             audit(db, actor, 'agent.planned', task.id, {'round': rounds + 1, 'tools': len(proposals), 'token_charge': body['_model_token_charge']})
         except MediaPending as exc:

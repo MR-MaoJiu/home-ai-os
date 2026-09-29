@@ -42,7 +42,10 @@ def text_result(result):
         from .source_fidelity import clean_answer
         return clean_answer(value)
     if result.get('status')=='stored':return '已保存到家庭服务器。'
-    if result.get('content_trust')=='untrusted_web':return '已检索到公开资料：\n'+'\n'.join(str(item.get('title',''))[:200] for item in result.get('results',[])[:5])
+    if result.get('content_trust')=='untrusted_web':
+        if result.get('status')=='unavailable':return '本轮搜索未取得可用结果，上游搜索暂未正常响应。'
+        if not result.get('results'):return '此次未找到匹配的公开资料。'
+        return '已检索到公开资料：\n'+'\n'.join(str(item.get('title',''))[:200] for item in result.get('results',[])[:5])
     return ''
 
 
