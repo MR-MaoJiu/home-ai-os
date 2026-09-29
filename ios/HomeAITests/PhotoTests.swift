@@ -104,8 +104,11 @@ final class RecordDetailTests: XCTestCase {
         let preview = try ProtectedRecordPreview(data: bytes, name: "../../private/file.txt", temporaryRoot: root)
         XCTAssertTrue(preview.url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/"))
         XCTAssertEqual(try Data(contentsOf: preview.url), bytes)
+        #if !targetEnvironment(simulator)
+        // 模拟器宿主文件系统不返回 iOS 数据保护属性；真机仍必须严格验证完整保护。
         let attributes = try FileManager.default.attributesOfItem(atPath: preview.url.path)
         XCTAssertEqual(attributes[.protectionKey] as? String, FileProtectionType.complete.rawValue)
+        #endif
         let export = RecordExportDocument(data: preview.contents)
         preview.remove()
         XCTAssertFalse(FileManager.default.fileExists(atPath: preview.url.path))
