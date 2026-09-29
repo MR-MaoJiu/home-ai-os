@@ -128,7 +128,14 @@ final class ClientNotifications {
             }
             struct Status: Decodable { let push_configured: Bool; let worker_online: Bool; let status: String }
             let result = try JSONDecoder().decode(Status.self, from: await api.request("GET", "/api/v1/notifications/status", expectedNamespace: namespace))
-            status = !result.push_configured ? "服务器尚未配置系统推送，通知列表可用" : result.worker_online ? "已开启服务器通知" : "推送已配置，等待服务器通知进程"
+            switch result.status {
+            case "disabled": status = "服务器已关闭系统推送，通知列表可用"
+            case "invalid_configuration": status = "服务器推送配置无效，通知列表可用"
+            case "not_configured": status = "服务器尚未配置系统推送，通知列表可用"
+            case "ready": status = "服务器推送已配置"
+            case "worker_offline": status = "推送已配置，等待服务器通知进程"
+            default: status = "暂时无法确认服务器推送状态，通知列表可用"
+            }
         } catch { status = "通知连接未完成，恢复网络后重试" }
     }
 }

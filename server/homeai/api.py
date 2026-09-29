@@ -56,6 +56,10 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.include_router(visibility_router)
     from .notifications import router as notification_router
     app.include_router(notification_router)
+    from .notifications_config import router as notification_config_router
+    app.include_router(notification_config_router)
+    from .backup_settings import router as backup_settings_router
+    app.include_router(backup_settings_router)
     v = app.state.vault
     auth = Depends(authenticate)
 

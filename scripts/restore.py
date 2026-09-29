@@ -65,14 +65,21 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
     if (destination/'blobs').exists():
         import shutil
         shutil.copytree(destination/'blobs',output/'blobs')
-    for directory in ('acme','tls'):
+    for directory in ('acme','tls','notifications'):
         if (destination/directory).exists():
             import shutil
             shutil.copytree(destination/directory,output/directory)
-    for filename in ('remote-config.enc','remote-legacy.enc', 'remote-network.enc', 'pairing-address.enc', 'service-application.enc','tls-selection.enc','tls-runtime.enc'):
+    for filename in ('remote-config.enc','remote-legacy.enc', 'remote-network.enc', 'pairing-address.enc', 'service-application.enc','tls-selection.enc','tls-runtime.enc','backup-settings.enc'):
         if (destination/filename).exists():
             import shutil
-            shutil.copyfile(destination/filename,output/filename);os.chmod(output/filename,0o600)
+            if filename == 'backup-settings.enc':
+                # 恢复配置不代表重新授权自动备份，旧排队请求也不能在新机器自动执行。
+                from homeai.backup_settings import suspend_restored_configuration
+                restored = suspend_restored_configuration((destination/filename).read_text(), Vault.from_file(root/'state/master.key'))
+                (output/filename).write_text(restored)
+            else:
+                shutil.copyfile(destination/filename,output/filename)
+            os.chmod(output/filename,0o600)
     if (destination/'server-identity.enc').exists():
         # 身份仍为主密钥加密的密文；只放入隔离恢复目录，不覆盖正在使用的身份。
         import shutil

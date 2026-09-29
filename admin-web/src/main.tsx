@@ -2,12 +2,14 @@ import {modelConfiguration} from './modelForm';
 import {BuiltinServices,MCPIntegration,SkillIntegration} from './Integrations';
 import {Members,RemoteSetup} from './ConnectionSetup';
 import {Readiness} from './Readiness';
+import {NotificationSettings} from './NotificationSettings';
+import {BackupSettings} from './BackupSettings';
 
 import React,{useEffect,useState} from 'react';
 import{createRoot}from'react-dom/client';
-import{House,Box,Cloud,Users,Database,Radio,FileText,ExternalLink,LogOut,RefreshCw,ShieldCheck,Menu}from'lucide-react';
+import{House,Box,Cloud,Users,Database,Radio,Bell,FileText,ExternalLink,LogOut,RefreshCw,ShieldCheck,Menu}from'lucide-react';
 import{api}from'./api';import'./style.css';
-const sections=[['概览',House],['模型与凭据',Box],['Provider',Cloud],['成员与设备',Users],['备份与恢复',Database],['远程连接',Radio],['审计',FileText]]as const;
+const sections=[['概览',House],['模型与凭据',Box],['Provider',Cloud],['成员与设备',Users],['通知配置',Bell],['备份与恢复',Database],['远程连接',Radio],['审计',FileText]]as const;
 function Field({label,children}:{label:string,children:React.ReactNode}){return <label className="field"><span>{label}</span><div>{children}</div></label>}
 function App(){
  const[me,setMe]=useState<any>(null),[loading,setLoading]=useState(true),[section,setSection]=useState('模型与凭据'),[error,setError]=useState(''),[notice,setNotice]=useState(''),[revision,setRevision]=useState(0),[mobile,setMobile]=useState(false),[reauth,setReauth]=useState(false);
@@ -33,14 +35,15 @@ type Props={section:string,revision:number,run:(f:()=>Promise<void>)=>Promise<vo
 function Panel({section,revision,run,reload,notify}:Props){
  const[data,setData]=useState<any>(null),[secondary,setSecondary]=useState<any>(null),[busy,setBusy]=useState(false);
  const paths:Record<string,string>={'概览':'/manage/overview','模型与凭据':'/providers','Provider':'/providers','成员与设备':'/members','备份与恢复':'/manage/backups','远程连接':'/remote/status','审计':'/activity'};
- useEffect(()=>{let active=true;setBusy(true);run(async()=>{const [value,devices]=await Promise.all([api(paths[section]),section==='成员与设备'?api('/devices'):Promise.resolve(null)]);if(active){setData(value);setSecondary(devices)}}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[section,revision]);
+ useEffect(()=>{if(!paths[section])return;let active=true;setBusy(true);run(async()=>{const [value,devices]=await Promise.all([api(paths[section]),section==='成员与设备'?api('/devices'):Promise.resolve(null)]);if(active){setData(value);setSecondary(devices)}}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[section,revision]);
  const mutate=(path:string,method='POST',body?:unknown)=>run(async()=>{await api(path,method,body);notify('操作已保存');reload()});
  if(section==='模型与凭据')return <><BuiltinServices onChanged={reload}/><MCPIntegration onChanged={reload}/><SkillIntegration revision={revision} onChanged={reload}/><div className="columns"><section><h2>接入模型</h2><form onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);run(async()=>{const manifest:any=modelConfiguration(form);const id=manifest.id;await api('/providers/'+id,'PUT',manifest);const key=String(form.get('key')??'').trim();if(key){const secret=await api('/secrets','POST',{provider_id:id,value:key});manifest.secret_id=secret.id;await api('/providers/'+id,'PUT',manifest)}notify('配置已保存，默认停用。请核对后在 Provider 页面启用。');reload()})}}><Field label="Provider ID"><input name="id" placeholder="例如：local.llama" required minLength={2} maxLength={81} pattern={'[A-Za-z][A-Za-z0-9_.\\-]{1,80}'}/><small>英文大小写均可，保存时统一为小写；可使用数字、点、下划线或连字符。</small></Field><Field label="接口地址"><input name="endpoint" type="url" placeholder="http://127.0.0.1:8080/v1" required/><small>填写模型服务的 Base URL。</small></Field><Field label="模型名称"><input name="model" placeholder="填写服务中实际可用的模型" required/></Field><Field label="部署类型"><div className="radios"><label><input name="type" type="radio" value="local" defaultChecked/>本地</label><label><input name="type" type="radio" value="cloud"/>云端</label></div></Field><Field label="API Key"><input name="key" type="password" autoComplete="new-password" placeholder="本地无密钥服务可留空"/><small>凭据将加密保存，不会回显。</small></Field><div className="form-action"><button className="primary">保存配置</button></div></form></section><section className="help"><h2>配置说明</h2><h3>本地优先</h3><p>推荐优先接入运行在家庭服务器或局域网中的模型服务。</p><hr/><h3>凭据安全</h3><p>API Key 等敏感信息加密保存在家庭服务器，页面不会读取已保存的明文。</p><hr/><h3>云端接入</h3><p>配置云服务不等于授权个人数据上云。调用仍须经过隐私策略检查。</p></section></div><section><h2>已配置模型</h2><Providers data={data} mutate={mutate}/></section></>;
+ if(section==='通知配置')return <NotificationSettings/>;
  if(busy&&!data)return <section><p className="empty">正在加载…</p></section>;
  if(section==='Provider')return <section><p>服务端统一调用已启用的能力，并校验权限与隐私策略。在线表示服务可达。</p><div className="section-title"><h2>能力提供方</h2><button onClick={reload}><RefreshCw size={16}/>刷新</button></div><Providers data={data} mutate={mutate}/></section>;
  if(section==='概览')return <><section><h2>家庭服务状态</h2><div className="summary">{[['有效设备',data?.devices]].map(([k,v])=><div key={k}><span>{k}</span><strong>{v??'—'}</strong></div>)}</div><p>当前环境：{data?.environment??'—'}</p></section><Readiness/></>;
  if(section==='成员与设备')return <Members members={data??[]} devices={secondary??[]} run={run} reload={reload}/>;
- if(section==='备份与恢复')return <section><h2>加密备份</h2><p>恢复必须在家庭服务器本机操作，避免远程误覆盖数据。此处展示已有加密归档。</p><Rows rows={data} keys={['name','bytes','modified_at']}/></section>;
+ if(section==='备份与恢复')return <BackupSettings archives={data??[]} onChanged={reload}/>;
  if(section==='远程连接')return <RemoteSetup status={data} run={run} reload={reload}/>;
 
  return <><section><h2>操作记录</h2><Rows rows={data?.entries} keys={['action','resource_id','created_at']}/></section><section><h2>云端披露</h2><Rows rows={data?.disclosures} keys={['provider','bytes_sent','status']}/></section></>;

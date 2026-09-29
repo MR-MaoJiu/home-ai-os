@@ -246,6 +246,8 @@ extension ClientDisplayContractTests {
         let api = AppServices.api
         await api.restoreConnectionIfNeeded()
         let namespace = try await api.syncNamespace()
+        let conversations = try JSONDecoder().decode([StoredConversation].self, from: await api.request("GET", "/api/v1/conversations", expectedNamespace: namespace))
+        let data = try JSONDecoder().decode(DataPage.self, from: await api.request("GET", "/api/v1/data", expectedNamespace: namespace))
         let memories = try JSONDecoder().decode([DataEntry].self, from: await api.request("GET", "/api/v1/memory/entries", expectedNamespace: namespace))
         XCTAssertTrue(memories.allSatisfy { $0.kind == "memory.fact" && !$0.isFamily })
         let rules = try JSONDecoder().decode([AutomationEntry].self, from: await api.request("GET", "/api/v1/automations", expectedNamespace: namespace))
@@ -255,7 +257,7 @@ extension ClientDisplayContractTests {
         struct Status: Decodable { let push_configured: Bool; let worker_online: Bool; let status: String }
         let status = try JSONDecoder().decode(Status.self, from: await api.request("GET", "/api/v1/notifications/status", expectedNamespace: namespace))
         XCTAssertTrue(status.worker_online)
-        XCTAssertTrue(["ready", "not_configured", "invalid_configuration"].contains(status.status))
-        print("SERVER_DISPLAY_READ_OK memory=\(memories.count) automation=\(rules.count) notifications=\(notices.items.count) apns_configured=\(status.push_configured)")
+        XCTAssertTrue(["ready", "not_configured", "invalid_configuration", "disabled"].contains(status.status))
+        print("SERVER_DISPLAY_READ_OK conversations=\(conversations.count) data=\(data.records.count) memory=\(memories.count) automation=\(rules.count) notifications=\(notices.items.count) apns_configured=\(status.push_configured)")
     }
 }

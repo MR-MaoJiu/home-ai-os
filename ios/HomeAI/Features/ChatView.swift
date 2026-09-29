@@ -160,7 +160,7 @@ struct ChatView: View {
             guard !Task.isCancelled, namespace == current, bootstrapRun == run else { return }
             conversations = list; historyHasMore = list.count == 100
             let pending = DeviceIdentity.read(pendingKey).flatMap { try? JSONDecoder().decode(PendingChatSend.self, from: $0) }
-            let saved = DeviceIdentity.read(selectedKey).flatMap { String(data: $0, encoding: .utf8) }
+            let saved = DeviceIdentity.read(selectedKey).flatMap { String(data: $0, encoding: .utf8) }.flatMap(UUID.init(uuidString:)).map { $0.uuidString.lowercased() }
             let target = router.conversationID ?? pending?.conversationID ?? selected ?? saved ?? conversations.first?.id
             if let target { await choose(target) }
         } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
@@ -180,9 +180,11 @@ struct ChatView: View {
         guard !loading, let namespace else { return }
         loading = true; defer { loading = false }
         let identifier = selected
+        var readingConversation = identifier != nil
         do {
             if let identifier {
                 let data = try await state.api.request("GET", "/api/v1/conversations/" + identifier, expectedNamespace: namespace)
+                readingConversation = false
                 let page = try JSONDecoder().decode(StoredConversationPage.self, from: data)
                 guard !Task.isCancelled, selected == identifier, self.namespace == namespace else { return }
                 let recentIDs = Set(page.turns.map(\.id))
@@ -193,7 +195,19 @@ struct ChatView: View {
             guard !Task.isCancelled, self.namespace == namespace else { return }
             pendingApprovals = try JSONDecoder().decode([ApprovalEntry].self, from: pending)
             error = nil
-        } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+        } catch {
+            guard !Task.isCancelled else { return }
+            if readingConversation, case APIClient.APIError.http(404, _) = error, let identifier, selected == identifier, self.namespace == namespace {
+                // 服务端清空会话后清除旧选择与对应草稿，配对凭据保持不变。
+                selected = nil; turns = []; before = nil; input = ""; pendingApprovals = []
+                conversations.removeAll { $0.id == identifier }
+                try? DeviceIdentity.save(Data(), name: selectedKey)
+                if let data = DeviceIdentity.read(pendingKey), let pending = try? JSONDecoder().decode(PendingChatSend.self, from: data), pending.conversationID == identifier {
+                    try? DeviceIdentity.save(Data(), name: pendingKey)
+                }
+                self.error = nil
+            } else { self.error = error.localizedDescription }
+        }
     }
     private func loadOlder(_ sequence: Int) async {
         guard let selected, let namespace else { return }

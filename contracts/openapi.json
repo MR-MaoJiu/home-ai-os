@@ -679,6 +679,137 @@
         }
       }
     },
+    "/api/v1/manage/notifications": {
+      "get": {
+        "tags": [
+          "通知配置"
+        ],
+        "summary": "Get Configuration",
+        "operationId": "get_configuration_api_v1_manage_notifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "通知配置"
+        ],
+        "summary": "Save Configuration",
+        "operationId": "save_configuration_api_v1_manage_notifications_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationConfigurationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/backup-settings": {
+      "get": {
+        "tags": [
+          "备份设置"
+        ],
+        "summary": "Get Settings",
+        "operationId": "get_settings_api_v1_manage_backup_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "备份设置"
+        ],
+        "summary": "Save Settings",
+        "operationId": "save_settings_api_v1_manage_backup_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupSettingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/backup-settings/run": {
+      "post": {
+        "tags": [
+          "备份设置"
+        ],
+        "summary": "Request Backup",
+        "operationId": "request_backup_api_v1_manage_backup_settings_run_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "summary": "Live",
@@ -3701,6 +3832,42 @@
         ],
         "title": "AutomationInput"
       },
+      "BackupSettingsInput": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "directory": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Directory",
+            "default": ""
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "daily",
+              "weekly",
+              "interval"
+            ],
+            "title": "Frequency",
+            "default": "manual"
+          },
+          "interval_hours": {
+            "type": "integer",
+            "maximum": 8760.0,
+            "minimum": 1.0,
+            "title": "Interval Hours",
+            "default": 24
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BackupSettingsInput"
+      },
       "Body_upload_api_v1_files_post": {
         "properties": {
           "file": {
@@ -4078,6 +4245,50 @@
           "mode"
         ],
         "title": "NetworkInput"
+      },
+      "NotificationConfigurationInput": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "key_id": {
+            "type": "string",
+            "maxLength": 10,
+            "title": "Key Id",
+            "default": ""
+          },
+          "team_id": {
+            "type": "string",
+            "maxLength": 10,
+            "title": "Team Id",
+            "default": ""
+          },
+          "topic": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Topic",
+            "default": ""
+          },
+          "private_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Private Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "NotificationConfigurationInput"
       },
       "Offer": {
         "properties": {

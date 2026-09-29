@@ -5,11 +5,10 @@ import json
 import logging
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
 import httpx
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -22,6 +21,7 @@ from .data import audit
 from .db import (Automation, Consumption, ConversationTurn, Device, Notification, Outbox,
                  Principal, PushDelivery, PushRegistration, Record, Task, now, scope, uid)
 from .security import Actor, authenticate, own
+from .notifications_config import environment_configuration, resolve_configuration, parse_key
 
 router = APIRouter(prefix='/api/v1', tags=['通知'])
 log = logging.getLogger('homeai.notifications')
@@ -42,23 +42,7 @@ class PushInput(Contract):
 
 
 def push_configuration(settings):
-    values = [getattr(settings, key, None) for key in ('apns_key_file', 'apns_key_id', 'apns_team_id', 'apns_topic')]
-    if not any(values):
-        return 'not_configured'
-    if not all(values):
-        return 'invalid_configuration'
-    try:
-        path = Path(values[0])
-        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077 or path.stat().st_size > 10000:
-            return 'invalid_configuration'
-        key = serialization.load_pem_private_key(path.read_bytes(), password=None)
-        if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(key.curve, ec.SECP256R1):
-            return 'invalid_configuration'
-        if not all(re.fullmatch('[A-Z0-9]{10}', v) for v in values[1:3]) or not re.fullmatch('[A-Za-z0-9.-]{3,255}', values[3]):
-            return 'invalid_configuration'
-    except (OSError, ValueError, TypeError):
-        return 'invalid_configuration'
-    return 'ready'
+    return environment_configuration(settings).status
 
 
 def worker_online(app):
@@ -78,7 +62,7 @@ def worker_online(app):
 @router.get('/notifications/status')
 def notification_status(request: Request, actor: Actor = Depends(authenticate)):
     app = request.app.state
-    status = push_configuration(app.settings)
+    status = resolve_configuration(app).status
     online = worker_online(app)
     return {'push_configured': status == 'ready', 'worker_online': online,
             'status': status if status != 'ready' or online else 'worker_offline'}
@@ -263,20 +247,47 @@ def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
 
 
+class APNsConfigurationUnavailable(Exception):
+    pass
+
+
 class APNs:
-    def __init__(self, settings, client=None):
-        self.settings = settings
+    def __init__(self, settings, client=None, app=None):
+        self.settings, self.app = settings, app
         self.client = client
+        self.owns_client = client is None
         self.jwt = None
         self.jwt_at = 0
+        self.configuration = None
+
+    async def refresh(self):
+        config = resolve_configuration(self.app) if self.app else environment_configuration(self.settings)
+        if self.configuration is None or self.configuration.revision != config.revision:
+            self.jwt, self.jwt_at = None, 0
+            self.configuration = config
+            # Apple 将连接绑定到团队/Topic；轮换配置时重建 HTTP/2 连接。
+            if self.owns_client and self.client is not None:
+                await self.client.aclose()
+                self.client = None
+        if config.status == 'ready' and self.client is None:
+            self.client = httpx.AsyncClient(http2=True, timeout=20, trust_env=False)
+        return config.status
+
+    async def close(self):
+        if self.owns_client and self.client is not None:
+            await self.client.aclose()
+            self.client = None
 
     def authorization(self):
+        config = self.configuration or environment_configuration(self.settings)
+        if config.status != 'ready':
+            raise APNsConfigurationUnavailable()
         if self.jwt and now() - self.jwt_at < 3000:
             return self.jwt
-        key = serialization.load_pem_private_key(Path(self.settings.apns_key_file).read_bytes(), password=None)
+        key = parse_key(config.private_key)
         issued = int(now())
-        header = b64(json.dumps({'alg': 'ES256', 'kid': self.settings.apns_key_id}, separators=(',', ':')).encode())
-        claims = b64(json.dumps({'iss': self.settings.apns_team_id, 'iat': issued}, separators=(',', ':')).encode())
+        header = b64(json.dumps({'alg': 'ES256', 'kid': config.key_id}, separators=(',', ':')).encode())
+        claims = b64(json.dumps({'iss': config.team_id, 'iat': issued}, separators=(',', ':')).encode())
         message = header + '.' + claims
         r, s = decode_dss_signature(key.sign(message.encode(), ec.ECDSA(hashes.SHA256())))
         self.jwt = message + '.' + b64(r.to_bytes(32, 'big') + s.to_bytes(32, 'big'))
@@ -284,17 +295,19 @@ class APNs:
         return self.jwt
 
     async def send(self, token, environment, delivery_id, notification_id):
+        if await self.refresh() != 'ready':
+            raise APNsConfigurationUnavailable()
         endpoint = 'https://api.sandbox.push.apple.com' if environment == 'sandbox' else 'https://api.push.apple.com'
         payload = {'aps': {'alert': {'title': 'Home AI', 'body': '家庭服务器有新的通知，请打开查看。'}, 'sound': 'default'},
                    'notification_id': notification_id}
-        headers = {'authorization': 'bearer ' + self.authorization(), 'apns-topic': self.settings.apns_topic,
+        headers = {'authorization': 'bearer ' + self.authorization(), 'apns-topic': self.configuration.topic,
                    'apns-push-type': 'alert', 'apns-priority': '10', 'apns-id': delivery_id,
                    'apns-collapse-id': notification_id, 'apns-expiration': str(int(now()) + 86400)}
         return await self.client.post(endpoint + '/3/device/' + token, json=payload, headers=headers)
 
 
 async def deliver(app, apns, user_id, household):
-    if push_configuration(app.settings) != 'ready':
+    if await apns.refresh() != 'ready':
         return
     with app.db() as db:
         scope(db, user_id, household)
@@ -340,6 +353,10 @@ async def deliver(app, apns, user_id, household):
                         apns.jwt = None
                     else:
                         row.status = 'failed'
+            except APNsConfigurationUnavailable:
+                row.attempts -= 1
+                db.commit()
+                return
             except (httpx.HTTPError, OSError, ValueError):
                 row.status, row.last_error = 'retry', 'transport_error'
             if row.status == 'retry':
@@ -366,13 +383,16 @@ async def main():
     with app.db.kw['bind'].connect() as lock:
         if not lock.scalar(text('SELECT pg_try_advisory_lock(804225)')):
             raise SystemExit('已有通知 Worker 运行')
-        async with httpx.AsyncClient(http2=True, timeout=20, trust_env=False) as client, Heartbeat(app, 'notification-worker') as heartbeat:
-            apns = APNs(app.settings, client)
-            while True:
-                try:
-                    await cycle(app, apns)
-                    heartbeat.progress()
-                except Exception as exc:
-                    heartbeat.progress(exc)
-                    log.error('通知循环失败：%s', type(exc).__name__)
-                await asyncio.sleep(5)
+        apns = APNs(app.settings, app=app)
+        try:
+            async with Heartbeat(app, 'notification-worker') as heartbeat:
+                while True:
+                    try:
+                        await cycle(app, apns)
+                        heartbeat.progress()
+                    except Exception as exc:
+                        heartbeat.progress(exc)
+                        log.error('通知循环失败：%s', type(exc).__name__)
+                    await asyncio.sleep(5)
+        finally:
+            await apns.close()

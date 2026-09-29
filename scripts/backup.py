@@ -10,25 +10,39 @@ import subprocess
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
-from homeai.backup import encrypt_stream, decrypt_stream, safe_extract, verify_archive
+from homeai.backup import encrypt_stream, decrypt_stream, safe_extract, verify_archive, development_database_name
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('action', choices=['create', 'verify'])
 parser.add_argument('--key', required=True, type=Path, help='独立 32 字节备份密钥文件')
 parser.add_argument('--file', type=Path)
+parser.add_argument('--state-dir', type=Path, help='应用实际使用的私有状态目录')
+parser.add_argument('--database-name', help='调用方预期的数据库名称，必须与运行配置一致')
 parser.add_argument("--allow-legacy", action="store_true", help="仅验证显式接受的旧版无清单归档")
 args = parser.parse_args()
 key = args.key.read_bytes()
 if len(key) != 32 or args.key.stat().st_mode & 0o077:
     raise SystemExit('备份密钥必须为 32 字节且权限为 0600')
 if args.action == 'create':
-    acme=root/'state/acme';acme.mkdir(parents=True,exist_ok=True)
+    from homeai.config import Settings
+    settings = Settings(_env_file=root/'.env.local')
+    try:
+        database_name = development_database_name(settings.database_url)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    if args.database_name and args.database_name != database_name:
+        raise SystemExit('数据库配置已变化，请重启备份 Worker 后重新核对；未执行备份')
+    state_dir = args.state_dir or settings.state_dir
+    if state_dir.is_symlink() or not state_dir.is_dir():
+        raise SystemExit('应用状态目录不存在或不是普通目录')
+    state_dir = state_dir.resolve()
+    acme=state_dir/'acme';acme.mkdir(parents=True,exist_ok=True)
     lock=os.fdopen(os.open(acme/'operation.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600),'r+')
     atexit.register(lock.close)
     try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:raise SystemExit('证书操作正在进行，请稍后进入备份维护窗口')
-    dump = subprocess.run(['docker','compose','--env-file',str(root/'.env.local'),'-f',str(root/'deploy/compose.dev.yml'),'exec','-T','postgres','pg_dump','-U','homeai_migrator','-d','homeai_runtime','-Fc'],check=True,capture_output=True).stdout
+    dump = subprocess.run(['docker','compose','--env-file',str(root/'.env.local'),'-f',str(root/'deploy/compose.dev.yml'),'exec','-T','postgres','pg_dump','-U','homeai_migrator','-d',database_name,'-Fc'],check=True,capture_output=True).stdout
     buffer = io.BytesIO()
     manifest = {'format_version': 2, 'created_at': datetime.now(timezone.utc).isoformat(), 'files': {}}
     with tarfile.open(fileobj=buffer, mode='w:gz') as tar:
@@ -39,8 +53,8 @@ if args.action == 'create':
             tar.addfile(info, io.BytesIO(content))
             manifest['files'][name] = {'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest()}
         add('database.dump', dump)
-        for name in ['blobs', 'deletions.jsonl', 'server-identity.enc', 'remote-config.enc', 'remote-legacy.enc', 'remote-network.enc', 'pairing-address.enc', 'service-application.enc', 'acme', 'tls', 'tls-selection.enc', 'tls-runtime.enc']:
-            path = root / 'state' / name
+        for name in ['blobs', 'deletions.jsonl', 'server-identity.enc', 'remote-config.enc', 'remote-legacy.enc', 'remote-network.enc', 'pairing-address.enc', 'service-application.enc', 'acme', 'tls', 'tls-selection.enc', 'tls-runtime.enc', 'notifications', 'backup-settings.enc']:
+            path = state_dir / name
             if path.is_symlink():
                 raise SystemExit('备份源不能是符号链接')
             if not path.exists():
@@ -50,13 +64,13 @@ if args.action == 'create':
                 if item.is_symlink():
                     raise SystemExit('备份源不能包含符号链接')
                 if item.is_file() and item.suffix != '.lock':
-                    add(item.relative_to(root / 'state').as_posix(), item.read_bytes())
+                    add(item.relative_to(state_dir).as_posix(), item.read_bytes())
         raw = json.dumps(manifest, ensure_ascii=False, sort_keys=True).encode()
         info = tarfile.TarInfo('manifest.json'); info.size = len(raw); info.mode = 0o600
         tar.addfile(info, io.BytesIO(raw))
     verify_archive(buffer)
     buffer.seek(0)
-    output=args.file or root/'state/backups'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'.haib')
+    output=args.file or state_dir/'backups'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'.haib')
     output.parent.mkdir(parents=True,exist_ok=True)
     fd=os.open(output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
     with os.fdopen(fd,'wb') as dest:encrypt_stream(buffer,dest,key)

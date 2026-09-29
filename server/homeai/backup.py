@@ -118,3 +118,18 @@ def verify_archive(archive, allow_legacy=False):
         if manifest.get('format_version') != 2 or manifest.get('files') != actual:
             raise ValueError('归档文件与完整性清单不一致')
         return {'format_version': 2, 'files': len(actual), 'manifest_verified': True}
+
+
+def development_database_name(database_url):
+    """仅支持当前仓库开发 Compose 的本机 PostgreSQL，避免误把其他库当作备份源。"""
+    import re
+    from sqlalchemy.engine import make_url
+    try:
+        target = make_url(database_url)
+    except Exception:
+        raise ValueError('数据库地址无效，无法确认备份来源') from None
+    if target.get_backend_name() != 'postgresql' or target.host not in {'127.0.0.1', 'localhost'} or target.port != 55432:
+        raise ValueError('当前备份仅支持开发 Compose 的本机 PostgreSQL（端口 55432）；其他部署尚不支持，未执行备份')
+    if not target.database or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}', target.database):
+        raise ValueError('数据库名称无效，无法确认备份来源')
+    return target.database

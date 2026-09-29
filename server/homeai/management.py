@@ -20,7 +20,9 @@ def tasks(request:Request,actor:Actor=Depends(authenticate)):
 @router.get('/backups')
 def backups(request:Request,actor:Actor=Depends(authenticate)):
     owner(actor)
-    directory=request.app.state.settings.state_dir/'backups'
+    from .backup_settings import configured_directory,safe_operation
+    directory=safe_operation(lambda: configured_directory(request.app.state))
+    if directory is None:return []
     return [{'name':p.name,'bytes':p.stat().st_size,'modified_at':p.stat().st_mtime} for p in sorted(directory.glob('*.haib')) if p.is_file() and not p.is_symlink()]
 
 @router.get('/readiness')
