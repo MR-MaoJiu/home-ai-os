@@ -1,0 +1,317 @@
+{
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "text": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "type": {
+            "const": "text"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "text": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "else": {
+        "properties": {
+          "record_id": {
+            "type": "null"
+          },
+          "version": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "type": {
+            "enum": [
+              "image",
+              "video",
+              "file"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "record_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "record_id",
+          "version"
+        ]
+      }
+    },
+    {
+      "else": {
+        "properties": {
+          "action_id": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "type": {
+            "enum": [
+              "choice",
+              "approval",
+              "data_request"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "action_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    },
+    {
+      "else": {
+        "properties": {
+          "html": {
+            "type": "null"
+          },
+          "template": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "type": {
+            "const": "h5"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "html": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "template": {
+            "const": "table.v1"
+          }
+        },
+        "required": [
+          "html",
+          "template"
+        ]
+      }
+    }
+  ],
+  "description": "客户端输入仍使用 MessagePart；此模型只供服务端注册的输出构造器使用。",
+  "properties": {
+    "type": {
+      "enum": [
+        "text",
+        "image",
+        "video",
+        "file",
+        "task",
+        "choice",
+        "approval",
+        "data_request",
+        "h5"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "text": {
+      "anyOf": [
+        {
+          "maxLength": 20000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Text"
+    },
+    "record_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Record Id"
+    },
+    "version": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Version"
+    },
+    "action_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Action Id"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    },
+    "status": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Status"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Title"
+    },
+    "summary": {
+      "anyOf": [
+        {
+          "maxLength": 20000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary"
+    },
+    "html": {
+      "anyOf": [
+        {
+          "maxLength": 65536,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "仅服务端注册模板生成；UTF-8 编码最多 65536 字节",
+      "title": "Html",
+      "x-max-utf8-bytes": 65536
+    },
+    "template": {
+      "anyOf": [
+        {
+          "const": "table.v1",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Template"
+    }
+  },
+  "required": [
+    "type"
+  ],
+  "title": "ChatOutputPart",
+  "type": "object"
+}

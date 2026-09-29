@@ -1,0 +1,81 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "title": "Text",
+      "type": "boolean"
+    },
+    "tools": {
+      "title": "Tools",
+      "type": "boolean"
+    },
+    "vision": {
+      "title": "Vision",
+      "type": "boolean"
+    },
+    "privacy": {
+      "title": "Privacy",
+      "type": "boolean"
+    },
+    "status": {
+      "enum": [
+        "configured",
+        "verified",
+        "unavailable"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "verified_at": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Verified At"
+    },
+    "resolved_model": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolved Model"
+    },
+    "errors": {
+      "additionalProperties": {
+        "maxLength": 300,
+        "type": "string"
+      },
+      "propertyNames": {
+        "enum": [
+          "text",
+          "tools",
+          "vision",
+          "privacy"
+        ]
+      },
+      "title": "Errors",
+      "type": "object"
+    }
+  },
+  "required": [
+    "text",
+    "tools",
+    "vision",
+    "privacy",
+    "status"
+  ],
+  "title": "CloudCapabilitiesReport",
+  "type": "object"
+}

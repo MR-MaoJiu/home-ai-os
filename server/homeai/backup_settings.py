@@ -75,7 +75,7 @@ def destination(app, value, create=False):
     path = validate_directory(value)
     source = app.settings.state_dir.resolve()
     resolved = path.resolve()
-    if any(resolved.is_relative_to(source / name) for name in ('blobs', 'acme', 'tls', 'notifications')):
+    if any(resolved.is_relative_to(source / name) for name in ('blobs', 'media', 'acme', 'tls', 'notifications')):
         raise ValueError('备份目录不能放在正在备份的数据或密钥源目录内部')
     return validate_directory(value, create=create)
 

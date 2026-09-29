@@ -63,12 +63,16 @@ try:
     read(base, '/admin/../state/master.key', 404)
     details = json.loads(docker('exec', name, 'python', '-c',
         'import os,json,homeai;from homeai.config import Settings;'
-        'print(json.dumps({"uid":os.getuid(),"package":homeai.__file__,"admin":str(Settings().admin_dist)}))'))
+        'from homeai.schema import registered_metadata;from homeai.cli import WORKER_MODULES;'
+        'print(json.dumps({"uid":os.getuid(),"package":homeai.__file__,"admin":str(Settings().admin_dist),"models":sorted(registered_metadata().tables),"workers":list(WORKER_MODULES)}))'))
     if details['uid'] != 10001 or 'site-packages' not in details['package']:
         raise RuntimeError('未验证到非 root 的实际安装包')
+    required={'media_uploads','media_jobs','model_configurations','client_actions','memory_learning','memory_forget_sources'}
+    if not required<=set(details['models']) or not {'media','notification','backup'}<=set(details['workers']):
+        raise RuntimeError('安装包缺少业务模型或后台执行器入口')
     print(json.dumps({'image': args.image, 'uid': details['uid'], 'installed_package': True,
         'admin_http': 200, 'assets_verified': len(assets), 'anonymous_api': 401,
-        'production_docs': 404, 'read_only_root': True}, ensure_ascii=False))
+        'production_docs': 404, 'read_only_root': True, 'models_registered':True, 'worker_entrypoints':True}, ensure_ascii=False))
 finally:
     # 只清理本次 UUID 命名的临时容器和卷，不触碰部署数据。
     subprocess.run(['docker', 'rm', '-f', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

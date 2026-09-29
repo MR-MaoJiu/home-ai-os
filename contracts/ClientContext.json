@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "Availability": {
+      "additionalProperties": false,
+      "properties": {
+        "battery": {
+          "default": "unavailable",
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "title": "Battery",
+          "type": "string"
+        },
+        "network": {
+          "default": "unavailable",
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "title": "Network",
+          "type": "string"
+        },
+        "location": {
+          "default": "unavailable",
+          "enum": [
+            "available",
+            "not_authorized",
+            "unavailable",
+            "stale"
+          ],
+          "title": "Location",
+          "type": "string"
+        }
+      },
+      "title": "Availability",
+      "type": "object"
+    },
+    "CoarseLocation": {
+      "additionalProperties": false,
+      "properties": {
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        },
+        "accuracy_meters": {
+          "minimum": 500,
+          "title": "Accuracy Meters",
+          "type": "number"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "precision": {
+          "const": "coarse",
+          "default": "coarse",
+          "title": "Precision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "latitude",
+        "longitude",
+        "accuracy_meters",
+        "observed_at"
+      ],
+      "title": "CoarseLocation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sampled_at": {
+      "format": "date-time",
+      "title": "Sampled At",
+      "type": "string"
+    },
+    "timezone": {
+      "maxLength": 100,
+      "title": "Timezone",
+      "type": "string"
+    },
+    "locale": {
+      "maxLength": 100,
+      "title": "Locale",
+      "type": "string"
+    },
+    "app_version": {
+      "default": "",
+      "maxLength": 50,
+      "title": "App Version",
+      "type": "string"
+    },
+    "battery_level": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Battery Level"
+    },
+    "battery_state": {
+      "default": "unknown",
+      "enum": [
+        "unknown",
+        "unplugged",
+        "charging",
+        "full"
+      ],
+      "title": "Battery State",
+      "type": "string"
+    },
+    "low_power_mode": {
+      "default": false,
+      "title": "Low Power Mode",
+      "type": "boolean"
+    },
+    "network_type": {
+      "default": "unknown",
+      "enum": [
+        "unknown",
+        "wifi",
+        "cellular",
+        "wired",
+        "other",
+        "offline"
+      ],
+      "title": "Network Type",
+      "type": "string"
+    },
+    "location": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CoarseLocation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "availability": {
+      "$ref": "#/$defs/Availability"
+    }
+  },
+  "required": [
+    "sampled_at",
+    "timezone",
+    "locale"
+  ],
+  "title": "ClientContext",
+  "type": "object"
+}

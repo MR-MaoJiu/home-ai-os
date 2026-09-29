@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "idempotency_key": {
+      "maxLength": 100,
+      "minLength": 8,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "reason": {
+      "default": "用户拒绝",
+      "maxLength": 300,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "idempotency_key"
+  ],
+  "title": "DenialInput",
+  "type": "object"
+}

@@ -18,11 +18,43 @@ log = logging.getLogger("homeai.worker")
 
 
 async def cycle(app, js=None):
+    from .client_actions import expire_requests
+    expire_requests(app)
+    cleanup_context = now()-getattr(app,'context_cleanup_at',0)>300
+    if cleanup_context:app.context_cleanup_at=now()
     with app.db() as db:
         users = [(u.id, u.household_id, u.role) for u in db.scalars(select(Principal))]
     for user_id, household, role in users:
         with app.db() as db:
             scope(db, user_id, household)
+            actor = Actor(user_id, household, 'scheduler', role)
+            from .model_routing import RedactionArtifact
+            db.execute(delete(RedactionArtifact).where(RedactionArtifact.owner_id == user_id, RedactionArtifact.expires_at <= now()))
+            for paused in db.scalars(select(Task).where(Task.owner_id==user_id,Task.status=='WAITING_MEDIA').with_for_update(skip_locked=True)):
+                payload=app.vault.open(paused.request,user_id+':task:'+paused.id)
+                from .media import context as media_context, MediaPending
+                media_actor=Actor(user_id,household,payload['device_id'],role)
+                try:
+                    waiting_id=payload.get('_media_wait_record_id')
+                    from .client_actions import authorized_source_scope
+                    for rid in ([waiting_id] if waiting_id else payload.get('record_ids',[])):
+                        with authorized_source_scope(db,media_actor,rid,payload) as source_actor:
+                            media_context(app,db,source_actor,rid)
+                    paused.status,paused.error,paused.deadline='RECEIVED',None,now()+payload.get('timeout_seconds',600)
+                except MediaPending:
+                    if now()-payload.get('_media_wait_started',paused.created_at)<86400:continue
+                    paused.status,paused.error='FAILED','附件分析等待已过期'
+                except Exception as exc:
+                    from fastapi import HTTPException
+                    paused.status,paused.error='FAILED',exc.detail if isinstance(exc,HTTPException) else '附件分析失败'
+                emit(db,media_actor,'task.updated',paused.id)
+            # 设备上下文是短期采样，不随会话或备份永久积累。
+            old_tasks = db.scalars(select(Task).where(Task.owner_id==user_id,Task.created_at<now()-86400).execution_options(yield_per=100)) if cleanup_context else []
+            for old_task in old_tasks:
+                payload=app.vault.open(old_task.request,user_id+':task:'+old_task.id)
+                if payload.get('_client_context_expires_at',float('inf'))<=now() and '_client_context' in payload:
+                    payload.pop('_client_context',None)
+                    old_task.request=app.vault.seal(payload,user_id+':task:'+old_task.id)
             expired_approvals = select(Invocation.task_id).join(Approval, Approval.invocation_id == Invocation.id).where(Approval.expires_at <= now())
             for task in db.scalars(select(Task).where(Task.owner_id == user_id, Task.status == "AWAITING_APPROVAL", or_(Task.deadline <= now(), Task.id.in_(expired_approvals))).with_for_update(skip_locked=True)):
                 task.status, task.error = "FAILED", "任务或审批已过期，未执行后续操作"

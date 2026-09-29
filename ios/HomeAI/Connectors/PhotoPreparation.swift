@@ -12,6 +12,20 @@ enum PhotoPreparation {
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceThumbnailMaxPixelSize: 1536
               ] as CFDictionary) else { throw APIClient.APIError.message("无法读取照片或照片超过 20 MB") }
+        return try encode(image)
+    }
+
+    static func jpeg(file: URL, maximumBytes: Int) throws -> Data {
+        guard (try file.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0 <= maximumBytes,
+              let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 1536] as CFDictionary) else {
+            throw APIClient.APIError.message("无法读取照片或照片超过服务器允许的大小")
+        }
+        return try encode(image)
+    }
+
+    private static func encode(_ image: CGImage) throws -> Data {
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw APIClient.APIError.message("无法转换照片")

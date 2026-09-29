@@ -50,6 +50,14 @@
 		F2A9DADDD37E5F78ECA1B800 /* AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = 95C00AFF2B6A9C9C42CCE3F2 /* AppShortcuts.strings */; };
 		F70BA49598AEC176FE65A948 /* future.der in Resources */ = {isa = PBXBuildFile; fileRef = 7663DFFCF83A100838851D5D /* future.der */; };
 		F9B16823F9E13697EC44B81F /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 026E7BEC5639994664ECC698 /* DeviceIdentity.swift */; };
+		C630ADC283243E58E0745CA7 /* ClientContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CB79435C113FAA8780EE8A3 /* ClientContext.swift */; };
+		5AAB2F7DF26FE76AFFC5E7FE /* MediaUploadQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A03A001F8E87ACD2624DAA0F /* MediaUploadQueue.swift */; };
+		456173777792EE326BA2540F /* ClientActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E5A749A16D45037DD87809 /* ClientActions.swift */; };
+		3D9013CE42A825A088F4B23B /* MediaComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6363646333548BDDC2F84A1A /* MediaComposer.swift */; };
+		BF15521CF2B26FF4BDD5EAAB /* MemberDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C83603C5992CC6B49F417F /* MemberDirectory.swift */; };
+		083E4001669547FDB8DBDE3D /* ClientActionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59981D1EB2E0ABFE2A9A2E07 /* ClientActionCard.swift */; };
+		C144B42E6DC349C85076F0EC /* IsolatedH5View.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A0D18353D4595711B5DCAB /* IsolatedH5View.swift */; };
+		FB927857E3530C2FA7D73706 /* ChatRichContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1741E56F7EAA4C5566FFD3B /* ChatRichContent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -109,6 +117,14 @@
 		F29C16E91255A0E4D8BA30DC /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		F8618794DCBB144BCD6989D4 /* ServerTrust.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTrust.swift; sourceTree = "<group>"; };
 		FE55D2FE3C69D506D916C9A3 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		2CB79435C113FAA8780EE8A3 /* ClientContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientContext.swift; sourceTree = "<group>"; };
+		A03A001F8E87ACD2624DAA0F /* MediaUploadQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadQueue.swift; sourceTree = "<group>"; };
+		17E5A749A16D45037DD87809 /* ClientActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientActions.swift; sourceTree = "<group>"; };
+		6363646333548BDDC2F84A1A /* MediaComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaComposer.swift; sourceTree = "<group>"; };
+		73C83603C5992CC6B49F417F /* MemberDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberDirectory.swift; sourceTree = "<group>"; };
+		59981D1EB2E0ABFE2A9A2E07 /* ClientActionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientActionCard.swift; sourceTree = "<group>"; };
+		B4A0D18353D4595711B5DCAB /* IsolatedH5View.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsolatedH5View.swift; sourceTree = "<group>"; };
+		F1741E56F7EAA4C5566FFD3B /* ChatRichContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRichContent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -153,6 +169,11 @@
 		311AF46D3716E4293947732B /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				6363646333548BDDC2F84A1A /* MediaComposer.swift */,
+				73C83603C5992CC6B49F417F /* MemberDirectory.swift */,
+				59981D1EB2E0ABFE2A9A2E07 /* ClientActionCard.swift */,
+				B4A0D18353D4595711B5DCAB /* IsolatedH5View.swift */,
+				F1741E56F7EAA4C5566FFD3B /* ChatRichContent.swift */,
 				FE55D2FE3C69D506D916C9A3 /* ChatView.swift */,
 				59682522EF3FF4C68D504EDE /* ManagementViews.swift */,
 				78CE7B3E8CF1C1E1E3AE3039 /* PairingScanner.swift */,
@@ -177,6 +198,9 @@
 		486CF881A1A352D4BA54175F /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				2CB79435C113FAA8780EE8A3 /* ClientContext.swift */,
+				A03A001F8E87ACD2624DAA0F /* MediaUploadQueue.swift */,
+				17E5A749A16D45037DD87809 /* ClientActions.swift */,
 				030A9C6729AEAA14F8E8E130 /* APIClient.swift */,
 				F29C16E91255A0E4D8BA30DC /* AppState.swift */,
 				6655F94B1B4EF8B88E34D214 /* AsyncOperationGate.swift */,
@@ -378,6 +402,14 @@
 				9D1E2E3606F70BE747E4DD31 /* SystemReminderSync.swift in Sources */,
 				22DB9BDFEEE8C697E15CB3F1 /* TaskResponse.swift in Sources */,
 				8BC859052EB0D6804590A98A /* VoiceCapture.swift in Sources */,
+				C630ADC283243E58E0745CA7 /* ClientContext.swift in Sources */,
+				5AAB2F7DF26FE76AFFC5E7FE /* MediaUploadQueue.swift in Sources */,
+				456173777792EE326BA2540F /* ClientActions.swift in Sources */,
+				3D9013CE42A825A088F4B23B /* MediaComposer.swift in Sources */,
+				BF15521CF2B26FF4BDD5EAAB /* MemberDirectory.swift in Sources */,
+				083E4001669547FDB8DBDE3D /* ClientActionCard.swift in Sources */,
+				C144B42E6DC349C85076F0EC /* IsolatedH5View.swift in Sources */,
+				FB927857E3530C2FA7D73706 /* ChatRichContent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

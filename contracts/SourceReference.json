@@ -1,0 +1,43 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "record_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Record Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "title": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    }
+  },
+  "required": [
+    "record_id",
+    "version",
+    "title"
+  ],
+  "title": "SourceReference",
+  "type": "object"
+}

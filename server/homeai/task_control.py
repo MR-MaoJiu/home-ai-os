@@ -12,6 +12,23 @@ from .data import audit, emit
 router = APIRouter(prefix='/api/v1/tasks', tags=['任务恢复'])
 
 
+@router.post('/{task_id}/resume')
+def resume(task_id: str, request: Request, actor: Actor = Depends(authenticate)):
+    app = request.app.state
+    with app.db() as db:
+        task = own(db, Task, task_id, actor)
+        db.refresh(task, with_for_update=True)
+        if task.status not in {'WAITING_BUDGET', 'WAITING_PRIVACY'} or task.cancel_requested:
+            raise HTTPException(409, '只有预算或隐私服务暂停的任务可以重新检查')
+        payload = app.vault.open(task.request, actor.user_id + ':task:' + task.id)
+        from .result_access import check_dependencies
+        check_dependencies(db, actor, payload)
+        task.deadline, task.status, task.error = __import__('time').time() + min(payload.get('timeout_seconds', 600), 3600), 'RECEIVED', None
+        emit(db, actor, 'task.updated', task.id)
+        db.commit()
+        return {'status': task.status}
+
+
 class Reconciliation(Contract):
     decision: Literal['COMPLETED', 'NOT_EXECUTED', 'ABORT']
     evidence: str = Field(min_length=10, max_length=2000)

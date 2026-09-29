@@ -11,7 +11,7 @@ TOOLS = [
     {"type":"function","function":{"name":"remember_chat","description":"用户明确要求记住聊天内容时提出候选记忆，待用户在记忆页确认。不得复制文件或健康位置原始数据。","parameters":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":False}}},
 
     {"type":"function","function":{"name":"search_web","description":"搜索互联网公开资料，仅在用户要求联网信息时使用。查询词会发送给外部搜索引擎，公开查询由服务端自动执行；不得包含私人资料、健康信息或秘密。","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
-    {"type":"function","function":{"name":"search_documents","description":"检索已解析且当前已授权的文档，回答文件内容问题前使用此工具，无匹配时说明未找到，不编造文件内容","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
+    {"type":"function","function":{"name":"search_documents","description":"已提供的附件节选不足以回答时，检索当前授权文档的其他段落。节选已经包含答案时直接使用原文，不要重复查询相同关键词。无匹配不代表节选不存在。","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
     {"type":"function","function":{"name":"search_memories","description":"检索当前用户已授权的记忆","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
     {"type":"function","function":{"name":"search_calendar","description":"检索当前用户已授权的日程","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":False}}},
     {"type":"function","function":{"name":"create_reminder","description":"创建一条没有指定时间的家庭提醒。多个事项分别调用；不要添加时间或通知参数。","parameters":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":False}}},
@@ -19,6 +19,12 @@ TOOLS = [
     {"type":"function","function":{"name":"read_home_states","description":"查询已接入 Home Assistant 的设备状态","parameters":{"type":"object","properties":{},"additionalProperties":False}}},
 ]
 MAPPING={'list_automations':'automation.list@v1','stop_automation':'automation.stop@v1','create_automation':'automation.create@v1','remember_chat':'memory.commit@v1','search_web':'web.search@v1','search_documents':'knowledge.search@v1','search_memories':'memory.search@v1','search_calendar':'calendar.search@v1','create_reminder':'reminder.create@v1','schedule_reminder':'reminder.create@v1','read_home_states':'home.states@v1'}
+from .client_actions import CLIENT_TOOLS, CLIENT_MAPPING
+TOOLS.extend(CLIENT_TOOLS)
+MAPPING.update(CLIENT_MAPPING)
+from .presentations import TOOL as PRESENTATION_TOOL
+TOOLS.append(PRESENTATION_TOOL)
+MAPPING['render_table']='presentation.render@v1'
 
 
 def decode_proposal(result):
@@ -37,6 +43,8 @@ def decode_proposal(result):
         expected=schema['properties'][key]['type']
         if expected=='string' and (not isinstance(value,str) or len(value)>2000):raise HTTPException(422,'工具文本参数无效')
         if expected=='boolean' and type(value) is not bool:raise HTTPException(422,'工具布尔参数无效')
+        if expected=='object' and (not isinstance(value,dict) or len(json.dumps(value,ensure_ascii=False))>10000):raise HTTPException(422,'工具对象参数无效')
+        if expected=='array' and (not isinstance(value,list) or len(json.dumps(value,ensure_ascii=False))>50000):raise HTTPException(422,'工具列表参数无效')
     if name in {'create_reminder','schedule_reminder'}:
         from .reminders import normalize
         args=normalize(args)

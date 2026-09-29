@@ -3,7 +3,8 @@ import asyncio
 import httpx
 import nats
 from sqlalchemy import text
-from .db import Base, now
+from .db import now
+from .schema import registered_metadata
 
 
 def database_check(app):
@@ -13,7 +14,7 @@ def database_check(app):
                 return {'ok': False, 'reason': '实际部署需要 PostgreSQL'}
             db.execute(text("SET LOCAL statement_timeout = '2s'"))
             role = db.execute(text('SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user')).one()
-            names = [table.name for table in Base.metadata.tables.values() if 'owner_id' in table.c]
+            names = [table.name for table in registered_metadata().tables.values() if 'owner_id' in table.c or table.name in {'model_configurations','model_verifications'}]
             rows = db.execute(text('SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class WHERE relnamespace=current_schema()::regnamespace AND relname=ANY(:names)'), {'names': names}).all()
             safe_role = not role.rolsuper and not role.rolbypassrls
             rls = len(rows) == len(names) and all(row.relrowsecurity and row.relforcerowsecurity for row in rows)
@@ -73,9 +74,20 @@ async def inspect(app, actor):
         remote = False
     checks = {'database': database, 'policy': opa, 'events': events,
               'encryption': {'ok': vault_ok, 'reason': '信封加密往返检查通过' if vault_ok else '加密检查失败'}}
+    checks['workers'],workers = runtime_check(app)
+    ready_workers = checks['workers']['ok']
+    dependencies_ready = all(item['ok'] for name,item in checks.items() if name!='workers')
+    return {'database': database.get('connected', False), 'master_key_loaded': vault_ok,
+        'environment': app.settings.environment, 'production_sandbox_verified': False,
+        'remote_configured': remote, 'core_dependencies_ready': dependencies_ready, 'runtime_ready': dependencies_ready and ready_workers, 'workers': workers,
+        'checks': checks, 'checked_at': now(), 'unverified': ['任务与 Provider 实际执行', '模型推理', '生产沙箱', '备份恢复', '真机与家庭部署']}
+
+
+def runtime_check(app):
     from .heartbeat import status as worker_status
     workers = worker_status(app)
-    required = ['core-worker', 'memory-worker']
+    required = ['core-worker', 'memory-worker', 'media-worker', 'notification-worker']
+    configuration_error = None
     try:
         import json
         from .db import Provider
@@ -85,10 +97,16 @@ async def inspect(app, actor):
                 required.append('home-observer')
     except Exception:
         required.append('home-observer')
-    ready_workers = all(any(item['phase'] == 'running' for item in workers[name]['instances']) for name in required)
-    dependencies_ready = all(item['ok'] for item in checks.values())
-    checks['workers'] = {'ok': ready_workers, 'reason': '必需执行器近期有正常循环心跳' if ready_workers else '必需执行器未启动、心跳过期、初始化中或最近循环失败'}
-    return {'database': database.get('connected', False), 'master_key_loaded': vault_ok,
-        'environment': app.settings.environment, 'production_sandbox_verified': False,
-        'remote_configured': remote, 'core_dependencies_ready': dependencies_ready, 'runtime_ready': dependencies_ready and ready_workers, 'workers': workers,
-        'checks': checks, 'checked_at': now(), 'unverified': ['任务与 Provider 实际执行', '模型推理', '生产沙箱', '备份恢复', '真机与家庭部署']}
+    try:
+        from .backup_settings import Store
+        backup = Store(app).read()
+        if backup['config']['enabled'] or (backup.get('last_run') or {}).get('status') in {'queued','running'}:
+            required.append('backup-worker')
+    except Exception:
+        configuration_error = '备份配置无法读取，请检查本机配置'
+    missing_workers = [name for name in required if not any(item['phase']=='running' for item in workers[name]['instances'])]
+    ready_workers = not missing_workers and configuration_error is None
+    labels={'core-worker':'任务执行器','memory-worker':'记忆索引','media-worker':'附件解析','notification-worker':'通知投递','backup-worker':'备份执行器','home-observer':'家居事件订阅'}
+    result = {'ok':ready_workers,'required':required,'missing':missing_workers,
+        'reason':configuration_error or ('必需执行器近期有正常循环心跳' if ready_workers else '未就绪：'+ '、'.join(labels[name] for name in missing_workers)+'。请启动对应进程或检查最近运行错误')}
+    return result,workers

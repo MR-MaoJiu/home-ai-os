@@ -45,11 +45,42 @@ def confirm(candidate_id: str, decision: str, request: Request, actor: Actor = D
         sources=[own(db,Record,rid,actor) for rid in json.loads(item.source_ids)]
         if any(r.deleted for r in sources):raise HTTPException(409,'来源已删除，不能确认')
         content=request.app.state.vault.open(item.content,actor.user_id+':candidate:'+item.id)
-        record=ingest(db,actor,DataRecord(source='conversation_memory' if item.conversation_id else 'memory_candidate',source_id=item.id,kind='memory.fact',version=1,sensitivity='SENSITIVE' if any(r.sensitivity=='SENSITIVE' for r in sources) else 'PRIVATE',payload={'content':content,'source_ids':[r.id for r in sources],'confirmed_at':now(),**({'conversation_id':item.conversation_id,'turn_id':item.turn_id} if item.conversation_id else {})}),request.app.state.vault)
+        from .auto_memory import before_confirm, candidate_sensitivity, bind_confirmed
+        before_confirm(request.app.state,db,actor,item)
+        sensitivity=candidate_sensitivity(db,item.id,'SENSITIVE' if any(r.sensitivity=='SENSITIVE' for r in sources) else 'PRIVATE')
+        record=ingest(db,actor,DataRecord(source='conversation_memory' if item.conversation_id else 'memory_candidate',source_id=item.id,kind='memory.fact',version=1,sensitivity=sensitivity,payload={'content':content,'source_ids':[r.id for r in sources],'confirmed_at':now(),**({'conversation_id':item.conversation_id,'turn_id':item.turn_id} if item.conversation_id else {})}),request.app.state.vault)
+        bind_confirmed(db,actor,item,record)
         item.status='CONFIRMED'
         audit(db,actor,'memory.confirm',record.id)
         db.commit()
         return {'record_id':record.id,'status':'CONFIRMED'}
+
+
+class EditMemory(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    content:str=Field(min_length=1,max_length=20000)
+    version:int=Field(ge=1)
+
+
+@router.patch('/entries/{record_id}')
+def edit_entry(record_id:str,body:EditMemory,request:Request,actor:Actor=Depends(authenticate)):
+    from .privacy import ensure_model_safe, PII
+    from .auto_memory import remember_forget, SENSITIVE
+    ensure_model_safe(body.content)
+    app=request.app.state
+    with app.db() as db:
+        from .sync_order import lock_changes
+        lock_changes(db)
+        record=own(db,Record,record_id,actor);db.refresh(record,with_for_update=True)
+        if record.deleted or record.kind!='memory.fact' or record.source!='conversation_memory':raise HTTPException(404,'个人聊天记忆不存在')
+        if record.version!=body.version:raise HTTPException(409,'记忆已变化，请刷新后修改')
+        remember_forget(app,db,actor,record)
+        payload=serialize(record,app.vault)['payload']
+        payload.update(content=body.content.strip(),origin='user_edited',edited_at=now())
+        sensitivity='SENSITIVE' if SENSITIVE.search(body.content) or PII.search(body.content) else record.sensitivity
+        updated=ingest(db,actor,DataRecord(source=record.source,source_id=record.source_id,kind=record.kind,version=record.version+1,sensitivity=sensitivity,cloud_policy='LOCAL_ONLY' if sensitivity=='SENSITIVE' else record.cloud_policy,payload=payload),app.vault)
+        emit(db,actor,'memory.updated',record.id);audit(db,actor,'memory.edit',record.id);db.commit()
+        return serialize(updated,app.vault)
 
 
 @router.get('/search')

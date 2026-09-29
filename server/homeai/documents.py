@@ -53,7 +53,7 @@ def checked_payload(db, actor, record, vault, payload=None):
     if payload is None:payload = serialize(record, vault)['payload']
     if record.kind == 'document.parsed' and record.source == 'document_parse':
         source = read_record(db, actor, record.source_id)
-        if source.owner_id != record.owner_id or source.kind not in {'document.file', 'document.import'}:
+        if source.owner_id != record.owner_id or source.kind not in {'document.file', 'document.import', 'photo.file', 'video.file'}:
             raise HTTPException(404, '文档来源不可用')
         if payload.get('source_version') != source.version:
             raise HTTPException(409, '原文件已更新，解析正文需要重新生成；请查看原文件')
@@ -65,7 +65,7 @@ def details(db, actor, identifier, app):
     from .sync_order import lock_changes
     lock_changes(db)
     source = read_record(db, actor, identifier)
-    if source.kind not in {'document.file', 'document.import'}:
+    if source.kind not in {'document.file', 'document.import', 'photo.file', 'video.file'}:
         raise HTTPException(422, '此记录不是文档文件')
     parsed = db.scalar(accessible(db, actor).where(Record.owner_id == source.owner_id,
         Record.source == 'document_parse', Record.source_id == source.id, Record.kind == 'document.parsed'))
@@ -90,3 +90,24 @@ def content_type(contents, filename):
     if contents.startswith(b'%PDF-'): return 'application/pdf'
     if contents[:4] == b'RIFF' and contents[8:12] == b'WEBP': return 'image/webp'
     return mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+
+def legacy_file(db, actor, record_id, app):
+    """旧附件仍通过规范记录鉴权，供普通和任务范围下载共用。"""
+    import base64
+    record=read_record(db,actor,record_id)
+    metadata=serialize(record,app.vault)['payload']
+    if record.kind in {'document.import','photo.selected'}:
+        encoded=metadata.get('content_base64','')
+    elif record.kind=='document.file' and record.source!='media_upload':
+        path=app.settings.state_dir/'blobs'/record.id
+        if not path.is_file() or path.is_symlink():raise HTTPException(404,'文件不可用')
+        encoded=app.vault.open(path.read_text(),record.owner_id+':blob:'+record.id)
+    else:raise HTTPException(422,'此记录不是旧格式附件')
+    try:contents=base64.b64decode(encoded,validate=True)
+    except Exception:raise HTTPException(422,'文件内容无效') from None
+    if len(contents)>app.settings.max_upload_bytes:raise HTTPException(413,'文件超过限制')
+    filename=metadata.get('name','attachment')
+    filename=filename[:200] if isinstance(filename,str) else 'attachment'
+    read_record(db,actor,record_id)
+    return contents,filename

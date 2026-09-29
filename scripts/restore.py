@@ -9,9 +9,10 @@ from pathlib import Path
 from dotenv import dotenv_values
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from homeai.backup import decrypt_stream,safe_extract,replay_deletions,verify_archive
+from homeai.backup import decrypt_stream,safe_extract,replay_deletions,replay_memory_forgets,prune_restored_media,invalidate_restored_authorizations,verify_archive
 from homeai.crypto import Vault
 from homeai.db import database
+from homeai.config import Settings
 
 root=Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser()
@@ -19,11 +20,16 @@ p.add_argument('--file',type=Path,required=True)
 p.add_argument('--key',type=Path,required=True)
 p.add_argument('--database',required=True)
 p.add_argument('--deletion-journal',type=Path,required=True,help='备份之外独立保管的最新删除日志')
+p.add_argument('--memory-forget-journal',type=Path,required=True,help='独立保管的最新记忆遗忘日志；从未遗忘也需明确提供空日志')
 p.add_argument('--allow-legacy',action='store_true',help='显式接受缺少完整性清单的旧备份')
 a=p.parse_args()
 if not re.fullmatch(r'homeai_restore_[a-z0-9_]+',a.database):raise SystemExit('目标必须为新的 homeai_restore_ 数据库')
-if not a.deletion_journal.is_file():raise SystemExit('独立删除日志缺失，不能恢复')
+if not a.deletion_journal.is_file() or a.deletion_journal.is_symlink():raise SystemExit('独立删除日志缺失，不能恢复')
+if not a.memory_forget_journal.is_file() or a.memory_forget_journal.is_symlink():raise SystemExit('独立记忆遗忘日志缺失，不能恢复')
 config=dotenv_values(root/'.env.local')
+settings=Settings(_env_file=root/'.env.local')
+master_key=settings.master_key_file if settings.master_key_file.is_absolute() else root/settings.master_key_file
+state_dir=settings.state_dir if settings.state_dir.is_absolute() else root/settings.state_dir
 admin=f"postgresql+psycopg://homeai_migrator:{config['HOMEAI_DB_ADMIN_PASSWORD']}@127.0.0.1:55432/homeai"
 key=a.key.read_bytes()
 if len(key)!=32 or a.key.stat().st_mode & 0o077:raise SystemExit('备份密钥格式/权限无效')
@@ -58,14 +64,17 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
         db.execute(text('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO homeai_app'))
         db.execute(text('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO homeai_app'))
         db.commit()
-    replay_deletions(factory,Vault.from_file(root/'state/master.key'),a.deletion_journal)
-    output=root/'state/restores'/a.database
+    vault=Vault.from_file(master_key)
+    deletion_result=replay_deletions(factory,vault,a.deletion_journal)
+    replay_memory_forgets(factory,vault,a.memory_forget_journal)
+    invalidate_restored_authorizations(factory,vault)
+    output=state_dir/'restores'/a.database
     output.mkdir(parents=True,exist_ok=False)
     os.chmod(output,0o700)
     if (destination/'blobs').exists():
         import shutil
         shutil.copytree(destination/'blobs',output/'blobs')
-    for directory in ('acme','tls','notifications'):
+    for directory in ('acme','tls','notifications','media'):
         if (destination/directory).exists():
             import shutil
             shutil.copytree(destination/directory,output/directory)
@@ -75,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
             if filename == 'backup-settings.enc':
                 # 恢复配置不代表重新授权自动备份，旧排队请求也不能在新机器自动执行。
                 from homeai.backup_settings import suspend_restored_configuration
-                restored = suspend_restored_configuration((destination/filename).read_text(), Vault.from_file(root/'state/master.key'))
+                restored = suspend_restored_configuration((destination/filename).read_text(), Vault.from_file(master_key))
                 (output/filename).write_text(restored)
             else:
                 shutil.copyfile(destination/filename,output/filename)
@@ -85,9 +94,13 @@ with tempfile.TemporaryDirectory(prefix='homeai-restore-') as directory:
         import shutil
         shutil.copyfile(destination/'server-identity.enc',output/'server-identity.enc')
         os.chmod(output/'server-identity.enc',0o600)
+    from homeai.private_files import private_write
+    private_write(output/'deletions.jsonl',a.deletion_journal.read_text())
+    private_write(output/'memory-forget.jsonl',a.memory_forget_journal.read_text())
+    prune_restored_media(output,deletion_result['removed_media_ids'])
     # 删除日志同时应用到恢复出的对象，禁止物理附件残留。
-    vault=Vault.from_file(root/'state/master.key')
+    vault=Vault.from_file(master_key)
     for line in a.deletion_journal.read_text().splitlines():
         tombstone=vault.open(line,'deletion-journal')
         (output/'blobs'/tombstone['record_id']).unlink(missing_ok=True)
-print('已恢复到隔离数据库 '+a.database+'，删除日志已重放；尚未切换业务服务。')
+print('已恢复到隔离数据库 '+a.database+'，删除与记忆遗忘日志均已重放，临时授权已作废；尚未切换业务服务。')

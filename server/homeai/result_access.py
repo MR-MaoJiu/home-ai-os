@@ -4,9 +4,11 @@ from .data import read_record
 
 
 def check_dependencies(db,actor,payload):
+    from .client_actions import read_authorized_record, check_task_grants
+    check_task_grants(db, actor, payload)
     versions=payload.get('_record_dependencies',{})
     for identifier in set(payload.get('record_ids',[]))|set(versions):
-        record=read_record(db,actor,identifier)
+        record=read_authorized_record(db,actor,identifier,payload)
         if record.sensitivity=='SECRET':raise HTTPException(403,'来源已变为秘密，结果不可继续使用')
         if identifier in versions and record.version!=versions[identifier]:raise HTTPException(409,'来源版本已变化，请重新执行')
 
@@ -15,7 +17,7 @@ def capture_result_dependencies(db,actor,payload,capability,result):
     versions=payload.setdefault('_record_dependencies',{})
     if capability=='knowledge.search@v1':
         entries=[{'id':row['record_id'],'version':row['version']} for row in result.get('matches',[])]
-    elif capability in {'memory.search@v1','calendar.search@v1','memory.semantic.search@v1','memory.graph.search@v1'}:
+    elif capability in {'memory.search@v1','calendar.search@v1','memory.semantic.search@v1','memory.graph.search@v1','client.request@v1','member.read@v1'}:
         entries=result.get('records',[]) if isinstance(result,dict) else result
     elif capability=='document.parse@v1':
         entries=[]

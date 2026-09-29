@@ -258,6 +258,7 @@ final class AppState {
         await restore()
         guard connected, UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else { return }
         startForegroundEvents()
+        ClientContextSampler.shared.refreshAllowedLocation()
         // 缓存和资料同步不等待 APNs 注册，避免无关网络请求拖住首屏。
         let notification = Task { await ClientNotifications.shared.synchronize(api: api) }
         do { try await loadData() }

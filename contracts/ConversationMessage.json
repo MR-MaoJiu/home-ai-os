@@ -1,0 +1,327 @@
+{
+  "$defs": {
+    "Availability": {
+      "additionalProperties": false,
+      "properties": {
+        "battery": {
+          "default": "unavailable",
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "title": "Battery",
+          "type": "string"
+        },
+        "network": {
+          "default": "unavailable",
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "title": "Network",
+          "type": "string"
+        },
+        "location": {
+          "default": "unavailable",
+          "enum": [
+            "available",
+            "not_authorized",
+            "unavailable",
+            "stale"
+          ],
+          "title": "Location",
+          "type": "string"
+        }
+      },
+      "title": "Availability",
+      "type": "object"
+    },
+    "ClientContext": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sampled_at": {
+          "format": "date-time",
+          "title": "Sampled At",
+          "type": "string"
+        },
+        "timezone": {
+          "maxLength": 100,
+          "title": "Timezone",
+          "type": "string"
+        },
+        "locale": {
+          "maxLength": 100,
+          "title": "Locale",
+          "type": "string"
+        },
+        "app_version": {
+          "default": "",
+          "maxLength": 50,
+          "title": "App Version",
+          "type": "string"
+        },
+        "battery_level": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Battery Level"
+        },
+        "battery_state": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "unplugged",
+            "charging",
+            "full"
+          ],
+          "title": "Battery State",
+          "type": "string"
+        },
+        "low_power_mode": {
+          "default": false,
+          "title": "Low Power Mode",
+          "type": "boolean"
+        },
+        "network_type": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "wifi",
+            "cellular",
+            "wired",
+            "other",
+            "offline"
+          ],
+          "title": "Network Type",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoarseLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "availability": {
+          "$ref": "#/$defs/Availability"
+        }
+      },
+      "required": [
+        "sampled_at",
+        "timezone",
+        "locale"
+      ],
+      "title": "ClientContext",
+      "type": "object"
+    },
+    "CoarseLocation": {
+      "additionalProperties": false,
+      "properties": {
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        },
+        "accuracy_meters": {
+          "minimum": 500,
+          "title": "Accuracy Meters",
+          "type": "number"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "precision": {
+          "const": "coarse",
+          "default": "coarse",
+          "title": "Precision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "latitude",
+        "longitude",
+        "accuracy_meters",
+        "observed_at"
+      ],
+      "title": "CoarseLocation",
+      "type": "object"
+    },
+    "Mention": {
+      "additionalProperties": false,
+      "properties": {
+        "member_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Member Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "member_id"
+      ],
+      "title": "Mention",
+      "type": "object"
+    },
+    "MessagePart": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "text",
+            "image",
+            "video",
+            "file"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Id"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "MessagePart",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "client_key": {
+      "maxLength": 100,
+      "minLength": 8,
+      "title": "Client Key",
+      "type": "string"
+    },
+    "content": {
+      "default": "",
+      "maxLength": 10000,
+      "title": "Content",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "2.0",
+      "enum": [
+        "1.0",
+        "2.0"
+      ],
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "parts": {
+      "items": {
+        "$ref": "#/$defs/MessagePart"
+      },
+      "maxItems": 20,
+      "title": "Parts",
+      "type": "array"
+    },
+    "mentions": {
+      "items": {
+        "$ref": "#/$defs/Mention"
+      },
+      "maxItems": 20,
+      "title": "Mentions",
+      "type": "array"
+    },
+    "client_context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClientContext"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reply_to_task_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reply To Task Id"
+    },
+    "timezone": {
+      "default": "Asia/Shanghai",
+      "maxLength": 100,
+      "title": "Timezone",
+      "type": "string"
+    }
+  },
+  "required": [
+    "client_key"
+  ],
+  "title": "Message",
+  "type": "object"
+}

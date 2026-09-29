@@ -1,0 +1,16 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "member_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Member Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "member_id"
+  ],
+  "title": "Mention",
+  "type": "object"
+}

@@ -5,6 +5,8 @@ import LocalAuthentication
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
+    @AppStorage(ClientContextSampler.locationPreference) private var coarseLocationEnabled = true
+    @State private var contextSampler = ClientContextSampler.shared
     @AppStorage("backgroundSyncEnabled") private var backgroundSyncEnabled = false
     @State private var scanning = false
     @State private var pendingPairing: String?
@@ -44,6 +46,15 @@ struct SettingsView: View {
             Section("数据共享") {
                 NavigationLink("健康与位置的持续共享") { ContinuousSharingView() }.disabled(!state.connected)
                 Text("上传资料与长期记忆分别存储在家庭服务器。图片和文件在数据页逐条共享。").font(.caption)
+            }
+            Section("对话上下文") {
+                Toggle("为对话提供大致位置", isOn: $coarseLocationEnabled)
+                    .onChange(of: coarseLocationEnabled) { _, enabled in contextSampler.setLocationHints(enabled) }
+                Text("系统已授权时使用前台获得的近期大致位置；未授权不会提供位置，发送消息也不会弹出权限框。不会持续后台定位。消息还携带已知电量、网络类型和时区。").font(.caption).foregroundStyle(.secondary)
+                Text(contextSampler.locationStatus).font(.caption).foregroundStyle(.secondary)
+            }
+            Section("成员") {
+                NavigationLink("成员请求与消息") { ClientActionInbox(notificationID: nil) }
             }
             Section("管理端登录") {
                 NavigationLink("管理端动态码") { AdminCodeView() }

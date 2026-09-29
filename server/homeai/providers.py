@@ -7,6 +7,18 @@ from .contracts import ProviderManifest
 from .db import Provider, Secret
 
 
+def ensure_local_model_endpoint(manifest):
+    """本地模型不能只凭网页提交的cloud=false把公网接口伪装成本地检测器。"""
+    import ipaddress
+    host=urlparse(manifest.endpoint).hostname
+    if host=='localhost':return
+    try:address=ipaddress.ip_address(host)
+    except ValueError:raise HTTPException(403,'本地模型请使用 localhost 或明确的局域网 IP；公网模型必须标记为云端') from None
+    networks=('127.0.0.0/8','10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','::1/128','fc00::/7')
+    if not any(address in ipaddress.ip_network(network) for network in networks):
+        raise HTTPException(403,'公网模型不能声明为本地模型')
+
+
 class Registry:
     def __init__(self, vault, transport=None):
         self.vault, self.transport = vault, transport
@@ -19,26 +31,41 @@ class Registry:
                 if manifest.secret_id:
                     secret = db.get(Secret, manifest.secret_id)
                     if not secret or secret.owner_id != db.info.get("user_id") or secret.provider_id != manifest.id:
-                        continue
+                        from .model_routing import shared_key
+                        from .security import Actor
+                        actor = Actor(db.info.get('user_id',''),db.info.get('household_id',''),'model-resolution','service')
+                        if capability != 'model.generate@v1' or not shared_key(self.vault,db,actor,manifest):
+                            continue
                 matches.append(manifest)
         if not matches:
             raise HTTPException(503, f"能力尚未配置可用 Provider：{capability}")
         return matches[0]
 
-    async def invoke(self, db, actor, manifest, capability, arguments, invocation_id):
+    async def invoke(self, db, actor, manifest, capability, arguments, invocation_id, *, cloud_permit=None):
         if capability not in manifest.capabilities:
             raise HTTPException(403, "能力未映射")
+        if not manifest.cloud and capability.startswith(('model.','photo.analyze')) and self.transport is None:
+            # 注入的传输用于离线契约测试；实际网络出口必须使用明确的本地地址。
+            ensure_local_model_endpoint(manifest)
         host = urlparse(manifest.endpoint).hostname
         if host not in manifest.allowed_hosts:
             raise HTTPException(403, "端点不在网络许可清单")
         if manifest.cloud and urlparse(manifest.endpoint).scheme != "https":
             raise HTTPException(403, "云端必须使用 HTTPS")
+        if manifest.cloud:
+            from .cloud_gateway import check_permit
+            check_permit(cloud_permit, actor, manifest, arguments)
         headers = {"Idempotency-Key": invocation_id}
         if manifest.secret_id:
             secret = db.get(Secret, manifest.secret_id)
-            if not secret or secret.owner_id != actor.user_id or secret.provider_id != manifest.id:
-                raise HTTPException(403, "Provider 无权使用此凭据")
-            headers["Authorization"] = "Bearer " + self.vault.open(secret.value, actor.user_id + ":secret:" + secret.id)
+            if secret and secret.owner_id == actor.user_id and secret.provider_id == manifest.id:
+                key = self.vault.open(secret.value, actor.user_id + ":secret:" + secret.id)
+            else:
+                from .model_routing import shared_key
+                key = shared_key(self.vault, db, actor, manifest) if capability == 'model.generate@v1' else None
+                if not key:
+                    raise HTTPException(403, "Provider 无权使用此凭据")
+            headers["Authorization"] = "Bearer " + key
         async with httpx.AsyncClient(timeout=manifest.timeout_seconds, transport=self.transport, follow_redirects=False, trust_env=False, headers=headers) as client:
             mapped = manifest.capabilities[capability]
             if manifest.adapter == "openai":
@@ -50,6 +77,8 @@ class Registry:
                         if type(temperature) not in (int, float) or not 0 <= temperature <= 2:
                             raise HTTPException(422, "采样温度无效")
                         payload["temperature"] = temperature
+                    if 'response_format' in arguments:
+                        payload['response_format'] = arguments['response_format']
                     if arguments.get("tools"):
                         payload["tools"] = arguments["tools"]
                         payload["tool_choice"] = "auto"

@@ -77,8 +77,7 @@ struct TaskProgressView: View {
 
 struct DataView: View {
     @Environment(AppState.self) private var state
-    @State private var importing = false
-    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var uploads = MediaDraft(scope: "data")
     @State private var scope = "personal"
     @State private var currentUser = ""
     @State private var currentMemberName = ""
@@ -93,6 +92,7 @@ struct DataView: View {
                 Text("我的").tag("personal")
                 Text("家庭").tag("family")
             }.pickerStyle(.segmented)
+            Section("上传资料") { MediaComposer(draft: uploads) }
             Section("服务器数据") {
                 if state.records.filter({ !$0.kind.hasPrefix("memory.") && ($0.isFamily || $0.owner_id == currentUser) && ($0.isFamily ? "family" : "personal") == scope }).isEmpty {
                     ContentUnavailableView(scope == "family" ? "暂无家庭数据" : "暂无个人数据", systemImage: "externaldrive", description: Text("导入图片或文件后，可选择仅自己或家庭可见。"))
@@ -109,34 +109,6 @@ struct DataView: View {
         }
 
         .navigationTitle("数据")
-        .toolbar {
-            PhotosPicker(selection: $selectedPhoto, matching: .images) { Label("导入照片", systemImage: "photo") }
-            Button("导入文件", systemImage: "plus") { importing = true }
-        }
-        .onChange(of: selectedPhoto) { _, photo in
-            guard let photo else { return }
-            Task { await state.perform {
-                guard let data = try await photo.loadTransferable(type: Data.self) else { return }
-                let prepared = try PhotoPreparation.jpeg(data)
-                try await ConnectorSync(api: state.api).uploadRecord(source: "photos", sourceID: DeviceIdentity.hash(data), kind: "photo.selected", payload: ["name": .string("用户选择的照片"), "content_base64": .string(prepared.base64EncodedString())])
-                try await state.loadData(force: true)
-                selectedPhoto = nil
-            } }
-        }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
-            Task { await state.perform {
-                let url = try result.get()
-                let access = url.startAccessingSecurityScopedResource()
-                defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let handle = try FileHandle(forReadingFrom: url)
-                defer { try? handle.close() }
-                let bytes = try handle.read(upToCount: 20 * 1024 * 1024 + 1) ?? Data()
-                guard bytes.count <= 20 * 1024 * 1024 else { throw APIClient.APIError.message("文件超过 20 MB") }
-                let task = try await state.api.uploadDocument(name: url.lastPathComponent, contents: bytes)
-                try await state.loadData(force: true)
-                state.syncStatus = "文档解析已提交（\(task.prefix(8))），完成后可直接在 AI 页面提问"
-            } }
-        }
         .task(id: state.connectionRevision) {
             if state.connected {
                 do {
@@ -232,7 +204,7 @@ private struct AutomationRunsView: View {
     }
 }
 
-struct FamilyMember: Decodable, Identifiable, Sendable { let id: String; let name: String }
+struct FamilyMember: Codable, Identifiable, Sendable { let id: String; let name: String }
 
 struct MemberMemoryView: View {
     @Environment(AppState.self) private var state
@@ -240,6 +212,7 @@ struct MemberMemoryView: View {
     private struct Snapshot: Codable { let entries: [DataEntry]; let candidates: [Candidate] }
     @State private var lastRefresh: Date?
     @State private var cached = false
+    @State private var editing: DataEntry?
     @State private var entries: [DataEntry] = []
     @State private var candidates: [Candidate] = []
     @State private var deciding = false
@@ -254,7 +227,20 @@ struct MemberMemoryView: View {
             if !entries.isEmpty {
                 Section("已记住") {
                     ForEach(entries) { record in
-                        Text(record.payload["content"]?.description ?? record.title).textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(record.payload["origin"]?.description == "automatic_preference" ? "自动记忆" : "已确认记忆").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("修改") { editing = record }.font(.caption)
+                            }
+                            Text(record.payload["content"]?.description ?? record.title).textSelection(.enabled)
+                            if let quote = record.payload["source_quote"]?.description, !quote.isEmpty { Text("来源原话：" + quote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                        }.swipeActions {
+                            Button("删除", role: .destructive) { Task {
+                                do { _ = try await state.api.request("DELETE", "/api/v1/data/" + record.id); await load(force: true) }
+                                catch { self.error = error.localizedDescription }
+                            } }
+                        }
                     }
                 }
             }
@@ -275,6 +261,7 @@ struct MemberMemoryView: View {
                 ContentUnavailableView("暂无聊天记忆", systemImage: "brain", description: Text("在 AI 对话中告诉它需要记住的内容。记忆由服务器保存，仅你自己可见。"))
             }
         }.navigationTitle("记忆")
+            .sheet(item: $editing) { record in MemoryEditor(record: record) { Task { await load(force: true) } } }
             .task(id: state.connectionRevision) { entries = []; candidates = []; lastRefresh = nil; await load() }
             .onChange(of: state.memoryEventRevision) { _, _ in Task { await load(force: true) } }
             .onChange(of: state.dataEventRevision) { _, _ in Task { await load(force: true) } }
@@ -320,13 +307,50 @@ struct MemberMemoryView: View {
     }
 }
 
+private struct MemoryEditor: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    let record: DataEntry
+    let saved: () -> Void
+    @State private var content: String
+    @State private var error: String?
+    @State private var busy = false
+    init(record: DataEntry, saved: @escaping () -> Void) {
+        self.record = record; self.saved = saved
+        _content = State(initialValue: record.payload["content"]?.description ?? "")
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("记忆内容", text: $content, axis: .vertical).lineLimit(4...12)
+                if let error { Text(error).foregroundStyle(.red) }
+            }.navigationTitle("修改记忆")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(busy) }
+                    ToolbarItem(placement: .confirmationAction) { Button("保存") { Task { await save() } }.disabled(busy || content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || content.count > 4000) }
+                }
+        }
+    }
+    private func save() async {
+        guard let version = record.version else { error = "记忆版本不可用，请刷新后重试"; return }
+        busy = true; defer { busy = false }
+        do {
+            _ = try await state.api.request("PATCH", "/api/v1/memory/entries/" + record.id, body: JSONSerialization.data(withJSONObject: ["content": content, "version": version]))
+            saved(); dismiss()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
 struct MemberRecordDetail: View {
     @Environment(AppState.self) private var state
     @Environment(\.scenePhase) private var phase
     let record: DataEntry
     let isOwner: Bool
+    var taskID: String? = nil
     private struct FileDetails: Codable { let record_id: String; let parsed: DataEntry?; let parse_status: String }
     @State private var detail: DataEntry?
+    @State private var taskReadValidated = false
+    @State private var loadGeneration = UUID()
     @State private var fileDetails: FileDetails?
     @State private var photo: UIImage?
     @State private var error: String?
@@ -342,16 +366,21 @@ struct MemberRecordDetail: View {
     @State private var visibility = "personal"
     @State private var saving = false
     private var displayed: DataEntry { detail ?? record }
+    private var isNewAsset: Bool { displayed.payload["media_upload_id"] != nil }
     private var isFile: Bool { ["document.file", "document.import"].contains(displayed.kind) }
-    private var recordKey: String { "record:" + record.id + ":" + String(record.version ?? 0) }
+    private var recordKey: String { ResourceRoutes.cacheScope(taskID) + "record:" + record.id + ":" + String(record.version ?? 0) }
 
     var body: some View {
         List {
             if unavailable {
                 ContentUnavailableView("资料不可用", systemImage: "lock", description: Text(error ?? "资料已删除或不再共享给你。"))
+            } else if taskID != nil && !taskReadValidated {
+                if let error { ContentUnavailableView("需要联网确认资料授权", systemImage: "lock", description: Text(error)) }
+                else { ProgressView("正在确认本次任务的资料授权…") }
             } else {
                 if loading { ProgressView("正在更新完整资料…") }
                 if let error { Text(error).foregroundStyle(.red) }
+                if isNewAsset { assetSection }
                 if displayed.kind == "photo.selected" {
                     Section("照片") {
                         if let photo { Image(uiImage: photo).resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: 420).accessibilityLabel("当前照片的实际内容") }
@@ -362,7 +391,7 @@ struct MemberRecordDetail: View {
                 if isFile {
                     Section("原文件") {
                         Text(displayed.title).textSelection(.enabled)
-                        Button("打开原文件", systemImage: "doc.text.magnifyingglass") { open() }.disabled(attachmentBusy)
+                        if !isNewAsset { Button("打开原文件", systemImage: "doc.text.magnifyingglass") { open() }.disabled(attachmentBusy) }
                         if attachmentBusy { ProgressView("正在读取原文件…") }
                     }
                     if let fileDetails {
@@ -396,26 +425,39 @@ struct MemberRecordDetail: View {
                 }
             }
         }
-        .navigationTitle(unavailable ? "资料不可用" : displayed.title)
+        .navigationTitle(unavailable || (taskID != nil && !taskReadValidated) ? "资料详情" : displayed.title)
         .onAppear { active = true; visibility = record.visibility ?? "personal" }
         .task(id: record.id + ":" + String(record.version ?? 0)) { await loadDetails() }
         .refreshable { await loadDetails() }
         .sheet(item: $preview, onDismiss: { closePreview() }) { RecordFilePreview(item: $0) }
         .sheet(item: $fullText) { RecordLongTextView(content: $0) }
         .onDisappear { active = false; attachmentOperation?.cancel(); closePreview() }
-        .onChange(of: phase) { _, phase in if phase == .background { attachmentOperation?.cancel(); closePreview() } }
+        .onChange(of: phase) { _, phase in
+            if phase == .background { attachmentOperation?.cancel(); closePreview(); if taskID != nil { clearSensitiveDisplay() } }
+            else if phase == .active && taskID != nil { Task { await loadDetails() } }
+        }
         .onChange(of: state.dataEventRevision) { _, _ in Task { await loadDetails() } }
         .onChange(of: state.connectionRevision) { _, _ in clearSensitiveDisplay() }
         .onChange(of: state.connected) { _, connected in if !connected { clearSensitiveDisplay() } }
+        .onChange(of: state.serverReachable) { _, reachable in if !reachable && taskID != nil { clearSensitiveDisplay() } }
     }
 
+    private var assetSection: some View {
+        Section("原件") {
+            NavigationLink { MediaAssetViewer(recordID: displayed.id, version: displayed.version ?? 1, taskID: taskID) } label: {
+                Label("查看完整附件", systemImage: "doc.text.magnifyingglass")
+            }
+            Text("按需读取完整原件，服务端负责解析与处理。").font(.caption).foregroundStyle(.secondary)
+        }
+    }
     private func closePreview() { preview?.remove(); preview = nil; fullText = nil }
     private func clearSensitiveDisplay() {
         attachmentOperation?.cancel(); closePreview()
+        taskReadValidated = false; loadGeneration = UUID()
         detail = nil; photo = nil; fileDetails = nil; unavailable = true
     }
     private func binaryKey(_ entry: DataEntry, field: String?) -> String {
-        "attachment:" + entry.id + ":" + String(entry.version ?? 0) + ":" + (field ?? "original")
+        ResourceRoutes.cacheScope(taskID) + "attachment:" + entry.id + ":" + String(entry.version ?? 0) + ":" + (field ?? "original")
     }
     private func apply(_ entry: DataEntry) {
         detail = entry; visibility = entry.visibility ?? "personal"
@@ -431,9 +473,9 @@ struct MemberRecordDetail: View {
             if code == 409 { error = "原件已更新，旧解析正文已隐藏，请查看或重新解析原文件。" }
             if let namespace {
                 await ClientViewCache.shared.remove(key: recordKey, namespace: namespace)
-                await ClientViewCache.shared.remove(key: "file-details:" + previous.id + ":" + String(previous.version ?? 0), namespace: namespace)
+                await ClientViewCache.shared.remove(key: ResourceRoutes.cacheScope(taskID) + "file-details:" + previous.id + ":" + String(previous.version ?? 0), namespace: namespace)
                 for field in Set(["original", "/content_base64"] + previous.payload.keys.filter { $0.hasSuffix("_base64") }.map { "/" + $0 }) {
-                    await ClientViewCache.shared.remove(key: "attachment:" + previous.id + ":" + String(previous.version ?? 0) + ":" + field, namespace: namespace)
+                    await ClientViewCache.shared.remove(key: ResourceRoutes.cacheScope(taskID) + "attachment:" + previous.id + ":" + String(previous.version ?? 0) + ":" + field, namespace: namespace)
                 }
             }
         }
@@ -448,26 +490,27 @@ struct MemberRecordDetail: View {
             }
         }
         let revision = state.dataEventRevision
+        let generation = loadGeneration
         let connection = state.connectionRevision
         do {
             let current = try await state.api.syncNamespace(); namespace = current
-            if detail == nil, let cached = await ClientViewCache.shared.read(key: recordKey, namespace: current),
+            if taskID == nil, detail == nil, let cached = await ClientViewCache.shared.read(key: recordKey, namespace: current),
                let value = try? JSONDecoder().decode(DataEntry.self, from: cached), await state.api.cachedNamespace() == current { apply(value) }
-            let raw = try await state.api.request("GET", "/api/v1/data/" + record.id, expectedNamespace: current)
-            guard active, !Task.isCancelled, state.dataEventRevision == revision, state.connectionRevision == connection, await state.api.cachedNamespace() == current else { return }
+            let raw = try await state.api.request("GET", ResourceRoutes.record(record.id, taskID: taskID), expectedNamespace: current)
+            guard active, !Task.isCancelled, loadGeneration == generation, state.dataEventRevision == revision, state.connectionRevision == connection, await state.api.cachedNamespace() == current else { return }
             let complete = try JSONDecoder().decode(DataEntry.self, from: raw)
             if let previous = detail?.version, previous != complete.version { closePreview(); fileDetails = nil }
-            apply(complete); error = nil; unavailable = false
-            try? await ClientViewCache.shared.write(raw, key: "record:" + complete.id + ":" + String(complete.version ?? 0), namespace: current)
+            apply(complete); error = nil; unavailable = false; taskReadValidated = true
+            try? await ClientViewCache.shared.write(raw, key: ResourceRoutes.cacheScope(taskID) + "record:" + complete.id + ":" + String(complete.version ?? 0), namespace: current)
             if isFile {
-                let parsedKey = "file-details:" + complete.id + ":" + String(complete.version ?? 0)
-                if fileDetails == nil, let cached = await ClientViewCache.shared.read(key: parsedKey, namespace: current) { fileDetails = try? JSONDecoder().decode(FileDetails.self, from: cached) }
-                let parsed = try await state.api.request("GET", "/api/v1/files/" + complete.id + "/details", expectedNamespace: current)
-                guard active, !Task.isCancelled, state.dataEventRevision == revision, state.connectionRevision == connection, await state.api.cachedNamespace() == current else { return }
+                let parsedKey = ResourceRoutes.cacheScope(taskID) + "file-details:" + complete.id + ":" + String(complete.version ?? 0)
+                if taskID == nil, fileDetails == nil, let cached = await ClientViewCache.shared.read(key: parsedKey, namespace: current) { fileDetails = try? JSONDecoder().decode(FileDetails.self, from: cached) }
+                let parsed = try await state.api.request("GET", ResourceRoutes.file(complete.id, taskID: taskID) + "/details", expectedNamespace: current)
+                guard active, !Task.isCancelled, loadGeneration == generation, state.dataEventRevision == revision, state.connectionRevision == connection, await state.api.cachedNamespace() == current else { return }
                 fileDetails = try JSONDecoder().decode(FileDetails.self, from: parsed)
                 try? await ClientViewCache.shared.write(parsed, key: parsedKey, namespace: current)
             }
-        } catch { if !Task.isCancelled && state.connectionRevision == connection { await deny(error) } }
+        } catch { if !Task.isCancelled && loadGeneration == generation && state.connectionRevision == connection { await deny(error) } }
     }
     private func open(field: String? = nil) {
         guard !attachmentBusy else { return }
@@ -480,7 +523,7 @@ struct MemberRecordDetail: View {
         do {
             let current = try await state.api.syncNamespace(); namespace = current
             // 下载/导出前重新读取权限和版本，缓存不能替代服务器授权判断。
-            let raw = try await state.api.request("GET", "/api/v1/data/" + record.id, expectedNamespace: current)
+            let raw = try await state.api.request("GET", ResourceRoutes.record(record.id, taskID: taskID), expectedNamespace: current)
             let verified = try JSONDecoder().decode(DataEntry.self, from: raw)
             guard active, !Task.isCancelled, state.connectionRevision == connection, state.dataEventRevision == revision, await state.api.cachedNamespace() == current else { return }
             apply(verified)
@@ -488,7 +531,7 @@ struct MemberRecordDetail: View {
             let data: Data
             if let cached = await ClientViewCache.shared.read(key: key, namespace: current) { data = cached }
             else if let field, let encoded = RecordAttachment.encodedValue(path: field, payload: verified.payload), let decoded = Data(base64Encoded: encoded) { data = decoded }
-            else { data = try await state.api.request("GET", "/api/v1/files/" + verified.id + "/content", expectedNamespace: current) }
+            else { data = try await state.api.request("GET", ResourceRoutes.file(verified.id, taskID: taskID) + "/content", expectedNamespace: current) }
             guard data.count <= RecordAttachment.maximumBytes else { throw APIClient.APIError.message("附件超过当前客户端的 20 MB 预览限制") }
             if field == nil, let expected = verified.payload["sha256"]?.description, expected.count == 64, DeviceIdentity.hash(data) != expected.lowercased() {
                 await ClientViewCache.shared.remove(key: key, namespace: current)
@@ -588,7 +631,9 @@ struct NotificationInboxView: View {
                     }
                     if let status = item.status { Text(status == "DUE" ? "已到期" : taskStatusLabel(status)).font(.subheadline) }
                     Text(Date(timeIntervalSince1970: item.created_at), format: .dateTime.month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
-                    if let conversation = item.conversation_id {
+                    if item.kind == "client.action" {
+                        NavigationLink("查看成员请求") { ClientActionInbox(notificationID: item.id).task { await markRead(item) } }
+                    } else if let conversation = item.conversation_id {
                         Button("查看对话") { Task { await openConversation(conversation, notification: item) } }
                     } else if let task = item.task_id {
                         NavigationLink { TaskProgressView(identifier: task).task { await markRead(item) } } label: { Text("查看执行结果") }

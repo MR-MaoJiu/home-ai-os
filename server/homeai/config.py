@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     event_subject_prefix: str = "homeai.events"
     session_seconds: int = 900
     max_upload_bytes: int = 20 * 1024 * 1024
+    media_image_max_bytes: int = Field(default=20 * 1024 * 1024, ge=1, le=256 * 1024 * 1024)
+    media_file_max_bytes: int = Field(default=50 * 1024 * 1024, ge=1, le=512 * 1024 * 1024)
+    media_video_max_bytes: int = Field(default=200 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
+    media_video_max_seconds: int = Field(default=600, ge=1, le=7200)
     provider_timeout_seconds: int = 60
     identity_certificate_file: Path = Path('state/tls/server.crt')
     server_addresses: list[str] = []

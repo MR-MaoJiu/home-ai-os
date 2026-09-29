@@ -59,6 +59,36 @@ def test_legacy_import_is_idempotent(system,alice):
     assert alice.request('GET','/api/v1/conversations/'+identifier).json()['turns'][0]['assistant_text']=='旧回答'
 
 
+def test_own_cloud_document_followup_keeps_sources_but_never_reuses_consent(system,alice):
+    from test_media import upload
+    from homeai.client_actions import create_request,ClientAction
+    from homeai.db import now
+    asset=upload(alice,b'CODE-91\nsecond line','followup.txt','file').json()['asset']
+    identifier=new_chat(alice)
+    first=alice.request('POST','/api/v1/conversations/'+identifier+'/messages',{'client_key':str(uuid.uuid4()),'content':'总结文件','parts':[{'type':'file','record_id':asset['record_id'],'version':1}]}).json()
+    actor=Actor(alice.user_id,'h1',alice.device_id,'infrastructure_owner');app=system[0].state
+    with system[2]() as db:
+        scope(db,alice.user_id,'h1');task=db.get(Task,first['task_id'])
+        action=create_request(app,db,actor,task,'cloud.disclose','本轮云披露',{'scope_hash':'b'*64,'record_versions':{asset['record_id']:1},'provider_id':'test.model'})
+        action_id=action['client_action_id'];db.commit()
+    assert alice.request('POST','/api/v1/client-actions/'+action_id+'/respond',{'idempotency_key':'followup-approval'}).status_code==200
+    finish(system,alice,first['task_id'],'这是本人的上轮文件摘要')
+    second=send(alice,identifier,'刚才的文件第二行是什么？').json()
+    with system[2]() as db:
+        scope(db,alice.user_id,'h1');task=db.get(Task,second['task_id'])
+        body=app.vault.open(task.request,alice.user_id+':task:'+task.id)
+        prior=history(app,db,actor,body)
+        assert '这是本人的上轮文件摘要' in json.dumps(prior,ensure_ascii=False)
+        assert asset['record_id'] in body['_historical_record_ids']
+        assert '_cloud_consents' not in body
+        # 云披露批准失效后仍可重新引用本人的原文件，但不能把旧摘要当作新证据。
+        db.get(ClientAction,action_id).expires_at=now()-1;db.commit()
+        body=app.vault.open(task.request,alice.user_id+':task:'+task.id)
+        prior=history(app,db,actor,body)
+        assert '这是本人的上轮文件摘要' not in json.dumps(prior,ensure_ascii=False)
+        assert asset['record_id'] in body['_historical_record_ids']
+
+
 def test_history_does_not_revive_revoked_sources(system,alice):
     bob=SignedClient(system[1],system[2]);rid=put(bob,record(payload={'title':'共享资料'}))
     assert bob.request('PUT','/api/v1/data/'+rid+'/visibility',{'visibility':'family'}).status_code==200

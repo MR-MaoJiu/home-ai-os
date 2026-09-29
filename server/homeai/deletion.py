@@ -35,6 +35,10 @@ def delete_tree(db, actor, record, vault, state_dir):
             candidate.status='SOURCE_DELETED'
             candidate.content=vault.seal('',actor.user_id+':candidate:'+candidate.id)
     for item in targets.values():
+        if item.kind=='memory.fact':
+            from .auto_memory import remember_forget
+            from types import SimpleNamespace
+            remember_forget(SimpleNamespace(vault=vault,settings=SimpleNamespace(state_dir=state_dir)),db,actor,item)
         item.deleted,item.payload,item.updated_at=True,'',now()
         notify_recipients(db,actor,'record.deleted',item.id)
         db.flush()
@@ -57,6 +61,8 @@ def delete_tree(db, actor, record, vault, state_dir):
             if task.status in {'RECEIVED','APPROVED','AWAITING_APPROVAL'}:task.status='CANCELED'
     for invocation in db.scalars(select(Invocation).where(Invocation.owner_id==actor.user_id)):
         invocation.result=None
+    from .model_routing import RedactionArtifact
+    db.execute(delete(RedactionArtifact).where(RedactionArtifact.owner_id==actor.user_id))
     db.commit()
     for rid in targets:
         (state_dir/'blobs'/rid).unlink(missing_ok=True)

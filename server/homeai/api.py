@@ -18,6 +18,10 @@ from .policy import Policy, CAPABILITIES
 from .providers import Registry
 from .data import accessible, serialize, ingest, read_record, emit, audit
 from .runtime import submit
+from .model_routing import router as model_routing_router
+from .client_actions import router as client_actions_router
+from .media import router as media_router
+from . import auto_memory  # 在测试建表及迁移元数据读取前登记规范表。
 
 
 def create_app(settings=None, vault=None, db_factory=None, policy=None, registry=None):
@@ -46,6 +50,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.state.db = db_factory or database(settings.database_url)[1]
     app.state.policy = policy or Policy(settings.opa_url)
     app.state.registry = registry or Registry(app.state.vault)
+    app.include_router(model_routing_router)
+    app.include_router(client_actions_router)
+    app.include_router(media_router)
     from .sharing import router as sharing_router
     app.include_router(sharing_router)
     from .builtins import router as builtin_router
@@ -235,23 +242,33 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
         from fastapi.responses import Response
         from urllib.parse import quote
         with app.state.db() as db:
-            record = read_record(db, actor, record_id)
-            metadata = serialize(record, v)['payload']
-            if record.kind in {'document.import','photo.selected'}:
-                encoded = metadata.get('content_base64', '')
-            elif record.kind == 'document.file':
-                path = settings.state_dir / 'blobs' / record.id
-                if not path.is_file() or path.is_symlink(): raise HTTPException(404, '文件不可用')
-                encoded = v.open(path.read_text(), record.owner_id + ':blob:' + record.id)
-            else: raise HTTPException(422, '此记录不是文件')
-            try: contents = base64.b64decode(encoded, validate=True)
-            except Exception: raise HTTPException(422, '文件内容无效') from None
-            if len(contents) > settings.max_upload_bytes: raise HTTPException(413, '文件超过限制')
-            filename = metadata.get('name', 'attachment')
-            filename = filename[:200] if isinstance(filename, str) else 'attachment'
-            from .documents import content_type
-            read_record(db,actor,record_id)
+            from .documents import legacy_file,content_type
+            contents,filename=legacy_file(db,actor,record_id,app.state)
             return Response(contents, media_type=content_type(contents,filename), headers={'Content-Disposition': "attachment; filename*=UTF-8''" + quote(filename, safe=''), 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
+
+    @app.get('/api/v1/tasks/{task_id}/files/{record_id}/details')
+    def task_file_details(task_id:str,record_id:str,actor:Actor=auth):
+        from .client_actions import authorized_source_scope
+        from .documents import details
+        with app.state.db() as db:
+            task=own(db,Task,task_id,actor)
+            payload=v.open(task.request,actor.user_id+':task:'+task.id)
+            with authorized_source_scope(db,actor,record_id,payload) as reader:
+                result=details(db,reader,record_id,app.state)
+            return result
+
+    @app.get('/api/v1/tasks/{task_id}/files/{record_id}/content')
+    def task_file_content(task_id:str,record_id:str,actor:Actor=auth):
+        from .client_actions import authorized_source_scope
+        from .documents import legacy_file,content_type
+        from fastapi.responses import Response
+        from urllib.parse import quote
+        with app.state.db() as db:
+            task=own(db,Task,task_id,actor)
+            payload=v.open(task.request,actor.user_id+':task:'+task.id)
+            with authorized_source_scope(db,actor,record_id,payload) as reader:
+                contents,filename=legacy_file(db,reader,record_id,app.state)
+            return Response(contents,media_type=content_type(contents,filename),headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(filename,safe=''),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
 
     @app.post("/api/v1/files/{record_id}/parse", status_code=202)
     def parse_file(record_id: str, actor: Actor = auth):
@@ -298,10 +315,24 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
         with app.state.db() as db:
             task = own(db, Task, task_id, actor)
             task.cancel_requested = True
-            if task.status in {"RECEIVED", "AWAITING_APPROVAL", "APPROVED"}:
+            if task.status in {"RECEIVED", "AWAITING_APPROVAL", "APPROVED", "WAITING_CLIENT", "WAITING_MEDIA", "WAITING_BUDGET", "WAITING_PRIVACY"}:
                 task.status = "CANCELED"
+            from .client_actions import cancel_task_actions
+            cancel_task_actions(app.state, db, actor, task)
+            emit(db, actor, 'task.updated', task.id)
             db.commit()
             return task_view(task, db, actor)
+
+    @app.get('/api/v1/tasks/{task_id}/content-access')
+    def task_content_access(task_id:str,actor:Actor=auth):
+        from .result_access import check_dependencies
+        with app.state.db() as db:
+            task=own(db,Task,task_id,actor)
+            if task.cancel_requested or not task.result or task.status!='SUCCEEDED':return {'allowed':False,'reason':'任务结果不可用'}
+            payload=v.open(task.request,actor.user_id+':task:'+task.id)
+            try:check_dependencies(db,actor,payload)
+            except HTTPException:return {'allowed':False,'reason':'来源或本次任务授权已失效'}
+            return {'allowed':True}
 
     @app.get("/api/v1/approvals")
     def approvals(actor: Actor = auth):
@@ -386,7 +417,10 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
                 # 注册端点不等于完成沙箱部署，生产环境必须由受控部署工具启用。
                 if settings.environment == "production":
                     raise HTTPException(409, "生产启用需先完成沙箱与供应链验收")
-                row.enabled, row.health = True, "degraded"
+                scope(db, actor.user_id, actor.household_id)
+                from .model_routing import verification
+                report=verification(db,actor.household_id,ProviderManifest.model_validate_json(row.manifest))
+                row.enabled, row.health = True, "online" if report.get('text') else "degraded"
             else:
                 raise HTTPException(422, "不支持的生命周期操作")
             scope(db, actor.user_id, actor.household_id)

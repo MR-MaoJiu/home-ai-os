@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ChatWebSource: Codable { let title: String; let url: String }
-struct ChatRecordSource: Codable { let record_id: String; let title: String; let version: Int? }
+struct ChatRecordSource: Codable { let record_id: String; let title: String; let version: Int?; var task_id: String? = nil }
 struct StoredChatTurn: Codable, Identifiable {
     let id: String
     let sequence: Int
@@ -14,6 +14,22 @@ struct StoredChatTurn: Codable, Identifiable {
     let approvals: [ApprovalEntry]
     let web_sources: [ChatWebSource]
     let sources: [ChatRecordSource]
+    var user_parts: [ChatPart]? = nil
+    var assistant_parts: [ChatPart]? = nil
+    var mentions: [ChatMention]? = nil
+    var client_actions: [ClientActionRequest]? = nil
+    var requires_online_revalidation: Bool? = nil
+    func cached(now: Date = Date()) -> StoredChatTurn {
+        let temporary = sources.contains { $0.task_id != nil } || (assistant_parts ?? []).contains { ["image", "video", "file"].contains($0.type) && $0.task_id != nil }
+        let consentExpired = (client_actions ?? []).contains { $0.kind == "cloud.disclose" && (($0.status == "RESPONDED" && $0.expires_at <= now.timeIntervalSince1970) || $0.status == "REVOKED") }
+        guard temporary || consentExpired || requires_online_revalidation == true else { return self }
+        return StoredChatTurn(id: id, sequence: sequence, client_key: client_key, user_text: user_text, task_id: task_id, status: status,
+            assistant_text: "这轮内容需要联网重新确认授权。", error: nil, approvals: [], web_sources: [], sources: [], user_parts: user_parts,
+            assistant_parts: [], mentions: mentions, client_actions: [], requires_online_revalidation: true)
+    }
+    var needsLiveContentAccess: Bool { sources.contains { $0.task_id != nil } || (assistant_parts ?? []).contains { $0.task_id != nil } || (client_actions ?? []).contains { $0.kind == "cloud.disclose" && ["RESPONDED", "REVOKED"].contains($0.status) } }
+    var contentExpiresAt: Double? { (client_actions ?? []).filter { $0.kind == "cloud.disclose" && $0.status == "RESPONDED" }.map(\.expires_at).min() }
+    var blocksComposer: Bool { ["RECEIVED", "EXECUTING", "APPROVED"].contains(status) }
     var pending: Bool { !["SUCCEEDED", "FAILED", "CANCELED", "NEEDS_RECONCILIATION"].contains(status) }
 }
 struct StoredConversationPage: Decodable {
@@ -45,10 +61,10 @@ struct ChatSnapshot: Codable {
         return values.values.sorted { $0.sequence < $1.sequence }
     }
     var bounded: ChatSnapshot {
-        let recent = Array(turns.suffix(200))
+        let recent = Array(turns.suffix(200)).map { $0.cached() }
         return ChatSnapshot(conversationID: conversationID, ownerNamespace: ownerNamespace, turns: recent,
                             before: recent.count < turns.count ? recent.first?.sequence : before,
-                            etag: etag, after: after)
+                            etag: recent.contains(where: { $0.requires_online_revalidation == true }) ? nil : etag, after: after)
     }
 }
 struct PendingChatSend: Codable {
@@ -56,6 +72,12 @@ struct PendingChatSend: Codable {
     let clientKey: String
     let content: String
     let timezone: String
+    var schemaVersion: String? = nil
+    var parts: [ChatPart]? = nil
+    var mentions: [ChatMention]? = nil
+    var mediaIDs: [String]? = nil
+    var clientContext: ClientContextSnapshot? = nil
+    var replyToTaskID: String? = nil
 }
 
 struct ChatView: View {
@@ -84,11 +106,17 @@ struct ChatView: View {
     @State private var pollID = UUID()
     @State private var voice = VoiceCapture()
     @State private var router = IntentRouter.shared
+    @State private var draft = MediaDraft()
+    @State private var mentions: [ChatMention] = []
+    @State private var directory = MemberDirectoryStore()
+    @State private var clientActions = ClientActionStore()
+    @State private var choosingMembers = false
+    @State private var replyToTaskID: String?
     private var pendingKey: String { "chat.pending:" + ownerNamespace }
     private let cacheKey = "chat.default"
     private var loading: Bool { refreshRun != nil }
     private var loadingOlder: Bool { olderRun != nil }
-    private var running: Bool { turns.contains { $0.pending } }
+    private var running: Bool { turns.contains { $0.blocksComposer } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -103,26 +131,41 @@ struct ChatView: View {
                         ForEach(turns) { turn in turnCard(turn).id(turn.id) }
                         let visibleIDs = Set(turns.flatMap { $0.approvals.map(\.id) })
                         ForEach(pendingApprovals.filter { !visibleIDs.contains($0.id) }) { approval in approvalCard(approval) }
+                        let visibleActions = Set(turns.flatMap { ($0.client_actions ?? []).map(\.id) })
+                        ForEach(clientActions.items.filter { $0.pending && !visibleActions.contains($0.id) }) { ClientActionCard(action: $0) }
                     }.padding()
                 }
                 .onChange(of: turns.last?.id) { _, _ in if let last = turns.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Button("指定成员", systemImage: "at") { choosingMembers = true }.font(.caption)
+                    ForEach(mentions, id: \.member_id) { mention in Text("@" + directory.name(mention.member_id)).font(.caption).foregroundStyle(.teal) }
+                    Spacer()
+                    NavigationLink { ClientActionInbox(notificationID: nil) } label: { Image(systemName: "person.crop.circle.badge.questionmark") }
+                }
+                if let replyToTaskID { HStack { Text("关联任务继续对话").font(.caption); Button("取消", systemImage: "xmark") { self.replyToTaskID = nil }.font(.caption) }.accessibilityIdentifier("reply-task-" + replyToTaskID) }
+                MediaComposer(draft: draft).frame(maxHeight: draft.items.isEmpty ? 40 : 180)
+            }.padding(.horizontal)
             HStack(alignment: .bottom) {
                 Button { Task { await voiceInput() } } label: { Image(systemName: voice.recording ? "stop.circle.fill" : "mic.circle").font(.title) }
                     .disabled(sending || namespace == nil || running)
                     .accessibilityLabel(voice.recording ? "结束录音" : "语音输入")
                 TextField("问问 Home AI", text: $input, axis: .vertical).disabled(sending || voice.recording).lineLimit(1...6).padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 18))
                 Button { Task { await send() } } label: { Image(systemName: "arrow.up.circle.fill").font(.largeTitle) }
-                    .disabled(sending || running || namespace == nil || ownerNamespace.isEmpty || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(sending || running || namespace == nil || ownerNamespace.isEmpty || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.items.isEmpty) || draft.items.contains(where: { $0.asset == nil }))
                     .accessibilityLabel("发送消息")
             }.padding()
         }
         .navigationTitle("Home AI")
+        .sheet(isPresented: $choosingMembers) { MemberDirectoryView(selected: $mentions, directory: directory) }
+        .task(id: state.connectionRevision) { await directory.load(api: state.api); await clientActions.load(api: state.api) }
         .onAppear { isVisible = true; viewGeneration = UUID() }
         .onDisappear {
             isVisible = false; viewGeneration = UUID(); bootstrapRun = nil
             refreshRequested = false; refreshRun = nil; olderRun = nil
             trailingRefresh?.cancel(); trailingRefresh = nil
+            hideTransientContent()
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -140,8 +183,11 @@ struct ChatView: View {
                 try? await Task.sleep(for: .seconds(1.5))
             }
         }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await bootstrap() } } }
-        .onChange(of: state.taskEventRevision) { _, _ in Task { await refresh() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await bootstrap() } }
+            else if phase == .background { hideTransientContent() }
+        }
+        .onChange(of: state.taskEventRevision) { _, _ in Task { await refresh(); await clientActions.load(api: state.api) } }
         .onChange(of: state.dataEventRevision) { _, _ in Task { await refresh() } }
         .onChange(of: router.conversationID) { _, id in
             guard id != nil else { return }
@@ -150,25 +196,40 @@ struct ChatView: View {
         }
         .onChange(of: state.serverReachable) { _, online in
             if online && bootstrapRun == nil { Task { await bootstrap() } }
+            else if !online { hideTransientContent() }
         }
     }
 
     @ViewBuilder private func turnCard(_ turn: StoredChatTurn) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { Spacer(minLength: 24); Text(turn.user_text).padding().background(.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 16)) }
-            if !turn.assistant_text.isEmpty {
+            if !turn.user_text.isEmpty { HStack { Spacer(minLength: 24); Text(turn.user_text).padding().background(.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 16)) } }
+            if let mentions = turn.mentions, !mentions.isEmpty { Text(mentions.map { "@" + directory.name($0.member_id) }.joined(separator: " ")).font(.caption).foregroundStyle(.teal) }
+            ForEach(Array((turn.user_parts ?? []).filter { $0.type != "text" }.enumerated()), id: \.offset) { _, part in ChatPartView(part: part) }
+            if let parts = turn.assistant_parts, !parts.isEmpty {
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in ChatPartView(part: part, actions: turn.client_actions ?? [], validationTaskID: turn.needsLiveContentAccess ? turn.task_id : nil, expiresAt: turn.contentExpiresAt) }
+            } else if !turn.assistant_text.isEmpty {
                 Text(turn.assistant_text).textSelection(.enabled)
-                if let namespace {
-                    NavigationLink("朗读回答") {
-                        SpeechView(text: turn.assistant_text, expectedNamespace: namespace, sources: turn.sources.map { RecordReference(id: $0.record_id, title: $0.title, version: $0.version) })
-                    }.font(.caption)
-                }
+            }
+            if !turn.assistant_text.isEmpty, !turn.sources.contains(where: { $0.task_id != nil }), let namespace {
+                NavigationLink("朗读回答") { SpeechView(text: turn.assistant_text, expectedNamespace: namespace, sources: turn.sources.map { RecordReference(id: $0.record_id, title: $0.title, version: $0.version, taskID: $0.task_id) }) }.font(.caption)
             }
             ForEach(turn.sources, id: \.record_id) { source in
-                NavigationLink(source.title) { RecordSourceView(source: RecordReference(id: source.record_id, title: source.title, version: source.version)) }.font(.caption)
+                NavigationLink(source.title) { RecordSourceView(source: RecordReference(id: source.record_id, title: source.title, version: source.version, taskID: source.task_id)) }.font(.caption)
             }
             if let problem = turn.error { Text(problem).foregroundStyle(.red).font(.caption) }
-            if turn.pending { HStack { ProgressView(); Text(taskStatusLabel(turn.status)).font(.caption); Button("取消") { Task { await cancel(turn) } } } }
+            if turn.pending {
+                HStack {
+                    if turn.blocksComposer { ProgressView() }
+                    Text(taskStatusLabel(turn.status)).font(.caption)
+                    Button("取消") { Task { await cancel(turn) } }
+                }
+                if ["WAITING_BUDGET", "WAITING_PRIVACY", "WAITING_MEDIA"].contains(turn.status) {
+                    Button("重新检查") { Task { await resume(turn) } }.font(.caption)
+                }
+                if !turn.blocksComposer { Button("就此继续对话") { replyToTaskID = turn.task_id }.font(.caption) }
+            }
+            let represented = Set((turn.assistant_parts ?? []).compactMap(\.action_id))
+            ForEach((turn.client_actions ?? []).filter { !represented.contains($0.id) }) { ClientActionCard(action: $0) }
             ForEach(turn.approvals) { approval in approvalCard(approval) }
             ForEach(Array(turn.web_sources.enumerated()), id: \.offset) { _, source in
                 if let url = URL(string: source.url), ["https", "http"].contains(url.scheme?.lowercased()), url.user == nil, url.password == nil {
@@ -197,7 +258,8 @@ struct ChatView: View {
             guard !Task.isCancelled, bootstrapRun == run else { return }
             if namespace != local { clearView(); namespace = local; bootstrapRun = run }
             if turns.isEmpty, let bytes = await ClientViewCache.shared.read(key: cacheKey, namespace: local),
-               let snapshot = try? JSONDecoder().decode(ChatSnapshot.self, from: bytes), !Task.isCancelled, bootstrapRun == run, namespace == local {
+               let stored = try? JSONDecoder().decode(ChatSnapshot.self, from: bytes), !Task.isCancelled, bootstrapRun == run, namespace == local {
+                let snapshot = stored.bounded
                 selected = snapshot.conversationID; ownerNamespace = snapshot.ownerNamespace
                 turns = snapshot.turns; before = snapshot.before; etag = snapshot.etag; after = snapshot.after
                 restorePendingDraft()
@@ -221,12 +283,17 @@ struct ChatView: View {
             await handleFailure(error)
         }
     }
+    private func hideTransientContent() {
+        let safe = turns.map { $0.cached() }
+        if safe.contains(where: { $0.requires_online_revalidation == true }) { turns = safe; etag = nil }
+    }
     private func clearView() {
         namespace = nil; ownerNamespace = ""; selected = nil; turns = []; pendingApprovals = []
         before = nil; etag = nil; after = 0; defaultResolved = false
         bootstrapRun = nil; input = ""; notice = nil
         refreshRun = nil; olderRun = nil; refreshRequested = false
         trailingRefresh?.cancel(); trailingRefresh = nil
+        draft.pause(); mentions = []; replyToTaskID = nil; clientActions.items = []
     }
     private func defaultConversation(namespace: String) async throws -> String {
         struct Created: Decodable { let id: String }
@@ -240,8 +307,12 @@ struct ChatView: View {
     private func restorePendingDraft() {
         guard !ownerNamespace.isEmpty, let selected,
               let data = DeviceIdentity.read(pendingKey), let pending = try? JSONDecoder().decode(PendingChatSend.self, from: data), pending.conversationID == selected else { return }
-        if turns.contains(where: { $0.client_key == pending.clientKey }) { try? DeviceIdentity.save(Data(), name: pendingKey) }
-        else if input.isEmpty { input = pending.content }
+        if turns.contains(where: { $0.client_key == pending.clientKey }) {
+            try? DeviceIdentity.save(Data(), name: pendingKey)
+            if let ids = pending.mediaIDs { Task { await draft.acknowledge(ids: ids) } }
+        } else if input.isEmpty {
+            input = pending.content; mentions = pending.mentions ?? []; replyToTaskID = pending.replyToTaskID
+        }
     }
     private func saveCache(namespace: String) async {
         guard isVisible, !Task.isCancelled, state.connected, self.namespace == namespace, let selected, !ownerNamespace.isEmpty else { return }
@@ -387,14 +458,32 @@ struct ChatView: View {
             }
             guard let selected else { return }
             let previous = DeviceIdentity.read(pendingStorage).flatMap { try? JSONDecoder().decode(PendingChatSend.self, from: $0) }
-            let pending = previous?.conversationID == selected && previous?.content == input ? previous! : PendingChatSend(conversationID: selected, clientKey: UUID().uuidString, content: input, timezone: TimeZone.current.identifier)
+            let parts = draft.items.compactMap { $0.asset.map(ChatPart.init(asset:)) }
+            guard parts.count == draft.items.count else { throw APIClient.APIError.message("附件尚未上传完成") }
+            let reusable = previous?.conversationID == selected && previous?.content == input && (previous?.parts ?? []) == parts && (previous?.mentions ?? []) == mentions && previous?.replyToTaskID == replyToTaskID
+            let pending: PendingChatSend
+            if reusable, let previous { pending = previous }
+            else {
+                pending = PendingChatSend(conversationID: selected, clientKey: UUID().uuidString, content: input, timezone: TimeZone.current.identifier,
+                    schemaVersion: "2.0", parts: parts, mentions: mentions, mediaIDs: draft.items.map(\.id), clientContext: ClientContextSampler.shared.snapshot(), replyToTaskID: replyToTaskID)
+            }
             try DeviceIdentity.save(JSONEncoder().encode(pending), name: pendingStorage)
-            let body = try JSONSerialization.data(withJSONObject: ["client_key": pending.clientKey, "content": pending.content, "timezone": pending.timezone])
+            var payload: [String: Any] = ["client_key": pending.clientKey, "content": pending.content, "timezone": pending.timezone]
+            if let schema = pending.schemaVersion {
+                payload["schema_version"] = schema
+                payload["parts"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pending.parts ?? []))
+                payload["mentions"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pending.mentions ?? []))
+                if let context = pending.clientContext { payload["client_context"] = try context.json() }
+                if let reply = pending.replyToTaskID { payload["reply_to_task_id"] = reply }
+            }
+            let body = try JSONSerialization.data(withJSONObject: payload)
             let bytes = try await state.api.request("POST", "/api/v1/conversations/" + selected + "/messages", body: body, expectedNamespace: namespace)
             let received = try JSONDecoder().decode(StoredChatTurn.self, from: bytes)
             try DeviceIdentity.save(Data(), name: pendingStorage)
             guard isCurrent(namespace: namespace, revision: revision, generation: generation), self.selected == selected else { return }
-            input = ""; turns = ChatSnapshot.merge(turns, updates: [received]); after = max(after, received.sequence); error = nil
+            input = ""; mentions = []; replyToTaskID = nil
+            await draft.acknowledge(ids: pending.mediaIDs ?? [])
+            turns = ChatSnapshot.merge(turns, updates: [received]); after = max(after, received.sequence); error = nil
             await saveCache(namespace: namespace); pollID = UUID()
         } catch {
             guard isCurrent(namespace: namespace, revision: revision, generation: generation) else { return }
@@ -408,6 +497,10 @@ struct ChatView: View {
             _ = try await state.api.request("POST", "/api/v1/approvals/" + id, body: JSONSerialization.data(withJSONObject: ["decision": decision]), expectedNamespace: namespace)
             await refresh();pollID = UUID()
         } catch { self.error = error.localizedDescription }
+    }
+    private func resume(_ turn: StoredChatTurn) async {
+        do { _ = try await state.api.request("POST", "/api/v1/tasks/" + turn.task_id + "/resume"); await refresh(); pollID = UUID() }
+        catch { self.error = error.localizedDescription }
     }
     private func cancel(_ turn: StoredChatTurn) async {
         guard let namespace else { return }
@@ -438,7 +531,7 @@ struct ChatView: View {
             guard case .object(let fields) = value, case .string(let identifier) = fields["record_id"], UUID(uuidString: identifier) != nil else { return nil }
             let version: Int?
             if case .number(let number) = fields["version"] { version = Int(exactly: number) } else { version = nil }
-            return RecordReference(id: identifier, title: fields["title"]?.description ?? "资料", version: version)
+            return RecordReference(id: identifier, title: fields["title"]?.description ?? "资料", version: version, taskID: fields["task_id"]?.description)
         }
     }
 

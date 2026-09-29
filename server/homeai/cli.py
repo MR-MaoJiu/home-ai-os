@@ -6,12 +6,20 @@ from sqlalchemy import select
 from .config import Settings
 from .db import database, Principal, uid
 from .security import credential
+from .schema import registered_metadata
+
+WORKER_MODULES = {
+    'core':'homeai.worker', 'memory':'homeai.memory_worker', 'media':'homeai.media',
+    'notification':'homeai.notifications', 'backup':'homeai.backup_settings', 'home':'homeai.home_observer',
+}
 
 
 def main():
     parser = argparse.ArgumentParser(description="Home AI OS 本机管理工具")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init-key")
+    worker = commands.add_parser('worker', help='启动指定后台执行器；适用于安装包和容器')
+    worker.add_argument('--service', choices=WORKER_MODULES, required=True)
     bootstrap = commands.add_parser("bootstrap")
     bootstrap.add_argument("--name", required=True)
     recover = commands.add_parser("web-recover")
@@ -30,6 +38,12 @@ def main():
     if args.command == "pair" and args.url:
         from .server_identity import addresses
         addresses([args.url])
+    registered_metadata()
+    if args.command == 'worker':
+        import asyncio
+        from importlib import import_module
+        asyncio.run(import_module(WORKER_MODULES[args.service]).main())
+        return
     settings = Settings()
     if args.command == "init-key":
         settings.master_key_file.parent.mkdir(parents=True, exist_ok=True)

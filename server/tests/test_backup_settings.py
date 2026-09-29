@@ -188,8 +188,9 @@ def test_backup_source_rejects_other_database_servers():
             development_database_name(url)
 
 
-def test_backup_destination_cannot_recursively_include_itself(system,alice):
-    destination=system[0].state.settings.state_dir/'blobs'/'backups'
+@pytest.mark.parametrize('source_directory',['blobs','media','acme','tls','notifications'])
+def test_backup_destination_cannot_recursively_include_itself(system,alice,source_directory):
+    destination=system[0].state.settings.state_dir/source_directory/'backups'
     response=alice.request('PUT','/api/v1/manage/backup-settings',{'enabled':True,'directory':str(destination),'frequency':'daily'})
     assert response.status_code==422
     assert not destination.exists()

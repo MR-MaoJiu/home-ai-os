@@ -1,0 +1,74 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "local_fast": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Local Fast"
+    },
+    "local_privacy": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Local Privacy"
+    },
+    "cloud_planner": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cloud Planner"
+    },
+    "vision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Vision"
+    },
+    "shared_cloud": {
+      "default": false,
+      "title": "Shared Cloud",
+      "type": "boolean"
+    },
+    "household_daily_tokens": {
+      "default": 0,
+      "maximum": 100000000,
+      "minimum": 0,
+      "title": "Household Daily Tokens",
+      "type": "integer"
+    },
+    "member_daily_tokens": {
+      "default": 0,
+      "maximum": 10000000,
+      "minimum": 0,
+      "title": "Member Daily Tokens",
+      "type": "integer"
+    }
+  },
+  "title": "ConfigurationInput",
+  "type": "object"
+}

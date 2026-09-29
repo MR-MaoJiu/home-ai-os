@@ -10,6 +10,8 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.lock && pip install --no-deps -e .
       - run: python scripts/check_boundaries.py
+      - name: Verify public contract snapshots
+        run: python scripts/export_contracts.py --check
       - name: Prepare isolated integration services
         run: |
           python scripts/dev_env.py

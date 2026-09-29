@@ -25,7 +25,7 @@ from .notifications_config import environment_configuration, resolve_configurati
 
 router = APIRouter(prefix='/api/v1', tags=['通知'])
 log = logging.getLogger('homeai.notifications')
-NOTIFY_STATUSES = {'SUCCEEDED', 'FAILED', 'CANCELED', 'AWAITING_APPROVAL', 'NEEDS_RECONCILIATION'}
+NOTIFY_STATUSES = {'SUCCEEDED', 'FAILED', 'CANCELED', 'AWAITING_APPROVAL', 'NEEDS_RECONCILIATION', 'WAITING_BUDGET', 'WAITING_PRIVACY'}
 
 
 class PushInput(Contract):

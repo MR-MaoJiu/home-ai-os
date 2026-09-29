@@ -2,7 +2,11 @@ import SwiftUI
 import UIKit
 
 @main struct HomeAIApp: App {
-    init() { ProtectedRecordPreview.removeAbandonedFiles() }
+    init() {
+        ProtectedRecordPreview.removeAbandonedFiles()
+        // 重启时仅清理本应用上次未完成的选择器明文临时副本，已入队附件保持加密。
+        try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("HomeAIMediaImport", isDirectory: true))
+    }
     @State private var state = AppState()
     @UIApplicationDelegateAdaptor(HomeAINotificationDelegate.self) private var notifications
     @Environment(\.scenePhase) private var phase

@@ -20,12 +20,6 @@ def redact(text: str):
     return PII.sub(replace, text), mapping
 
 
-def cloud_context(records):
-    # 正则无法可靠识别人名、地址和任意附件。未配置并验证 NER/本地复核链时只允许公开记录。
-    if any(r.sensitivity != "PUBLIC" or r.cloud_policy != "REDACT_AND_ALLOW" for r in records):
-        raise HTTPException(403, "私人内容的完整脱敏链尚未通过验收，禁止上云")
-
-
 def validate_search(arguments):
     if set(arguments) != {'query'} or not isinstance(arguments.get('query'), str):
         raise HTTPException(422, '联网搜索只接受 query 文本')

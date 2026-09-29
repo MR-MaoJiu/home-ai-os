@@ -62,7 +62,7 @@ class Heartbeat:
 
 def status(app, max_age=30):
     result = {}
-    for service in ('core-worker', 'memory-worker', 'home-observer'):
+    for service in ('core-worker', 'memory-worker', 'media-worker', 'notification-worker', 'backup-worker', 'home-observer'):
         entries = []
         for path in (app.settings.state_dir / 'health').glob(service + '-*.enc'):
             try:

@@ -39,6 +39,7 @@ struct ClientNotification: Decodable, Identifiable, Sendable {
     let status: String?
     var title: String {
         if kind == "system.test" { return "通知测试" }
+        if kind == "client.action" { return "成员请求与消息" }
         if kind == "reminder.due" { return scope == "family" ? "家庭提醒已到期" : "提醒已到期" }
         if status == "AWAITING_APPROVAL" { return "有操作需要确认" }
         return scope == "family" ? "家庭执行结果" : "我的执行结果"

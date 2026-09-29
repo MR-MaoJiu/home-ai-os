@@ -207,7 +207,11 @@ actor ClientViewCache {
     private let directory: URL?
     private let testKey: SymmetricKey?
     private var rejectedNamespaces: Set<String> = []
-    init(directory: URL? = nil, key: SymmetricKey? = nil) { self.directory = directory; self.testKey = key }
+    private let mediaBudget: Int
+    init(directory: URL? = nil, key: SymmetricKey? = nil, mediaBudget: Int = 512 * 1024 * 1024) {
+        self.directory = directory; self.testKey = key; self.mediaBudget = max(0, mediaBudget)
+    }
+    private func isMedia(_ key: String) -> Bool { key.contains("asset-chunk:") || key.contains("asset-thumb:") }
 
     func read(key: String, namespace: String) -> Data? {
         guard !rejectedNamespaces.contains(namespace) else { return nil }
@@ -231,6 +235,10 @@ actor ClientViewCache {
         let payload = try JSONEncoder().encode(Entry(version: 1, namespace: namespace, key: key, payload: data))
         let box = try AES.GCM.seal(payload, using: encryptionKey(namespace), authenticating: Data((namespace + ":" + key).utf8))
         guard let bytes = box.combined else { throw APIClient.APIError.message("页面缓存加密失败") }
+        if isMedia(key) {
+            guard bytes.count <= mediaBudget else { return }
+            try trimMedia(in: path.deletingLastPathComponent(), replacing: path, incomingBytes: bytes.count)
+        }
         try bytes.write(to: path, options: [.atomic, .completeFileProtection])
     }
 
@@ -247,7 +255,22 @@ actor ClientViewCache {
 
     private func file(key: String, namespace: String) throws -> URL {
         let root = try directory ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("HomeAI/Views", isDirectory: true)
-        return root.appendingPathComponent(DeviceIdentity.hash(Data(namespace.utf8)), isDirectory: true).appendingPathComponent(DeviceIdentity.hash(Data(key.utf8)) + ".sealed")
+        var folder = root.appendingPathComponent(DeviceIdentity.hash(Data(namespace.utf8)), isDirectory: true)
+        if isMedia(key) { folder = folder.appendingPathComponent("media", isDirectory: true) }
+        return folder.appendingPathComponent(DeviceIdentity.hash(Data(key.utf8)) + ".sealed")
+    }
+
+    /// 媒体缓存与待发送队列分离，淘汰不会删除用户尚未送达的附件。
+    private func trimMedia(in folder: URL, replacing: URL, incomingBytes: Int) throws {
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
+        let entries = files.filter { $0 != replacing }.compactMap { file -> (URL, Int, Date)? in
+            guard let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return nil }
+            return (file, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
+        }.sorted { $0.2 < $1.2 }
+        var total = entries.reduce(incomingBytes) { $0 + $1.1 }
+        for entry in entries where total > mediaBudget {
+            try FileManager.default.removeItem(at: entry.0); total -= entry.1
+        }
     }
 
     private func encryptionKey(_ namespace: String) throws -> SymmetricKey {

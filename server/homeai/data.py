@@ -31,7 +31,7 @@ def accessible(db, actor, include_deleted=False):
     query = select(Record).where(Record.household_id == actor.household_id, or_(Record.owner_id == actor.user_id, and_(Record.visibility == "family", Record.sensitivity != "SECRET", ~Record.kind.like("memory.%"))))
     parent = aliased(Record)
     parent_visible = exists(select(parent.id).where(parent.id == Record.source_id, parent.owner_id == Record.owner_id,
-        parent.household_id == actor.household_id, parent.deleted.is_(False), parent.kind.in_(['document.file', 'document.import']),
+        parent.household_id == actor.household_id, parent.deleted.is_(False), parent.kind.in_(['document.file', 'document.import', 'photo.file', 'video.file']),
         or_(parent.owner_id == actor.user_id, and_(parent.visibility == 'family', parent.sensitivity != 'SECRET'))))
     query = query.where(or_(Record.kind != 'document.parsed', Record.source != 'document_parse', parent_visible))
     if db.info.get("family_automation"):

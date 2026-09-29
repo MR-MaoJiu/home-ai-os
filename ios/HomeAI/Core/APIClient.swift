@@ -449,7 +449,10 @@ actor APIClient {
                 connection?.ownerID = verified.user_id
                 connection?.deviceID = verified.device_id
                 rejectedNamespace = nil
-                if let verifiedNamespace = pairedNamespace() { await ClientViewCache.shared.authorize(namespace: verifiedNamespace) }
+                if let verifiedNamespace = pairedNamespace() {
+                    await ClientViewCache.shared.authorize(namespace: verifiedNamespace)
+                    await MediaUploadStore.shared.authorize(namespace: verifiedNamespace)
+                }
                 try persist()
             }
             return data
@@ -462,6 +465,7 @@ actor APIClient {
                 try? persist()
                 await ClientViewCache.shared.invalidate(namespace: namespace, revoked: true)
                 await DeviceDataSync().invalidate(namespace: namespace)
+                await MediaUploadStore.shared.invalidate(namespace: namespace)
                 if firstRejection { await authorizationFailureHandler?(namespace) }
             }
             throw error
@@ -554,18 +558,15 @@ actor APIClient {
         eventSockets.removeAll()
     }
 
+    /// 返回规范资料标识；完成后的解析由服务端媒体 Worker 自动编排。
     func uploadDocument(name: String, contents: Data) async throws -> String {
-        guard contents.count <= 20 * 1024 * 1024 else { throw APIError.message("文件超过 20 MB") }
         let namespace = try await syncNamespace()
-        let boundary = "HomeAI-" + UUID().uuidString
-        let filename = String((name as NSString).lastPathComponent.prefix(200)).replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
-        var body = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8)
-        body.append(contents)
-        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
-        struct Identifier: Decodable { let id: String }
-        let record = try JSONDecoder().decode(Identifier.self, from: await request("POST", "/api/v1/files", body: body, expectedNamespace: namespace, contentType: "multipart/form-data; boundary=\(boundary)"))
-        let task = try JSONDecoder().decode(Identifier.self, from: await request("POST", "/api/v1/files/\(record.id)/parse", expectedNamespace: namespace))
-        return task.id
+        let limits = await MediaUploadLimits.fetch(api: self, namespace: namespace)
+        let item = try await MediaUploadStore.shared.enqueue(data: contents, name: name, kind: "file", mime: "application/octet-stream", namespace: namespace, scope: "data", maximumBytes: limits.file_max_bytes)
+        let completed = try await MediaUploadStore.shared.upload(id: item.id, namespace: namespace, api: self) { _ in }
+        guard let asset = completed.asset else { throw APIError.message("文件上传尚未完成") }
+        try await MediaUploadStore.shared.remove(id: item.id, namespace: namespace)
+        return asset.record_id
     }
 
     nonisolated static func invalidatesCredentials(status: Int) -> Bool { status == 401 }

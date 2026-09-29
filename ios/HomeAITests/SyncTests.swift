@@ -57,21 +57,24 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(recovered.records.count, fixture.count - 1)
         XCTAssertFalse(recovered.records.contains { $0.id == removed })
         if fixture.documents == true {
-            let taskID = try await api.uploadDocument(name: "备份计划.md", contents: Data("# 备份计划\n周日晚上八点进行家庭备份。".utf8))
-            _ = try await api.request("POST", "/_test/run/" + taskID)
-            struct Parsed: Decodable { let source_id: String; let markdown: String }
-            struct ParsedTask: Decodable { let status: String; let result: Parsed? }
-            let task = try JSONDecoder().decode(ParsedTask.self, from: await api.request("GET", "/api/v1/tasks/" + taskID))
-            XCTAssertEqual(task.status, "SUCCEEDED")
-            let parsed = try XCTUnwrap(task.result)
-            XCTAssertTrue(parsed.markdown.contains("八点"))
+            let recordID = try await api.uploadDocument(name: "备份计划.md", contents: Data("# 备份计划\n周日晚上八点进行家庭备份。".utf8))
+            var asset: MediaAsset?
+            for _ in 0..<120 {
+                asset = try JSONDecoder().decode(MediaAsset.self, from: await api.request("GET", "/api/v1/assets/" + recordID))
+                if ["succeeded", "failed", "canceled"].contains(asset?.processing?.status ?? "") { break }
+                try await Task.sleep(for: .seconds(1))
+            }
+            XCTAssertEqual(asset?.processing?.status, "succeeded")
+            let parsedID = try XCTUnwrap(asset?.processing?.result_record_id)
+            let parsed = try JSONDecoder().decode(DataEntry.self, from: await api.request("GET", "/api/v1/data/" + parsedID))
+            XCTAssertTrue(parsed.payload["markdown"]?.description.contains("八点") == true)
             let query = try JSONSerialization.data(withJSONObject: ["query": "家庭备份时间"])
             struct Match: Decodable { let excerpt: String }
             struct Search: Decodable { let mode: String; let matches: [Match] }
             let found = try JSONDecoder().decode(Search.self, from: await api.request("POST", "/api/v1/knowledge/search", body: query))
             XCTAssertEqual(found.mode, "pgvector_chunks")
             XCTAssertTrue(found.matches.contains { $0.excerpt.contains("八点") })
-            _ = try await api.request("DELETE", "/api/v1/data/" + parsed.source_id)
+            _ = try await api.request("DELETE", "/api/v1/data/" + (try XCTUnwrap(parsed.source_id)))
         }
         // Intent 的不确定提交恢复：真实服务已收下请求，但客户端尚未清除待确认记录。
         let intentNamespace = try await api.syncNamespace()
