@@ -1,5 +1,7 @@
 import XCTest
 import EventKit
+import UserNotifications
+import UIKit
 @testable import HomeAI
 
 final class SyncTests: XCTestCase {
@@ -259,5 +261,78 @@ extension ClientDisplayContractTests {
         XCTAssertTrue(status.worker_online)
         XCTAssertTrue(["ready", "not_configured", "invalid_configuration", "disabled"].contains(status.status))
         print("SERVER_DISPLAY_READ_OK conversations=\(conversations.count) data=\(data.records.count) memory=\(memories.count) automation=\(rules.count) notifications=\(notices.items.count) apns_configured=\(status.push_configured)")
+    }
+}
+
+
+extension ClientDisplayContractTests {
+    @MainActor
+    func testCurrentNotificationAuthorizationStatus() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["HOMEAI_READONLY_CLIENT_CHECK"] == "1" || env["TEST_RUNNER_HOMEAI_READONLY_CLIENT_CHECK"] == "1" else {
+            throw XCTSkip("仅在用户授权的真机上只读检查系统通知状态")
+        }
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let authorization: String
+        switch settings.authorizationStatus {
+        case .authorized: authorization = "authorized"
+        case .provisional: authorization = "provisional"
+        case .denied: authorization = "denied"
+        case .ephemeral: authorization = "ephemeral"
+        default: authorization = "notDetermined"
+        }
+        let hasToken = DeviceIdentity.read("push-device-token")?.isEmpty == false
+        print("NOTIFICATION_DEVICE_READ authorization=\(authorization) system_registered=\(UIApplication.shared.isRegisteredForRemoteNotifications) token_saved=\(hasToken) protected_data_available=\(UIApplication.shared.isProtectedDataAvailable)")
+    }
+}
+
+extension ClientDisplayContractTests {
+    @MainActor
+    func testDeliveredAPNsNotificationReadOnly() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let notificationID = env["HOMEAI_APNS_VERIFICATION_ID"] ?? env["TEST_RUNNER_HOMEAI_APNS_VERIFICATION_ID"], UUID(uuidString: notificationID) != nil else {
+            throw XCTSkip("需要本机提供的单次验收通知标识；本测试只读系统已送达通知")
+        }
+        let delivered = await UNUserNotificationCenter.current().deliveredNotifications()
+        let matching = delivered.contains { $0.request.content.userInfo["notification_id"] as? String == notificationID }
+        // 已点击或清除的通知不会留在 delivered 列表，未匹配不能据此判定投递失败。
+        print("APNS_DEVICE_DELIVERY_READ matching_delivered=\(matching)")
+    }
+}
+
+
+extension ClientDisplayContractTests {
+    func testNotificationResponseAlwaysCompletesOnMainThread() async {
+        let callback = expectation(description: "通知回调切回主线程")
+        callback.assertForOverFulfill = true
+        await Task.detached {
+            HomeAINotificationDelegate.finishNotificationResponse(identifier: nil) {
+                XCTAssertTrue(Thread.isMainThread)
+                callback.fulfill()
+            }
+        }.value
+        await fulfillment(of: [callback], timeout: 3)
+    }
+
+    @MainActor
+    func testExistingNotificationOpensThroughMainThreadRoute() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let notificationID = env["HOMEAI_APNS_VERIFICATION_ID"] ?? env["TEST_RUNNER_HOMEAI_APNS_VERIFICATION_ID"], UUID(uuidString: notificationID) != nil else {
+            throw XCTSkip("需要真实已存在通知；不发送新推送")
+        }
+        let callback = expectation(description: "真实通知路由完成")
+        callback.assertForOverFulfill = true
+        HomeAINotificationDelegate.finishNotificationResponse(identifier: notificationID) {
+            XCTAssertTrue(Thread.isMainThread)
+            callback.fulfill()
+        }
+        await fulfillment(of: [callback], timeout: 3)
+        XCTAssertEqual(ClientNotifications.shared.pendingNotificationID, notificationID.lowercased())
+        let api = AppServices.api
+        await api.restoreConnectionIfNeeded()
+        let namespace = try await api.syncNamespace()
+        let notification = try JSONDecoder().decode(ClientNotification.self, from: await api.request("GET", "/api/v1/notifications/" + notificationID, expectedNamespace: namespace))
+        XCTAssertEqual(notification.id, notificationID)
+        print("NOTIFICATION_EXISTING_ROUTE_OK completion_on_main=true authenticated_read=true")
     }
 }

@@ -12,7 +12,7 @@ struct RecordReference: Identifiable {
 
 
 func taskStatusLabel(_ status: String) -> String {
-    ["RECEIVED": "已接收", "EXECUTING": "执行中", "APPROVED": "已确认，等待执行", "AWAITING_APPROVAL": "等待你的确认", "SUCCEEDED": "已完成", "FAILED": "执行失败", "CANCELED": "已取消", "NEEDS_RECONCILIATION": "结果待核对"][status] ?? status
+    ["READY": "通知已就绪", "DUE": "已到提醒时间", "RECEIVED": "已接收", "EXECUTING": "执行中", "APPROVED": "已确认，等待执行", "AWAITING_APPROVAL": "等待你的确认", "SUCCEEDED": "已完成", "FAILED": "执行失败", "CANCELED": "已取消", "NEEDS_RECONCILIATION": "结果待核对"][status] ?? status
 }
 
 

@@ -38,6 +38,7 @@ struct ClientNotification: Decodable, Identifiable, Sendable {
     let record_id: String?
     let status: String?
     var title: String {
+        if kind == "system.test" { return "通知测试" }
         if kind == "reminder.due" { return scope == "family" ? "家庭提醒已到期" : "提醒已到期" }
         if status == "AWAITING_APPROVAL" { return "有操作需要确认" }
         return scope == "family" ? "家庭执行结果" : "我的执行结果"
@@ -151,13 +152,24 @@ final class HomeAINotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         Task { @MainActor in ClientNotifications.shared.registrationFailed() }
     }
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .list]
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void) {
+        Task { @MainActor in completionHandler([.banner, .sound, .list]) }
     }
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let raw = response.notification.request.content.userInfo["notification_id"] as? String,
-              let id = UUID(uuidString: raw) else { return }
-        // 推送仅携带通知标识，详情必须重新通过已配对身份向家庭服务器读取。
-        await MainActor.run { ClientNotifications.shared.pendingNotificationID = id.uuidString.lowercased() }
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
+        Self.finishNotificationResponse(identifier: response.notification.request.content.userInfo["notification_id"] as? String,
+                                        completion: completionHandler)
+    }
+
+    nonisolated static func finishNotificationResponse(identifier: String?, completion: @escaping @Sendable () -> Void) {
+        // 冷启动通知完成回调会触发 UIKit 恢复状态，必须与页面路由一起在主线程完成。
+        // 不使用 async 代理桥接，避免 await 返回后系统 completion 落到工作线程。
+        Task { @MainActor in
+            defer { completion() }
+            guard let identifier, let id = UUID(uuidString: identifier) else { return }
+            // 推送仅携带通知标识，详情仍通过已配对身份向家庭服务器读取。
+            ClientNotifications.shared.pendingNotificationID = id.uuidString.lowercased()
+        }
     }
 }

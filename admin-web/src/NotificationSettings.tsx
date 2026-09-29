@@ -9,7 +9,7 @@ type NotificationConfiguration={
 };
 const statusNames:Record<NotificationConfiguration['status'],string>={
  not_configured:'尚未配置',disabled:'已关闭系统推送',invalid_configuration:'配置不完整或格式无效',
- worker_offline:'通知进程未运行',ready:'已配置，待实际投递验证',
+ worker_offline:'通知进程未运行',ready:'已配置',
 };
 
 export function NotificationSettings(){
