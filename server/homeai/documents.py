@@ -43,4 +43,6 @@ def persist(db, actor, source_id, source_version, result, app):
     if existing and not existing.deleted and serialize(existing, app.vault)['payload'] != payload:
         version += 1
     record = ingest(db, actor, DataRecord(source='document_parse', source_id=source.id, kind='document.parsed', version=version, sensitivity=source.sensitivity, cloud_policy=source.cloud_policy, payload=payload), app.vault)
+    from .visibility import change_record
+    change_record(db,actor,record,source.visibility)
     return {'record_id': record.id, 'source_id': source.id, 'status': 'parsed', 'markdown': result['markdown']}

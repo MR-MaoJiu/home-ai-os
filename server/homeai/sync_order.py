@@ -1,6 +1,6 @@
 """家用规模的数据事务顺序边界，防止事件 ID 先分配后提交造成游标漏读。"""
 from sqlalchemy import text,select,insert
-from .db import Grant,Outbox,uid,now
+from .db import Grant,Outbox,Record,Principal,uid,now
 
 
 def lock_changes(db):
@@ -10,7 +10,8 @@ def lock_changes(db):
 
 def notify_recipients(db,actor,kind,record_id,recipients=None):
     if recipients is None:
-        recipients=list(db.scalars(select(Grant.grantee_id).where(Grant.owner_id==actor.user_id,Grant.record_id==record_id)))
+        record=db.get(Record,record_id)
+        recipients=list(db.scalars(select(Principal.id).where(Principal.household_id==actor.household_id))) if record and record.visibility=="family" else []
     from .data import event_metadata
     metadata = event_metadata(db, kind, record_id)
     for recipient in set(recipients)-{actor.user_id}:

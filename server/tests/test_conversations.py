@@ -61,14 +61,14 @@ def test_legacy_import_is_idempotent(system,alice):
 
 def test_history_does_not_revive_revoked_sources(system,alice):
     bob=SignedClient(system[1],system[2]);rid=put(bob,record(payload={'title':'共享资料'}))
-    assert bob.request('PUT','/api/v1/data/'+rid+'/grants/'+alice.user_id).status_code==200
+    assert bob.request('PUT','/api/v1/data/'+rid+'/visibility',{'visibility':'family'}).status_code==200
     identifier=new_chat(alice);first=send(alice,identifier,'读取共享资料').json()
     finish(system,alice,first['task_id'],'来自共享来源的旧回答')
     with system[2]() as db:
         scope(db,alice.user_id,'h1');task=db.get(Task,first['task_id'])
         value=system[0].state.vault.open(task.request,alice.user_id+':task:'+task.id)
         value['_record_dependencies']={rid:1};task.request=system[0].state.vault.seal(value,alice.user_id+':task:'+task.id);db.commit()
-    bob.request('DELETE','/api/v1/data/'+rid+'/grants/'+alice.user_id)
+    bob.request('PUT','/api/v1/data/'+rid+'/visibility',{'visibility':'personal'})
     page=alice.request('GET','/api/v1/conversations/'+identifier).json()
     assert '旧回答已隐藏' in page['turns'][0]['assistant_text']
     second=send(alice,identifier,'继续').json()

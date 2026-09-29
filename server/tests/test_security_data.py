@@ -28,11 +28,13 @@ def test_cross_user_and_household(system,alice):
     rid=put(alice)
     path='/api/v1/data/'+rid
     assert bob.request('GET',path).status_code==404
-    assert alice.request('PUT',path+'/grants/'+outsider.user_id).status_code==404
-    assert alice.request('PUT',path+'/grants/'+bob.user_id).status_code==200
+    assert outsider.request('PUT',path+'/visibility',{'visibility':'family'}).status_code==404
+    assert alice.request('PUT',path+'/visibility',{'visibility':'family'}).status_code==200
     assert bob.request('GET',path).status_code==200
+    assert outsider.request('GET',path).status_code==404
     assert bob.request('DELETE',path).status_code==404
-    assert alice.request('DELETE',path+'/grants/'+bob.user_id).status_code==200
+    assert bob.request('PUT',path+'/visibility',{'visibility':'personal'}).status_code==404
+    assert alice.request('PUT',path+'/visibility',{'visibility':'personal'}).status_code==200
     assert bob.request('GET',path).status_code==404
 
 
@@ -108,48 +110,54 @@ def test_legacy_file_migration_preserves_classification_and_download(system,alic
     assert alice.request('POST','/api/v1/files/'+rid+'/parse').status_code==403
 
 
-def test_grant_management_requires_owner_and_revokes_visibility(system,alice):
+def test_visibility_requires_owner_and_legacy_grants_cannot_expand_scope(system,alice):
     bob=SignedClient(system[1],system[2]);outsider=SignedClient(system[1],system[2],household='other')
     rid=put(bob,record(kind='health.sleep',payload={'value':1}))
     path='/api/v1/data/'+rid
     assert alice.request('GET',path).status_code==404
+    assert alice.request('PUT',path+'/visibility',{'visibility':'family'}).status_code==404
+    assert bob.request('PUT',path+'/grants/'+alice.user_id).status_code==410
+    assert bob.request('PUT',path+'/visibility',{'visibility':'family'}).status_code==200
+    assert alice.request('GET',path).json()['visibility']=='family'
     assert alice.request('GET',path+'/grants').status_code==404
-    assert bob.request('GET',path+'/grants').json()=={'grantee_ids':[]}
-    assert bob.request('PUT',path+'/grants/'+alice.user_id).status_code==200
-    assert alice.request('GET',path).status_code==200
-    assert alice.request('GET',path+'/grants').status_code==404
-    assert bob.request('GET',path+'/grants').json()['grantee_ids']==[alice.user_id]
     assert outsider.request('GET',path).status_code==404
-    assert bob.request('DELETE',path+'/grants/'+alice.user_id).status_code==200
+    assert outsider.request('PUT',path+'/visibility',{'visibility':'personal'}).status_code==404
+    assert bob.request('PUT',path+'/visibility',{'visibility':'personal'}).status_code==200
     assert alice.request('GET',path).status_code==404
 
 
 def test_continuous_sharing_is_scoped_and_reversible(system,alice):
     bob=SignedClient(system[1],system[2])
     outsider=SignedClient(system[1],system[2],household='other')
-    path='/api/v1/sharing/rules/health/'+bob.user_id
+    path='/api/v1/sharing/categories/health'
     health=put(alice,record(source_id='health-old',kind='health.sleep'))
     location=put(alice,record(source_id='location-old',kind='location.point'))
     memory=put(alice,record(source_id='memory-old',kind='memory.fact'))
     secret=record(source_id='health-secret',kind='health.sleep');secret['sensitivity']='SECRET'
     secret_id=put(alice,secret)
-    assert alice.request('PUT','/api/v1/sharing/rules/health/'+outsider.user_id).status_code==404
-    assert alice.request('PUT','/api/v1/sharing/rules/memory/'+bob.user_id).status_code==422
-    assert alice.request('PUT',path).status_code==200
-    assert alice.request('PUT',path).status_code==200
-    assert len(alice.request('GET','/api/v1/sharing/rules').json())==1
-    assert bob.request('GET','/api/v1/sharing/rules').json()==[]
+    assert alice.request('PUT','/api/v1/sharing/rules/health/'+bob.user_id).status_code==410
+    assert alice.request('PUT','/api/v1/sharing/categories/memory',{'visibility':'family'}).status_code==422
+    assert alice.request('PUT',path,{'visibility':'family','grantee_id':outsider.user_id}).status_code==422
+    assert alice.request('PUT',path,{'visibility':'family'}).status_code==200
+    assert alice.request('PUT',path,{'visibility':'family'}).status_code==200
+    assert alice.request('GET','/api/v1/sharing/categories').json()=={'health':'family','location':'personal'}
+    assert bob.request('GET','/api/v1/sharing/categories').json()=={'health':'personal','location':'personal'}
+    # 后加入家庭的成员也按家庭可见范围读取，不依赖创建规则时的成员快照。
+    later=SignedClient(system[1],system[2])
+    assert later.request('GET','/api/v1/data/'+health).status_code==200
     new=put(alice,record(source_id='health-new',kind='health.sleep'))
     put(alice,record(source_id='health-old',kind='health.sleep',version=2,payload={'value':42}))
     assert bob.request('GET','/api/v1/data/'+health).json()['payload']['value']==42
     assert bob.request('GET','/api/v1/data/'+new).status_code==200
+    assert outsider.request('GET','/api/v1/data/'+health).status_code==404
     for hidden in (location,memory,secret_id):
         assert bob.request('GET','/api/v1/data/'+hidden).status_code==404
-    assert alice.request('DELETE',path).status_code==200
+    assert alice.request('PUT',path,{'visibility':'personal'}).status_code==200
     for revoked in (health,new):
         assert bob.request('GET','/api/v1/data/'+revoked).status_code==404
+        assert later.request('GET','/api/v1/data/'+revoked).status_code==404
     latest=put(alice,record(source_id='health-latest',kind='health.sleep'))
     assert bob.request('GET','/api/v1/data/'+latest).status_code==404
-    assert alice.request('PUT','/api/v1/sharing/rules/location/'+bob.user_id).status_code==200
+    assert alice.request('PUT','/api/v1/sharing/categories/location',{'visibility':'family'}).status_code==200
     assert bob.request('GET','/api/v1/data/'+location).status_code==200
     assert bob.request('GET','/api/v1/data/'+health).status_code==404

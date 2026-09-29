@@ -27,7 +27,9 @@ def emit(db, actor, kind, resource_id):
 def accessible(db, actor, include_deleted=False):
     scope(db, actor.user_id, actor.household_id)
     granted = select(Grant.record_id).where(Grant.grantee_id == actor.user_id, Grant.household_id == actor.household_id)
-    query = select(Record).where(Record.household_id == actor.household_id, or_(Record.owner_id == actor.user_id, and_(Record.id.in_(granted), Record.sensitivity != "SECRET")))
+    query = select(Record).where(Record.household_id == actor.household_id, or_(Record.owner_id == actor.user_id, and_(Record.visibility == "family", Record.sensitivity != "SECRET", ~Record.kind.like("memory.%"))))
+    if db.info.get("family_automation"):
+        query=query.where(Record.visibility=="family",~Record.kind.like("memory.%"))
     return query if include_deleted else query.where(Record.deleted.is_(False))
 
 
@@ -39,7 +41,7 @@ def read_record(db, actor, record_id):
 
 
 def serialize(record, vault):
-    return {"id": record.id, "owner_id": record.owner_id, "source": record.source, "source_id": record.source_id, "kind": record.kind, "version": record.version, "sensitivity": record.sensitivity, "cloud_policy": record.cloud_policy, "deleted": record.deleted, "payload": {} if record.deleted else vault.open(record.payload, record.owner_id + ":record:" + record.id)}
+    return {"id": record.id, "owner_id": record.owner_id, "visibility": record.visibility, "source": record.source, "source_id": record.source_id, "kind": record.kind, "version": record.version, "sensitivity": record.sensitivity, "cloud_policy": record.cloud_policy, "deleted": record.deleted, "payload": {} if record.deleted else vault.open(record.payload, record.owner_id + ":record:" + record.id)}
 
 
 def ingest(db, actor, item, vault):
@@ -71,6 +73,9 @@ def ingest(db, actor, item, vault):
     record.updated_at = now()
     from .sharing import apply_rules
     apply_rules(db, actor, record)
+    if record.visibility=='family' and (record.sensitivity=='SECRET' or record.kind.startswith('memory.')):
+        from .visibility import change_record
+        change_record(db,actor,record,'personal')
     emit(db, actor, "record.changed", record.id)
     notify_recipients(db, actor, "record.changed", record.id)
     if record.sensitivity == 'SECRET' and old_sensitivity != 'SECRET':

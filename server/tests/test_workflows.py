@@ -230,18 +230,21 @@ async def test_member_data_memory_tasks_and_rules_remain_scoped(workflow):
     assert upload.status_code==200,upload.text
     record=upload.json()['records'][0]['id'];path='/api/v1/data/'+record
     assert admin.request('GET',path).status_code==404
-    assert phone.request('PUT',path+'/grants/'+admin.user_id).status_code==200
+    assert phone.request('PUT',path+'/visibility',{'visibility':'family'}).status_code==200
     assert admin.request('GET',path).status_code==200
-    assert phone.request('GET',path+'/grants').json()['grantee_ids']==[admin.user_id]
+    assert phone.request('GET',path).json()['visibility']=='family'
     assert admin.request('GET',path+'/grants').status_code==404
-    candidate=phone.request('POST','/api/v1/memory/candidates',{'source_ids':[record],'content':'仅用于权限隔离验收的候选记忆'}).json()['id']
+    from test_conversations import new_chat,send
+    conversation=new_chat(phone)
+    turn=send(phone,conversation,'仅用于权限隔离验收的聊天').json()['id']
+    candidate=phone.request('POST','/api/v1/memory/from-conversation',{'conversation_id':conversation,'turn_id':turn,'content':'仅用于权限隔离验收的候选记忆'}).json()['id']
     assert admin.request('GET','/api/v1/memory/candidates').json()==[]
     confirmed=phone.request('POST','/api/v1/memory/candidates/'+candidate+'/confirm')
     assert confirmed.status_code==200,confirmed.text
     fact='/api/v1/data/'+confirmed.json()['record_id']
     assert admin.request('GET',fact).status_code==404
-    assert phone.request('PUT',fact+'/grants/'+admin.user_id).status_code==200
-    assert admin.request('GET',fact).status_code==200
+    assert phone.request('PUT',fact+'/visibility',{'visibility':'family'}).status_code==403
+    assert admin.request('GET',fact).status_code==404
     task=create(phone,[{'capability':'mail.send@v1','arguments':{'to':'recipient@example.test','subject':'审批权限验收','text':'未审批，不发送'}}])
     await run_task(app,task,phone.user_id)
     pending=phone.request('GET','/api/v1/approvals').json()
@@ -251,8 +254,7 @@ async def test_member_data_memory_tasks_and_rules_remain_scoped(workflow):
     rule=phone.request('POST','/api/v1/automations',{'name':'权限验收','cron':'0 8 * * *','timezone':'Asia/Shanghai','skill':{'name':'权限验收','steps':[{'capability':'reminder.create@v1','arguments':{'title':'权限验收'}}]}})
     assert rule.status_code==200,rule.text
     assert admin.request('GET','/api/v1/automations').json()==[]
-    assert phone.request('DELETE',path+'/grants/'+admin.user_id).status_code==200
-    assert phone.request('DELETE',fact+'/grants/'+admin.user_id).status_code==200
+    assert phone.request('PUT',path+'/visibility',{'visibility':'personal'}).status_code==200
     assert admin.request('GET',path).status_code==404
     assert admin.request('GET',fact).status_code==404
     admin.request('DELETE','/api/v1/devices/'+admin.device_id)

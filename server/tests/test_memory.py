@@ -2,21 +2,37 @@ from test_security_data import put
 
 
 def test_candidate_needs_confirmation(system,alice):
-    source=put(alice)
-    candidate=alice.request('POST','/api/v1/memory/candidates',{'source_ids':[source],'content':'喜欢下午开会'})
+    from test_conversations import new_chat,send
+    conversation=new_chat(alice)
+    turn=send(alice,conversation,'我喜欢下午开会').json()['id']
+    candidate=alice.request('POST','/api/v1/memory/from-conversation',{'conversation_id':conversation,'turn_id':turn,'content':'喜欢下午开会'})
     assert candidate.status_code==200,candidate.text
     cid=candidate.json()['id']
-    assert alice.request('GET','/api/v1/memory/search?q=开会').json()['records']==[]
+    assert alice.request('GET','/api/v1/memory/entries').json()==[]
+    assert alice.request('GET','/api/v1/memory/candidates').json()[0]['id']==cid
     confirmed=alice.request('POST',f'/api/v1/memory/candidates/{cid}/confirm')
     assert confirmed.status_code==200,confirmed.text
-    assert len(alice.request('GET','/api/v1/memory/search?q=开会').json()['records'])==1
+    entries=alice.request('GET','/api/v1/memory/entries').json()
+    assert len(entries)==1 and entries[0]['source']=='conversation_memory'
+    assert entries[0]['payload']['conversation_id']==conversation
+    assert entries[0]['payload']['turn_id']==turn
     assert alice.request('POST',f'/api/v1/memory/candidates/{cid}/confirm').status_code==409
 
 
-def test_delete_source_removes_derived_fact(alice):
+def test_delete_legacy_source_removes_derived_fact(system,alice):
+    import json
+    from homeai.db import MemoryCandidate,scope,uid
     source=put(alice)
-    candidate=alice.request('POST','/api/v1/memory/candidates',{'source_ids':[source],'content':'来源派生的私人内容'}).json()['id']
+    assert alice.request('POST','/api/v1/memory/candidates',{'source_ids':[source],'content':'原始资料不能直接成为聊天记忆'}).status_code==410
+    # 旧版本资料候选保留删除传播覆盖，新客户端不再创建或展示这类候选。
+    candidate=uid()
+    with system[2]() as db:
+        scope(db,alice.user_id,'h1')
+        db.add(MemoryCandidate(id=candidate,owner_id=alice.user_id,household_id='h1',source_ids=json.dumps([source]),content=system[0].state.vault.seal('历史来源派生的私人内容',alice.user_id+':candidate:'+candidate)))
+        db.commit()
+    assert alice.request('GET','/api/v1/memory/candidates').json()==[]
     fact=alice.request('POST',f'/api/v1/memory/candidates/{candidate}/confirm').json()['record_id']
+    assert alice.request('GET','/api/v1/memory/entries').json()==[]
     deleted=alice.request('DELETE','/api/v1/data/'+source)
     assert deleted.status_code==200,deleted.text
     assert fact in deleted.json()['deleted_ids']

@@ -18,23 +18,14 @@ class CandidateInput(BaseModel):
 
 @router.post('/candidates')
 def candidate(body: CandidateInput, request: Request, actor: Actor = Depends(authenticate)):
-    with request.app.state.db() as db:
-        scope(db,actor.user_id,actor.household_id)
-        for source in body.source_ids:
-            record=own(db,Record,source,actor)
-            if record.deleted or record.sensitivity=='SECRET':raise HTTPException(403,'来源不允许用于记忆')
-        row=MemoryCandidate(id=uid(),household_id=actor.household_id,owner_id=actor.user_id,source_ids=json.dumps(body.source_ids),content='')
-        row.content=request.app.state.vault.seal(body.content,actor.user_id+':candidate:'+row.id)
-        db.add(row)
-        db.commit()
-        return {'id':row.id,'status':row.status}
+    raise HTTPException(410,'记忆请从聊天生成，不能将上传资料直接作为聊天记忆')
 
 
 @router.get('/candidates')
 def candidates(request: Request, actor: Actor = Depends(authenticate)):
     with request.app.state.db() as db:
         scope(db,actor.user_id,actor.household_id)
-        return [{'id':r.id,'status':r.status,'source_ids':json.loads(r.source_ids),'content':request.app.state.vault.open(r.content,actor.user_id+':candidate:'+r.id)} for r in db.scalars(select(MemoryCandidate).where(MemoryCandidate.owner_id==actor.user_id,MemoryCandidate.status=='PENDING'))]
+        return [{'id':r.id,'status':r.status,'source_ids':json.loads(r.source_ids),'content':request.app.state.vault.open(r.content,actor.user_id+':candidate:'+r.id)} for r in db.scalars(select(MemoryCandidate).where(MemoryCandidate.owner_id==actor.user_id,MemoryCandidate.status=='PENDING',MemoryCandidate.conversation_id.is_not(None)))]
 
 
 @router.post('/candidates/{candidate_id}/{decision}')
@@ -53,7 +44,7 @@ def confirm(candidate_id: str, decision: str, request: Request, actor: Actor = D
         sources=[own(db,Record,rid,actor) for rid in json.loads(item.source_ids)]
         if any(r.deleted for r in sources):raise HTTPException(409,'来源已删除，不能确认')
         content=request.app.state.vault.open(item.content,actor.user_id+':candidate:'+item.id)
-        record=ingest(db,actor,DataRecord(source='memory_candidate',source_id=item.id,kind='memory.fact',version=1,sensitivity='SENSITIVE' if any(r.sensitivity=='SENSITIVE' for r in sources) else 'PRIVATE',payload={'content':content,'source_ids':[r.id for r in sources],'confirmed_at':now()}),request.app.state.vault)
+        record=ingest(db,actor,DataRecord(source='conversation_memory' if item.conversation_id else 'memory_candidate',source_id=item.id,kind='memory.fact',version=1,sensitivity='SENSITIVE' if any(r.sensitivity=='SENSITIVE' for r in sources) else 'PRIVATE',payload={'content':content,'source_ids':[r.id for r in sources],'confirmed_at':now(),**({'conversation_id':item.conversation_id,'turn_id':item.turn_id} if item.conversation_id else {})}),request.app.state.vault)
         item.status='CONFIRMED'
         audit(db,actor,'memory.confirm',record.id)
         db.commit()
@@ -158,3 +149,37 @@ def rebuild_derived(provider_id: str, request: Request, actor: Actor = Depends(a
         audit(db, actor, 'memory.derived.rebuild', provider_id)
         db.commit()
         return {'status': 'PENDING', 'provider_enabled': provider.enabled, 'requires_worker': True}
+
+
+class ChatMemoryInput(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    conversation_id:str
+    turn_id:str
+    content:str=Field(min_length=1,max_length=20000)
+
+
+def create_chat_candidate(app,db,actor,conversation_id,turn_id,content,identifier=None):
+    from .db import Conversation,ConversationTurn
+    from .privacy import ensure_model_safe
+    conversation=own(db,Conversation,conversation_id,actor)
+    turn=own(db,ConversationTurn,turn_id,actor)
+    if turn.conversation_id!=conversation.id:raise HTTPException(422,'聊天轮次与会话不匹配')
+    ensure_model_safe(content)
+    identifier=identifier or uid()
+    old=db.get(MemoryCandidate,identifier)
+    if old:return old
+    row=MemoryCandidate(id=identifier,household_id=actor.household_id,owner_id=actor.user_id,conversation_id=conversation.id,turn_id=turn.id,source_ids='[]',content=app.vault.seal(content,actor.user_id+':candidate:'+identifier))
+    db.add(row);audit(db,actor,'memory.chat_candidate',row.id);db.flush()
+    return row
+
+@router.post('/from-conversation')
+def from_conversation(body:ChatMemoryInput,request:Request,actor=Depends(authenticate)):
+    with request.app.state.db() as db:
+        row=create_chat_candidate(request.app.state,db,actor,body.conversation_id,body.turn_id,body.content)
+        db.commit();return {'id':row.id,'status':row.status}
+
+@router.get('/entries')
+def entries(request:Request,actor=Depends(authenticate)):
+    with request.app.state.db() as db:
+        scope(db,actor.user_id,actor.household_id)
+        return [serialize(row,request.app.state.vault) for row in db.scalars(select(Record).where(Record.owner_id==actor.user_id,Record.source=='conversation_memory',Record.kind=='memory.fact',Record.deleted.is_(False)).order_by(Record.updated_at.desc()))]

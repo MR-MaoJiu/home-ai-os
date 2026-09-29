@@ -2,7 +2,7 @@
 import json
 import os
 from sqlalchemy import select, delete
-from .db import Record, MemoryCandidate, MemoryVector, KnowledgeChunk, Revision, Grant, Task, Invocation, now
+from .db import Record, MemoryCandidate, MemoryVector, KnowledgeChunk, Revision, Grant, Principal, Task, Invocation, now
 from .data import emit, audit
 
 
@@ -20,7 +20,7 @@ def delete_tree(db, actor, record, vault, state_dir):
             payload=vault.open(item.payload,actor.user_id+':record:'+item.id)
             if set(payload.get('source_ids',[])) & targets.keys():targets[item.id]=item
         if len(targets)==previous:break
-    recipients=list(db.scalars(select(Grant.grantee_id).where(Grant.owner_id==actor.user_id,Grant.record_id.in_(targets))))
+    recipients=list(db.scalars(select(Principal.id).where(Principal.household_id==actor.household_id))) if any(item.visibility=="family" for item in targets.values()) else []
     invalidate_snapshots(db,actor,[actor.user_id,*recipients])
     journal=state_dir/'deletions.jsonl'
     journal.parent.mkdir(parents=True,exist_ok=True)

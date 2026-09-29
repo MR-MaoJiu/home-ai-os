@@ -61,14 +61,14 @@ final class AppState {
             try await api.pair(code)
             // 保存凭据不等于连通；通过已授权通道验证后才显示成功。
             _ = try await api.request("GET", "/api/v1/me")
-            records = []; activity = []; approvals = []; automations = []; taskStates = []
+            records = []; activity = []; approvals = []; automations = []; taskStates = []; notificationRevision = nil
             syncStatus = ""; systemReminderStatus = ""
             connected = true; connectionRevision = UUID()
             serverReachable = true
             pairingFeedback = .success; pairingNotice = true
         } catch {
             if attemptedPairing {
-                records = []; activity = []; approvals = []; automations = []; taskStates = []
+                records = []; activity = []; approvals = []; automations = []; taskStates = []; notificationRevision = nil
                 connected = await api.isConnected(); connectionRevision = UUID()
             }
             let message: String
@@ -97,6 +97,7 @@ final class AppState {
     var taskEventStatus = ""
     var taskStates: [TaskStateEvent.Item] = []
     var taskEventRevision = UUID()
+    private var notificationRevision: String?
     private var eventRun: Task<Void, Never>?
     private var eventRunID: UUID?
     private var eventConnectionRevision: UUID?
@@ -155,13 +156,10 @@ final class AppState {
                         self.serverReachable = true
                         await self.confirmConnectionRecovered()
                         if event.type == "task.snapshot" {
-                            let owner = try await self.api.ownerIdentity(expectedNamespace: namespace)
-                            if UserDefaults.standard.bool(forKey: SystemReminderSync.preferenceKey(owner.namespace) + ".automatic") {
-                                try await self.loadData()
-                            }
                             guard namespace == (try await self.api.syncNamespace()), !Task.isCancelled else { return }
-                            if self.taskStates != event.tasks {
+                            if self.taskStates != event.tasks || self.notificationRevision != event.notification_revision {
                                 self.taskStates = event.tasks
+                                self.notificationRevision = event.notification_revision
                                 self.taskEventRevision = UUID()
                             }
                             self.taskEventStatus = event.has_more ? "显示最近 100 个任务状态" : "任务状态已连接"
@@ -207,6 +205,7 @@ final class AppState {
         await restore()
         guard connected, UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else { return }
         startForegroundEvents()
+        await ClientNotifications.shared.synchronize(api: api)
         do { try await loadData() }
         catch is CancellationError { }
         catch let error as URLError where error.code == .cancelled { }
@@ -255,17 +254,7 @@ final class AppState {
             let result = try await dataSync.synchronize(api: api)
             records = result.records
             syncStatus = result.offline ? "离线：显示上次同步缓存" : "已完成增量同步"
-            if !result.offline && UIApplication.shared.applicationState == .active {
-                let namespace = try await api.syncNamespace()
-                let owner = try await api.ownerIdentity(expectedNamespace: namespace)
-                let key = SystemReminderSync.preferenceKey(owner.namespace)
-                if UserDefaults.standard.bool(forKey: key + ".automatic"), let calendar = UserDefaults.standard.string(forKey: key), !calendar.isEmpty {
-                    do {
-                        let report = try await SystemReminderSync.shared.synchronize(records: result.records, api: api, calendarID: calendar, expectedNamespace: namespace, includeSchedule: UserDefaults.standard.bool(forKey: key + ".schedule"))
-                        systemReminderStatus = report.summary
-                    } catch { systemReminderStatus = "系统提醒未同步：" + error.localizedDescription }
-                }
-            }
+
         } catch let APIClient.APIError.http(code, message) {
             if [401, 403].contains(code) { records = []; connected = false; syncStatus = "授权已失效" }
             throw APIClient.APIError.http(code, message)
@@ -298,6 +287,8 @@ struct DataEntry: Codable, Identifiable, Sendable {
     let source: String?
     let source_id: String?
     let cloud_policy: String?
+    let visibility: String?
+    var isFamily: Bool { visibility == "family" }
     let payload: [String: JSONValue]
     var title: String { payload["title"]?.description ?? payload["name"]?.description ?? kind }
 }
@@ -311,6 +302,11 @@ struct AutomationEntry: Decodable, Identifiable {
     let enabled: Bool
     let trigger_kind: String?
     let event_type: String?
+    let visibility: String?
+    let owner_id: String?
+    let instruction: String?
+    let created_at: Double?
+    var isFamily: Bool { visibility == "family" }
     var triggerDescription: String {
         guard trigger_kind == "event" else { return cron }
         return ["record.changed": "数据新增或更新", "record.deleted": "数据删除", "record.revoked": "共享授权撤回"][event_type ?? ""] ?? "数据事件"

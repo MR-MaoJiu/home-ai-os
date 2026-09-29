@@ -7,7 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from croniter import croniter
 from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, or_
 from sqlalchemy.exc import IntegrityError
 from .config import Settings
 from .db import *
@@ -52,6 +52,10 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.include_router(builtin_router)
     from .integrations import router as integration_router
     app.include_router(integration_router)
+    from .visibility import router as visibility_router
+    app.include_router(visibility_router)
+    from .notifications import router as notification_router
+    app.include_router(notification_router)
     v = app.state.vault
     auth = Depends(authenticate)
 
@@ -165,47 +169,17 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
         with app.state.db() as db:
             record=own(db,Record,record_id,actor)
             if record.deleted:raise HTTPException(404,"数据已删除")
-            return {"grantee_ids":list(db.scalars(select(Grant.grantee_id).where(Grant.record_id==record.id,Grant.owner_id==actor.user_id)))}
+            raise HTTPException(410,"请使用资料的个人或家庭可见范围")
 
     @app.put("/api/v1/data/{record_id}/grants/{user_id}")
     def share(record_id: str, user_id: str, actor: Actor = auth):
-        with app.state.db() as db:
-            from .sync_order import lock_changes, notify_recipients
-            scope(db, actor.user_id, actor.household_id)
-            lock_changes(db)
-            record = own(db, Record, record_id, actor)
-            subject = db.get(Principal, user_id)
-            if not subject or subject.household_id != actor.household_id or record.deleted:
-                raise HTTPException(404, "成员或数据不存在")
-            if record.sensitivity == "SECRET":
-                raise HTTPException(403, "秘密不能共享")
-            existing = db.scalar(select(Grant).where(Grant.record_id == record.id, Grant.grantee_id == user_id))
-            if not existing:
-                db.add(Grant(household_id=actor.household_id, owner_id=actor.user_id, record_id=record.id, grantee_id=user_id))
-            if not existing:
-                db.flush()
-                notify_recipients(db, actor, 'record.changed', record.id, [user_id])
-            audit(db, actor, "data.share", record.id)
-            db.commit()
-            return {"shared": True}
+        raise HTTPException(410,"请使用资料的个人或家庭可见范围")
 
     @app.delete("/api/v1/data/{record_id}/grants/{user_id}")
     def unshare(record_id: str, user_id: str, actor: Actor = auth):
         with app.state.db() as db:
-            from .sync_order import lock_changes, notify_recipients
-            scope(db, actor.user_id, actor.household_id)
-            lock_changes(db)
-            own(db, Record, record_id, actor)
-            existing = db.scalar(select(Grant).where(Grant.record_id == record_id, Grant.grantee_id == user_id))
-            if existing:
-                from .sync_order import invalidate_snapshots
-                invalidate_snapshots(db, actor, [user_id])
-                db.delete(existing)
-                db.flush()
-                notify_recipients(db, actor, 'record.revoked', record_id, [user_id])
-            audit(db, actor, "data.unshare", record_id)
-            db.commit()
-            return {"revoked": True}
+            own(db,Record,record_id,actor)
+            raise HTTPException(410,"请使用资料的个人或家庭可见范围")
 
     @app.post("/api/v1/files")
     async def upload(file: UploadFile, actor: Actor = auth):
@@ -409,7 +383,7 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     def list_automations(actor: Actor = auth):
         with app.state.db() as db:
             scope(db, actor.user_id, actor.household_id)
-            return [{"id": a.id, "name": a.name, "cron": a.cron, "enabled": a.enabled, "next_run": a.next_run if a.trigger_kind == "cron" else None, "trigger_kind": a.trigger_kind, "event_type": a.event_type, "record_kind": a.record_kind, "record_source": a.record_source, "include_shared": a.include_shared, "cooldown_seconds": a.cooldown_seconds} for a in db.scalars(select(Automation).where(Automation.owner_id == actor.user_id))]
+            return [{"id": a.id, "name": a.name, "cron": a.cron, "enabled": a.enabled, "next_run": a.next_run if a.trigger_kind == "cron" else None, "trigger_kind": a.trigger_kind, "event_type": a.event_type, "record_kind": a.record_kind, "record_source": a.record_source, "include_shared": a.include_shared, "cooldown_seconds": a.cooldown_seconds,"visibility":a.visibility,"owner_id":a.owner_id,"created_at":a.created_at,"instruction":v.open(a.instruction,a.owner_id+':automation-instruction:'+a.id) if a.instruction and a.owner_id==actor.user_id else None} for a in db.scalars(select(Automation).where(Automation.household_id==actor.household_id,or_(Automation.owner_id == actor.user_id,Automation.visibility=='family')))]
 
     @app.post("/api/v1/automations")
     def create_automation(body: AutomationInput, actor: Actor = auth):
@@ -431,7 +405,7 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             raise HTTPException(403, "Skill 不能直接修改派生索引")
         with app.state.db() as db:
             scope(db, actor.user_id, actor.household_id)
-            row = Automation(id=uid(), household_id=actor.household_id, owner_id=actor.user_id, name=body.name, cron=body.cron, timezone=body.timezone, skill="", enabled=body.enabled, next_run=next_run, trigger_kind=body.trigger_kind, event_type=body.event_type, record_kind=body.record_kind, record_source=body.record_source, include_shared=body.include_shared, cooldown_seconds=body.cooldown_seconds)
+            row = Automation(id=uid(), household_id=actor.household_id, owner_id=actor.user_id, name=body.name, visibility=body.visibility, cron=body.cron, timezone=body.timezone, skill="", enabled=body.enabled, next_run=next_run, trigger_kind=body.trigger_kind, event_type=body.event_type, record_kind=body.record_kind, record_source=body.record_source, include_shared=body.include_shared, cooldown_seconds=body.cooldown_seconds)
             row.skill = v.seal({**body.skill.model_dump(), "device_id": actor.device_id}, actor.user_id + ":automation:" + row.id)
             db.add(row)
             db.commit()
@@ -446,6 +420,11 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
                 AutomationDelivery.owner_id == actor.user_id).order_by(AutomationDelivery.created_at.desc()).limit(max(1, min(limit, 100))))
             return [{"id": row.id, "event_id": row.event_id, "status": row.status, "task_id": row.task_id,
                      "reason": row.reason, "created_at": row.created_at} for row in rows]
+
+    @app.get("/api/v1/automations/{automation_id}/runs")
+    def automation_runs(automation_id:str,actor:Actor=auth):
+        from .automation_service import runs
+        with app.state.db() as db:return runs(app.state,db,actor,automation_id)
 
     @app.delete("/api/v1/automations/{automation_id}")
     def stop_automation(automation_id: str, actor: Actor = auth):

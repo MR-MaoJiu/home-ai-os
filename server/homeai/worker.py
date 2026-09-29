@@ -8,7 +8,7 @@ from nats.js.errors import NotFoundError
 from croniter import croniter
 from sqlalchemy import select, delete, or_
 from .api import create_app
-from .db import Principal, Task, Outbox, Nonce, Automation, Device, Invocation, Approval, now, scope
+from .db import Principal, Task, Outbox, Nonce, Automation, AutomationDelivery, Device, Invocation, Approval, now, scope
 from .runtime import run_task, submit
 from .contracts import TaskRequest
 from .data import emit, audit
@@ -43,7 +43,11 @@ async def cycle(app, js=None):
                 if not device or device.revoked:
                     automation.enabled = False
                     continue
-                submit(db, actor, TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}", steps=skill["steps"], max_steps=len(skill["steps"]), timezone=automation.timezone), app.vault)
+                from .automation_service import bind_task
+                request=TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}",message=app.vault.open(automation.instruction,user_id+':automation-instruction:'+automation.id),timezone=automation.timezone,max_model_tokens=131072) if automation.instruction else TaskRequest(idempotency_key=f"auto:{automation.id}:{automation.next_run}",steps=skill["steps"],max_steps=len(skill["steps"]),timezone=automation.timezone)
+                task=submit(db,actor,request,app.vault)
+                bind_task(app,task,automation)
+                db.add(AutomationDelivery(owner_id=user_id,household_id=household,automation_id=automation.id,event_id='cron:'+str(automation.next_run),task_id=task.id,status='DISPATCHED'))
                 automation.next_run = croniter(automation.cron, datetime.now(ZoneInfo(automation.timezone))).get_next(float)
             db.commit()
         from .event_automations import dispatch

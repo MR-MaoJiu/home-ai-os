@@ -66,11 +66,11 @@ async def test_real_document_search_shared_revoked_and_deleted():
             assert any(source['record_id']==rid for source in answer['result']['sources'])
 
         assert other.request('POST','/api/v1/knowledge/search',{'query':'何时检查备份'}).json()['matches']==[]
-        assert user.request('PUT',f'/api/v1/data/{rid}/grants/{other.user_id}').status_code==200
+        assert user.request('PUT',f'/api/v1/data/{rid}/visibility',{'visibility':'family'}).status_code==200
         assert other.request('POST','/api/v1/knowledge/search',{'query':'何时检查备份'}).json()['matches'][0]['record_id']==rid
         cached_task=other.request('POST','/api/v1/tasks',{'idempotency_key':str(uuid.uuid4()),'capability':'knowledge.search@v1','arguments':{'query':'备份时间'}}).json()['id']
         await run_task(app.state,cached_task,other.user_id)
-        assert user.request('DELETE',f'/api/v1/data/{rid}/grants/{other.user_id}').status_code==200
+        assert user.request('PUT',f'/api/v1/data/{rid}/visibility',{'visibility':'personal'}).status_code==200
         cached=other.request('GET','/api/v1/tasks/'+cached_task).json()
         assert cached['result'] is None and cached['result_redacted'] is True
         assert other.request('GET','/api/v1/tasks/'+cached_task+'/steps').json()==[]

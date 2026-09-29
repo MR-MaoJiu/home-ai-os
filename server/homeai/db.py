@@ -55,6 +55,7 @@ class Owned:
 
 
 class Record(Owned, Base):
+    visibility: Mapped[str] = mapped_column(String, default="personal")
     __tablename__ = "data_records"
     __table_args__ = (UniqueConstraint("owner_id", "source", "source_id"),)
     source: Mapped[str] = mapped_column(String)
@@ -167,6 +168,8 @@ class Provider(Base):
 
 
 class Automation(Owned, Base):
+    visibility: Mapped[str] = mapped_column(String, default="personal")
+    instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
     __tablename__ = "automations"
     name: Mapped[str] = mapped_column(String)
     cron: Mapped[str] = mapped_column(String)
@@ -242,6 +245,8 @@ def restore_scope(session, transaction, connection):
         connection.execute(text("SELECT set_config('homeai.user_id', :u, true), set_config('homeai.household_id', :h, true)"), {"u": session.info["user_id"], "h": session.info["household_id"]})
 
 class MemoryCandidate(Owned, Base):
+    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    turn_id: Mapped[str | None] = mapped_column(String, nullable=True)
     __tablename__ = "memory_candidates"
     source_ids: Mapped[str] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text)
@@ -373,3 +378,40 @@ class AgentSkill(Owned, Base):
     description: Mapped[str] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+class Notification(Owned, Base):
+    __tablename__ = "notifications"
+    __table_args__ = (UniqueConstraint("owner_id", "event_key"),)
+    event_key: Mapped[str] = mapped_column(String)
+    kind: Mapped[str] = mapped_column(String)
+    visibility: Mapped[str] = mapped_column(String, default="personal")
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    automation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    record_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String)
+    created_at: Mapped[float] = mapped_column(default=now, index=True)
+    read_at: Mapped[float | None] = mapped_column(nullable=True)
+
+
+class PushRegistration(Owned, Base):
+    __tablename__ = "push_registrations"
+    device_id: Mapped[str] = mapped_column(String, unique=True)
+    token: Mapped[str] = mapped_column(Text)
+    token_digest: Mapped[str] = mapped_column(String)
+    environment: Mapped[str] = mapped_column(String)
+    authorization: Mapped[str] = mapped_column(String)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[float] = mapped_column(default=now)
+
+
+class PushDelivery(Owned, Base):
+    __tablename__ = "push_deliveries"
+    __table_args__ = (UniqueConstraint("notification_id", "device_id"),)
+    notification_id: Mapped[str] = mapped_column(String, index=True)
+    device_id: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    retry_at: Mapped[float] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    accepted_at: Mapped[float | None] = mapped_column(nullable=True)

@@ -106,6 +106,8 @@ def dispatch(app, user_id, household, role):
                         steps=steps, max_steps=len(steps), timezone=rule.timezone), app.vault,
                         automation_chain=json.loads(event.automation_chain) + [rule.id],
                         record_dependencies=dependencies)
+                    from .automation_service import bind_task
+                    bind_task(app,task,rule)
                     delivery.task_id, delivery.status = task.id, 'DISPATCHED'
                     rule.last_trigger_at = now()
                     audit(db, actor, 'automation.dispatch', rule.id, {'event_id': event.event_id, 'task_id': task.id})

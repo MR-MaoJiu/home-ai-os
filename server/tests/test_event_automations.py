@@ -164,13 +164,13 @@ def test_shared_opt_in_revocation_and_cross_owner_delivery_isolation(workflow):
     private_rule = rule(bob)
     shared_rule = rule(bob, include_shared=True)
     rid = record(alice)
-    assert alice.request('PUT', f'/api/v1/data/{rid}/grants/{bob.user_id}').status_code == 200
+    assert alice.request('PUT', f'/api/v1/data/{rid}/visibility', {'visibility':'family'}).status_code == 200
     event = events(app, bob, rid)[0]
     deliver(app, event)
     assert deliveries(app, bob, private_rule) == []
     assert len(deliveries(app, bob, shared_rule)) == 1
     assert alice.request('GET', f'/api/v1/automations/{shared_rule}/deliveries').status_code == 404
-    assert alice.request('DELETE', f'/api/v1/data/{rid}/grants/{bob.user_id}').status_code == 200
+    assert alice.request('PUT', f'/api/v1/data/{rid}/visibility', {'visibility':'personal'}).status_code == 200
     dispatch_user(app, bob)
     assert deliveries(app, bob, shared_rule)[0].status == 'SKIPPED'
 

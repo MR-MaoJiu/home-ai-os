@@ -23,3 +23,8 @@ class Settings(BaseSettings):
 
     direct_enabled: bool = True
     direct_stun_urls: list[str] = Field(default_factory=list, max_length=2)
+
+    apns_key_file: Path | None = None
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    apns_topic: str = ""

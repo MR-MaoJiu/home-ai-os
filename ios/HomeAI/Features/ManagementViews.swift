@@ -78,6 +78,8 @@ struct TaskProgressView: View {
 struct DataView: View {
     @Environment(AppState.self) private var state
     @State private var importing = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var scope = "personal"
     @State private var currentUser = ""
     @State private var currentMemberName = ""
     var body: some View {
@@ -85,22 +87,42 @@ struct DataView: View {
             if !state.syncStatus.isEmpty { Text(state.syncStatus).font(.caption).foregroundStyle(.secondary) }
             Section {
                 if !currentMemberName.isEmpty { Text("当前成员：" + currentMemberName).font(.caption) }
-                Text("显示本人成员的数据和明确共享给你的数据。图片、文件等逐条共享；健康和位置的持续共享在设置中管理。").font(.caption)
+                Text("个人数据仅自己可见，家庭数据在所有家庭成员的设备上展示。").font(.caption)
             }
-            Section("已授权的数据") {
-                ForEach(state.records.filter { !$0.kind.hasPrefix("memory.") }) { record in
+            Picker("数据范围", selection: $scope) {
+                Text("我的").tag("personal")
+                Text("家庭").tag("family")
+            }.pickerStyle(.segmented)
+            Section("服务器数据") {
+                if state.records.filter({ !$0.kind.hasPrefix("memory.") && ($0.isFamily || $0.owner_id == currentUser) && ($0.isFamily ? "family" : "personal") == scope }).isEmpty {
+                    ContentUnavailableView(scope == "family" ? "暂无家庭数据" : "暂无个人数据", systemImage: "externaldrive", description: Text("导入图片或文件后，可选择仅自己或家庭可见。"))
+                }
+                ForEach(state.records.filter { !$0.kind.hasPrefix("memory.") && ($0.isFamily || $0.owner_id == currentUser) && ($0.isFamily ? "family" : "personal") == scope }) { record in
                     NavigationLink {
                         MemberRecordDetail(record: record, isOwner: record.owner_id == currentUser)
                     } label: {
-                        Label { VStack(alignment: .leading) { Text(record.title); Text(record.kind).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: "doc.text") }
+                        Label { VStack(alignment: .leading) { Text(record.title); Text(record.isFamily ? "家庭 · " + record.kind : "个人 · " + record.kind).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: "doc.text") }
                     }
                     .swipeActions { if record.owner_id == currentUser { Button("删除", role: .destructive) { Task { await remove(record.id) } } } }
                 }
             }
         }
-        .overlay { if state.records.filter({ !$0.kind.hasPrefix("memory.") }).isEmpty { ContentUnavailableView("数据由你掌控", systemImage: "externaldrive", description: Text(state.syncStatus.isEmpty ? "在设置中授权同步，或导入文件。" : state.syncStatus)) } }
+
         .navigationTitle("数据")
-        .toolbar { Button("导入文件", systemImage: "plus") { importing = true } }
+        .toolbar {
+            PhotosPicker(selection: $selectedPhoto, matching: .images) { Label("导入照片", systemImage: "photo") }
+            Button("导入文件", systemImage: "plus") { importing = true }
+        }
+        .onChange(of: selectedPhoto) { _, photo in
+            guard let photo else { return }
+            Task { await state.perform {
+                guard let data = try await photo.loadTransferable(type: Data.self) else { return }
+                let prepared = try PhotoPreparation.jpeg(data)
+                try await ConnectorSync(api: state.api).uploadRecord(source: "photos", sourceID: DeviceIdentity.hash(data), kind: "photo.selected", payload: ["name": .string("用户选择的照片"), "content_base64": .string(prepared.base64EncodedString())])
+                try await state.loadData()
+                selectedPhoto = nil
+            } }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
             Task { await state.perform {
                 let url = try result.get()
@@ -133,269 +155,316 @@ struct DataView: View {
 
 struct AutomationsView: View {
     @Environment(AppState.self) private var state
-    @State private var showingEditor = false
+    @State private var scope = "personal"
     var body: some View {
-        List(state.automations) { item in
-            VStack(alignment: .leading) {
-                HStack { Text(item.name); Spacer(); Text(item.enabled ? "已启用" : "已停用").foregroundStyle(.secondary) }
-                Text(item.triggerDescription).font(.caption)
-            }.swipeActions {
-                Button("停用", role: .destructive) { Task { await state.perform {
-                    _ = try await state.api.request("DELETE", "/api/v1/automations/" + item.id)
-                    try await state.loadAutomations()
-                } } }
+        List {
+            Picker("范围", selection: $scope) {
+                Text("我的").tag("personal")
+                Text("家庭").tag("family")
+            }.pickerStyle(.segmented)
+            ForEach(state.automations.filter { ($0.isFamily ? "family" : "personal") == scope }) { item in
+                NavigationLink { AutomationRunsView(item: item) } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack { Text(item.name); Spacer(); Text(item.enabled ? "已启用" : "已停用").foregroundStyle(.secondary) }
+                        Text(item.triggerDescription).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if state.automations.filter({ ($0.isFamily ? "family" : "personal") == scope }).isEmpty {
+                ContentUnavailableView(scope == "family" ? "暂无家庭自动化" : "暂无个人自动化", systemImage: "bolt", description: Text("在 AI 对话中说明执行内容、时间和个人或家庭范围。服务器会负责执行并通知相关设备。"))
             }
         }
-        .overlay { if state.automations.isEmpty { ContentUnavailableView("让日常按时发生", systemImage: "bolt", description: Text("按时间或数据变化创建提醒，每次执行都遵守你的权限设置。")) } }
         .navigationTitle("自动化")
-        .toolbar { Button("新建", systemImage: "plus") { showingEditor = true } }
-        .sheet(isPresented: $showingEditor) { AutomationEditor() }
-        .task { await reload() }.refreshable { await reload() }
+        .toolbar { NavigationLink { NotificationInboxView() } label: { Label("通知", systemImage: "bell") } }
+        .task(id: state.connectionRevision) { await reload() }
+        .onChange(of: state.taskEventRevision) { _, _ in Task { await reload() } }
+        .refreshable { await reload() }
     }
     func reload() async { guard state.connected else { return }; await state.perform { try await state.loadAutomations() } }
 }
 
-struct AutomationEditor: View {
+private struct AutomationRunsView: View {
     @Environment(AppState.self) private var state
-    @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var time = Date()
-    @State private var trigger = "cron"
-    @State private var eventType = "record.changed"
-    @State private var recordKind = ""
-    @State private var includeShared = false
-    @State private var saving = false
+    let item: AutomationEntry
+    struct Run: Decodable, Identifiable { let id: String; let status: String; let created_at: Double; let task_id: String?; let result_text: String? }
+    @State private var runs: [Run] = []
+    @State private var error: String?
+    @State private var loading = false
     var body: some View {
-        NavigationStack {
-            Form {
-                TextField("提醒内容", text: $title)
-                Picker("触发方式", selection: $trigger) {
-                    Text("每天定时").tag("cron")
-                    Text("数据事件").tag("event")
+        List {
+            Section {
+                LabeledContent("范围", value: item.isFamily ? "家庭所有成员" : "仅自己")
+                LabeledContent("状态", value: item.enabled ? "已启用" : "已停用")
+                Text(item.triggerDescription)
+                if let instruction = item.instruction, !instruction.isEmpty { Text(instruction) }
+            }
+            Section("服务器执行记录") {
+                if loading && runs.isEmpty { ProgressView() }
+                if let error { Text(error).foregroundStyle(.red) }
+                ForEach(runs) { run in
+                    if let task = run.task_id {
+                        NavigationLink { TaskProgressView(identifier: task) } label: { runLabel(run) }
+                    } else { runLabel(run) }
                 }
-                if trigger == "cron" {
-                    DatePicker("每天", selection: $time, displayedComponents: .hourAndMinute)
-                } else {
-                    Picker("事件", selection: $eventType) {
-                        Text("数据新增或更新").tag("record.changed")
-                        Text("数据删除").tag("record.deleted")
-                        Text("共享授权撤回").tag("record.revoked")
-                    }
-                    TextField("数据类型，可留空", text: $recordKind).textInputAutocapitalization(.never)
-                    Toggle("包含共享给我的数据", isOn: $includeShared)
-                    Text("触发间隔为 60 秒，期间的事件保留排队。过时或已撤权的更新会跳过；停用不取消已经创建的任务。").font(.caption).foregroundStyle(.secondary)
-                }
-                Text("提醒保存到家庭服务器。推送功能尚未完成配置时，请在数据页面查看。").font(.caption).foregroundStyle(.secondary)
-            }.disabled(saving).navigationTitle("新建自动化")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button("保存") { Task { await save() } }.disabled(title.isEmpty || title.count > 100 || saving) }
-                }
+                if !loading && error == nil && runs.isEmpty { Text("尚未执行").foregroundStyle(.secondary) }
+            }
+        }.navigationTitle(item.name)
+        .task(id: state.connectionRevision) { runs = []; await load() }
+        .onChange(of: state.taskEventRevision) { _, _ in Task { await load() } }
+        .refreshable { await load() }
+    }
+    private func runLabel(_ run: Run) -> some View {
+        VStack(alignment: .leading) {
+            Text(taskStatusLabel(run.status))
+            if let result = run.result_text, !result.isEmpty { Text(result).font(.subheadline).textSelection(.enabled) }
+            Text(Date(timeIntervalSince1970: run.created_at), format: .dateTime.year().month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
         }
     }
-    func save() async {
-        guard !saving else { return }
-        saving = true
-        defer { saving = false }
-        await state.perform {
-            let parts = Calendar.current.dateComponents([.hour, .minute], from: time)
-            var arguments: [String: Any] = ["title": title]
-            if trigger == "event" { arguments["source_record"] = ["$event": "record_id"] }
-            var body: [String: Any] = ["name": title, "trigger_kind": trigger, "timezone": TimeZone.current.identifier, "enabled": true, "skill": ["name": title, "steps": [["capability": "reminder.create@v1", "arguments": arguments]]]]
-            if trigger == "cron" {
-                body["cron"] = "\(parts.minute ?? 0) \(parts.hour ?? 0) * * *"
-            } else {
-                body["event_type"] = eventType
-                body["cooldown_seconds"] = 60
-                body["include_shared"] = includeShared
-                if !recordKind.isEmpty { body["record_kind"] = recordKind }
-            }
-            _ = try await state.api.request("POST", "/api/v1/automations", body: JSONSerialization.data(withJSONObject: body))
-            try await state.loadAutomations()
-            dismiss()
-        }
+    private func load() async {
+        guard !loading else { return }; loading = true; defer { loading = false }
+        do {
+            let namespace = try await state.api.syncNamespace()
+            let bytes = try await state.api.request("GET", "/api/v1/automations/" + item.id + "/runs", expectedNamespace: namespace)
+            guard !Task.isCancelled else { return }
+            runs = try JSONDecoder().decode([Run].self, from: bytes); error = nil
+        } catch { runs = []; self.error = error.localizedDescription }
     }
 }
 
 struct FamilyMember: Decodable, Identifiable, Sendable { let id: String; let name: String }
 
-struct RecordSharingView: View {
+struct MemberMemoryView: View {
     @Environment(AppState.self) private var state
-    let recordID: String
-    @State private var members: [FamilyMember] = []
-    @State private var grants: Set<String> = []
-    @State private var me = ""
+    struct Candidate: Decodable, Identifiable { let id: String; let content: String }
+    @State private var entries: [DataEntry] = []
+    @State private var candidates: [Candidate] = []
+    @State private var deciding = false
     @State private var error: String?
-    @State private var busy = false
+    @State private var loading = false
     var body: some View {
         List {
-            Section { Text("只共享当前这条资料或记忆，不会开放你的其他数据。可随时撤回；秘密资料不能共享。").font(.caption) }
             if let error { Text(error).foregroundStyle(.red) }
-            ForEach(members.filter { $0.id != me }) { member in
-                HStack {
-                    Text(member.name); Spacer()
-                    Button(grants.contains(member.id) ? "撤回共享" : "共享") { Task { await change(member.id) } }.disabled(busy)
+            if loading && entries.isEmpty { ProgressView("正在读取记忆…") }
+            if !entries.isEmpty {
+                Section("已记住") {
+                    ForEach(entries) { record in
+                        Text(record.payload["content"]?.description ?? record.title).textSelection(.enabled)
+                    }
                 }
             }
-        }.navigationTitle("共享给家庭成员").task(id: state.connectionRevision) { members = []; grants = []; await load() }
+            if !candidates.isEmpty {
+                Section("等待确认") {
+                    ForEach(candidates) { candidate in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(candidate.content)
+                            HStack {
+                                Button("确认记住") { Task { await decide(candidate.id, "confirm") } }
+                                Button("不记住", role: .destructive) { Task { await decide(candidate.id, "reject") } }
+                            }.disabled(deciding)
+                        }
+                    }
+                }
+            }
+            if !loading && error == nil && entries.isEmpty && candidates.isEmpty {
+                ContentUnavailableView("暂无聊天记忆", systemImage: "brain", description: Text("在 AI 对话中告诉它需要记住的内容。记忆由服务器保存，仅你自己可见。"))
+            }
+        }.navigationTitle("记忆")
+            .task(id: state.connectionRevision) { entries = []; candidates = []; await load() }
+            .onChange(of: state.taskEventRevision) { _, _ in Task { await load() } }
+            .refreshable { await load() }
     }
-    func load() async {
+    private func load() async {
+        guard !loading else { return }; loading = true; defer { loading = false }
         do {
             let namespace = try await state.api.syncNamespace()
-            let owner = try await state.api.ownerIdentity(expectedNamespace: namespace)
-            me = owner.userID
-            members = try JSONDecoder().decode([FamilyMember].self, from: await state.api.request("GET", "/api/v1/members", expectedNamespace: namespace))
-            struct Grants: Decodable { let grantee_ids: [String] }
-            grants = Set(try JSONDecoder().decode(Grants.self, from: await state.api.request("GET", "/api/v1/data/" + recordID + "/grants", expectedNamespace: namespace)).grantee_ids)
-            error = nil
-        } catch { self.error = error.localizedDescription }
+            let bytes = try await state.api.request("GET", "/api/v1/memory/entries", expectedNamespace: namespace)
+            let pending = try await state.api.request("GET", "/api/v1/memory/candidates", expectedNamespace: namespace)
+            guard !Task.isCancelled else { return }
+            entries = try JSONDecoder().decode([DataEntry].self, from: bytes)
+            candidates = try JSONDecoder().decode([Candidate].self, from: pending); error = nil
+        } catch { entries = []; candidates = []; self.error = error.localizedDescription }
     }
-    func change(_ member: String) async {
-        busy = true; defer { busy = false }
+    private func decide(_ id: String, _ action: String) async {
+        guard !deciding else { return }; deciding = true; defer { deciding = false }
         do {
-            _ = try await state.api.request(grants.contains(member) ? "DELETE" : "PUT", "/api/v1/data/" + recordID + "/grants/" + member)
+            _ = try await state.api.request("POST", "/api/v1/memory/candidates/" + id + "/" + action)
             await load()
         } catch { self.error = error.localizedDescription }
     }
 }
 
-struct MemberMemoryView: View {
-    @Environment(AppState.self) private var state
-    struct Candidate: Decodable, Identifiable { let id: String; let content: String }
-    @State private var candidates: [Candidate] = []
-    @State private var ownerID = ""
-    @State private var source = ""
-    @State private var content = ""
-    @State private var error: String?
-    @State private var busy = false
-    var body: some View {
-        List {
-            Section { Text("同步的原始资料不会自动成为长期记忆。提交候选并确认后，才保存到你的记忆账本。").font(.caption) }
-            if let error { Text(error).foregroundStyle(.red) }
-            Section("我的已确认记忆") {
-                ForEach(state.records.filter { $0.kind == "memory.fact" && $0.owner_id == ownerID }) { record in
-                    VStack(alignment: .leading) {
-                        Text(record.payload["content"]?.description ?? record.title)
-
-                    }
-                }
-            }
-            Section("提交我的候选记忆") {
-                Picker("来源资料", selection: $source) {
-                    Text("请选择自己的资料").tag("")
-                    ForEach(state.records.filter { $0.owner_id == ownerID && $0.sensitivity != "SECRET" && !$0.kind.hasPrefix("memory.") }) { record in Text(record.title).tag(record.id) }
-                }
-                TextField("需要记住的内容", text: $content, axis: .vertical).lineLimit(3...8)
-                Button("提交候选，等待确认") { Task { await submit() } }.disabled(busy || source.isEmpty || content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            Section("等待我确认") {
-                ForEach(candidates) { candidate in
-                    VStack(alignment: .leading) {
-                        Text(candidate.content)
-                        HStack {
-                            Button("确认记住") { Task { await decide(candidate.id, "confirm") } }
-                            Button("拒绝", role: .destructive) { Task { await decide(candidate.id, "reject") } }
-                        }.disabled(busy)
-                    }
-                }
-            }
-        }.navigationTitle("记忆").task(id: state.connectionRevision) { candidates = []; await load() }.refreshable { await load() }
-    }
-    func load() async {
-        do {
-            let namespace = try await state.api.syncNamespace()
-            ownerID = try await state.api.ownerIdentity(expectedNamespace: namespace).userID
-            try await state.loadData()
-            candidates = try JSONDecoder().decode([Candidate].self, from: await state.api.request("GET", "/api/v1/memory/candidates"))
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-    func submit() async {
-        busy = true; defer { busy = false }
-        do {
-            _ = try await state.api.request("POST", "/api/v1/memory/candidates", body: JSONSerialization.data(withJSONObject: ["source_ids": [source], "content": content]))
-            content = ""; await load()
-        } catch { self.error = error.localizedDescription }
-    }
-    func decide(_ id: String, _ decision: String) async {
-        busy = true; defer { busy = false }
-        do { _ = try await state.api.request("POST", "/api/v1/memory/candidates/" + id + "/" + decision); await load() }
-        catch { self.error = error.localizedDescription }
-    }
-}
-
 private struct MemberRecordDetail: View {
+    @Environment(AppState.self) private var state
     let record: DataEntry
     let isOwner: Bool
+    @State private var visibility = "personal"
+    @State private var saving = false
     var body: some View {
         List {
             LabeledContent("类型", value: record.kind)
-            LabeledContent("敏感等级", value: record.sensitivity)
             if isOwner && record.sensitivity != "SECRET" {
-                if record.kind.hasPrefix("health.") || record.kind.hasPrefix("location.") {
-                    NavigationLink("管理此类数据的持续共享") { ContinuousSharingView() }
-                } else {
-                    NavigationLink("共享给家庭成员") { RecordSharingView(recordID: record.id) }
-                }
-            }
-            if record.kind == "photo.selected" && record.sensitivity != "SECRET" {
-                NavigationLink("使用本地模型分析照片") { PhotoAnalysisView(recordID: record.id) }
-            }
+                Picker("可见范围", selection: Binding(get: { visibility }, set: { selected in Task { await change(selected) } })) {
+                    Text("仅自己").tag("personal")
+                    Text("家庭所有成员").tag("family")
+                }.disabled(saving)
+            } else { LabeledContent("可见范围", value: record.isFamily ? "家庭所有成员" : "仅自己") }
             ForEach(record.payload.keys.filter { $0 != "content_base64" }.sorted(), id: \.self) { key in
                 VStack(alignment: .leading) {
                     Text(key).foregroundStyle(.secondary)
                     Text(record.payload[key]?.description ?? "").textSelection(.enabled)
                 }
             }
-        }.navigationTitle(record.title)
+        }.navigationTitle(record.title).onAppear { visibility = record.visibility ?? "personal" }
+    }
+    private func change(_ value: String) async {
+        guard !saving else { return }; saving = true; defer { saving = false }
+        await state.perform {
+            _ = try await state.api.request("PUT", "/api/v1/data/" + record.id + "/visibility", body: JSONSerialization.data(withJSONObject: ["visibility": value]))
+            visibility = value; try await state.loadData()
+        }
     }
 }
 
 struct ContinuousSharingView: View {
     @Environment(AppState.self) private var state
-    struct Rule: Decodable { let category: String; let grantee_id: String }
-    @State private var members: [FamilyMember] = []
-    @State private var rules: [Rule] = []
+    @State private var categories: [String: String] = [:]
     @State private var namespace: String?
     @State private var error: String?
     @State private var busy = false
     var body: some View {
         List {
             Section {
-                Text("开启后向指定成员共享该类已有资料及后续上传、更新的资料；关闭会撤回该类全部共享。秘密资料始终不可共享。此设置不会扩大系统采集权限，也不会共享你的记忆。").font(.caption)
+                Text("开启后，该类已有及后续上传的数据对家庭所有成员可见；关闭后仅自己可见。不会共享聊天记忆，也不会新增手机采集权限。").font(.caption)
             }
             if let error { Text(error).foregroundStyle(.red) }
             ForEach(["health", "location"], id: \.self) { category in
-                Section(category == "health" ? "健康信息" : "位置信息") {
-                    ForEach(members) { member in
-                        Toggle(member.name, isOn: Binding(get: {
-                            rules.contains { $0.category == category && $0.grantee_id == member.id }
-                        }, set: { enabled in Task { await change(category, member.id, enabled) } }))
-                        .disabled(busy || namespace == nil)
-                    }
-                    if members.isEmpty { Text("暂无可共享的其他家庭成员").foregroundStyle(.secondary) }
-                }
+                Toggle(category == "health" ? "家庭可见健康数据" : "家庭可见位置数据", isOn: Binding(get: {
+                    categories[category] == "family"
+                }, set: { enabled in Task { await change(category, enabled) } }))
+                .disabled(busy || namespace == nil)
             }
         }.navigationTitle("持续共享")
-            .task(id: state.connectionRevision) { namespace = nil; members = []; rules = []; await load() }
+            .task(id: state.connectionRevision) { namespace = nil; categories = [:]; await load() }
             .refreshable { await load() }
     }
     private func load() async {
         do {
             let current = try await state.api.syncNamespace()
-            let owner = try await state.api.ownerIdentity(expectedNamespace: current)
-            let people = try JSONDecoder().decode([FamilyMember].self, from: await state.api.request("GET", "/api/v1/members", expectedNamespace: current))
-            let saved = try JSONDecoder().decode([Rule].self, from: await state.api.request("GET", "/api/v1/sharing/rules", expectedNamespace: current))
+            let saved = try JSONDecoder().decode([String: String].self, from: await state.api.request("GET", "/api/v1/sharing/categories", expectedNamespace: current))
             guard !Task.isCancelled else { return }
-            members = people.filter { $0.id != owner.userID }; rules = saved; namespace = current; error = nil
+            categories = saved; namespace = current; error = nil
         } catch { self.error = error.localizedDescription; namespace = nil }
     }
-    private func change(_ category: String, _ member: String, _ enabled: Bool) async {
+    private func change(_ category: String, _ enabled: Bool) async {
         guard let namespace else { return }
         busy = true; defer { busy = false }
         do {
-            _ = try await state.api.request(enabled ? "PUT" : "DELETE", "/api/v1/sharing/rules/" + category + "/" + member, expectedNamespace: namespace)
+            _ = try await state.api.request("PUT", "/api/v1/sharing/categories/" + category, body: JSONSerialization.data(withJSONObject: ["visibility": enabled ? "family" : "personal"]), expectedNamespace: namespace)
             await load()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct NotificationSettingsContent: View {
+    @State private var notifications = ClientNotifications.shared
+    var body: some View {
+        if notifications.authorization == "notDetermined" || notifications.authorization == "unknown" {
+            Button("允许系统通知") { Task { await notifications.requestPermission() } }
+        } else {
+            Button(notifications.authorization == "denied" ? "在系统设置中开启通知" : "系统通知设置") {
+                if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
+            }
+        }
+        if !notifications.status.isEmpty { Text(notifications.status).font(.caption).foregroundStyle(.secondary) }
+    }
+}
+
+struct NotificationInboxView: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    var highlightID: String? = nil
+    struct Page: Decodable { let items: [ClientNotification]; let has_more: Bool; let next_before: Double? }
+    @State private var items: [ClientNotification] = []
+    @State private var before: Double?
+    @State private var viewingOlder = false
+    @State private var hasMore = false
+    @State private var loading = false
+    @State private var error: String?
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red) }
+            if loading && items.isEmpty { ProgressView("正在读取通知…") }
+            ForEach(items) { item in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        if item.read_at == nil { Circle().fill(.teal).frame(width: 7, height: 7) }
+                        Text(item.title).font(.headline)
+                        Spacer()
+                        Text(item.scope == "family" ? "家庭" : "个人").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let status = item.status { Text(status == "DUE" ? "已到期" : taskStatusLabel(status)).font(.subheadline) }
+                    Text(Date(timeIntervalSince1970: item.created_at), format: .dateTime.month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
+                    if let conversation = item.conversation_id {
+                        Button("查看对话") { Task { await openConversation(conversation, notification: item) } }
+                    } else if let task = item.task_id {
+                        NavigationLink { TaskProgressView(identifier: task).task { await markRead(item) } } label: { Text("查看执行结果") }
+                    } else if let record = item.record_id {
+                        NavigationLink { RecordSourceView(source: RecordReference(id: record, title: "提醒详情", version: nil)).task { await markRead(item) } } label: { Text("查看提醒") }
+                    } else if item.automation_id != nil {
+                        Button("查看家庭自动化") {
+                            Task {
+                                await markRead(item)
+                                IntentRouter.shared.destination = .automations
+                                ClientNotifications.shared.pendingNotificationID = nil
+                                dismiss()
+                            }
+                        }
+                    }
+                    if item.read_at == nil { Button("标记已读") { Task { await markRead(item); await load() } }.font(.caption) }
+                }.listRowBackground(item.id == highlightID ? Color.teal.opacity(0.08) : nil)
+            }
+            if hasMore { Button("加载更早通知") { Task { await load(older: true) } }.disabled(loading) }
+            if !loading && error == nil && items.isEmpty {
+                ContentUnavailableView("暂无通知", systemImage: "bell", description: Text("任务和自动化在服务器执行，结果会显示在这里。"))
+            }
+        }.navigationTitle("通知")
+            .task(id: state.connectionRevision) {
+                items = []
+                while !Task.isCancelled {
+                    if !viewingOlder { await load() }
+                    do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                }
+            }
+            .onChange(of: state.taskEventRevision) { _, _ in Task { await load() } }
+            .refreshable { await load() }
+    }
+    private func load(older: Bool = false) async {
+        guard !loading else { return }; loading = true; defer { loading = false }
+        do {
+            let namespace = try await state.api.syncNamespace()
+            let path = "/api/v1/notifications?limit=50" + (older && before != nil ? "&before=\(before!)" : "")
+            let page = try JSONDecoder().decode(Page.self, from: await state.api.request("GET", path, expectedNamespace: namespace))
+            guard !Task.isCancelled else { return }
+            if older { items += page.items.filter { next in !items.contains { $0.id == next.id } } }
+            else { items = page.items }
+            viewingOlder = older
+            before = page.next_before; hasMore = page.has_more; error = nil
+            if !older, let highlightID, !items.contains(where: { $0.id == highlightID }) {
+                let highlighted = try JSONDecoder().decode(ClientNotification.self, from: await state.api.request("GET", "/api/v1/notifications/" + highlightID, expectedNamespace: namespace))
+                items.insert(highlighted, at: 0)
+            }
+        } catch { if !older { items = [] }; self.error = error.localizedDescription }
+    }
+    private func markRead(_ item: ClientNotification) async {
+        do { _ = try await state.api.request("POST", "/api/v1/notifications/" + item.id + "/read") }
+        catch { self.error = error.localizedDescription }
+    }
+    private func openConversation(_ id: String, notification: ClientNotification) async {
+        guard UUID(uuidString: id) != nil else { return }
+        await markRead(notification)
+        IntentRouter.shared.conversationID = id
+        IntentRouter.shared.destination = .ai
+        ClientNotifications.shared.pendingNotificationID = nil
+        dismiss()
     }
 }

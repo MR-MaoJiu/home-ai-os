@@ -41,12 +41,12 @@ def test_snapshot_then_changes_include_updates_and_sharing(clients):
     changes=alice.request('GET','/api/v1/sync/changes').json()
     assert changes['records'][0]['payload']['text']=='version2'
     initialize(bob)
-    assert alice.request('PUT',f'/api/v1/data/{first}/grants/{bob.user_id}').status_code==200
+    assert alice.request('PUT',f'/api/v1/data/{first}/visibility',{'visibility':'family'}).status_code==200
     shared=bob.request('GET','/api/v1/sync/changes').json()
     assert shared['records'][0]['id']==first
     assert bob.request('POST','/api/v1/sync/ack',{'cursor':shared['next_cursor']}).status_code==200
     cached=bob.request('POST','/api/v1/sync/snapshot').json()['snapshot_id']
-    assert alice.request('DELETE',f'/api/v1/data/{first}/grants/{bob.user_id}').status_code==200
+    assert alice.request('PUT',f'/api/v1/data/{first}/visibility',{'visibility':'personal'}).status_code==200
     assert bob.request('GET','/api/v1/sync/snapshot/'+cached).status_code==404
     revoked=bob.request('GET','/api/v1/sync/changes').json()
     assert first in revoked['removed_ids'] and revoked['records']==[]
@@ -84,7 +84,7 @@ def test_secret_upgrade_invalidates_shared_cache_and_rls(clients):
     app,alice,bob=clients
     item={'source':'test','source_id':'classified','kind':'note','version':1,'payload':{'text':'private'}}
     rid=put(alice,item)
-    assert alice.request('PUT',f'/api/v1/data/{rid}/grants/{bob.user_id}').status_code==200
+    assert alice.request('PUT',f'/api/v1/data/{rid}/visibility',{'visibility':'family'}).status_code==200
     snapshot,_=initialize(bob)
     item.update(version=2,sensitivity='SECRET')
     put(alice,item)

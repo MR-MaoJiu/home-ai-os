@@ -207,3 +207,55 @@ final class SyncTests: XCTestCase {
         }
     }
 }
+
+final class ClientDisplayContractTests: XCTestCase {
+    func testTaskSnapshotReadsNotificationRevisionWithoutTaskChanges() throws {
+        let old = try JSONDecoder().decode(TaskStateEvent.self, from: Data(#"{"type":"task.snapshot","tasks":[],"has_more":false}"#.utf8))
+        let updated = try JSONDecoder().decode(TaskStateEvent.self, from: Data(#"{"type":"task.snapshot","tasks":[],"has_more":false,"notification_revision":"notification-new"}"#.utf8))
+        XCTAssertEqual(old.tasks, updated.tasks)
+        XCTAssertNil(old.notification_revision)
+        XCTAssertEqual(updated.notification_revision, "notification-new")
+    }
+
+    func testPersonalDataRemainsPersonalWhenReadingOlderCache() throws {
+        let entry = try JSONDecoder().decode(DataEntry.self, from: Data(#"{"id":"a","kind":"document","sensitivity":"PRIVATE","payload":{}}"#.utf8))
+        XCTAssertFalse(entry.isFamily)
+    }
+
+    func testFamilyAutomationCanBeDisplayedWithoutPrivateInstruction() throws {
+        let entry = try JSONDecoder().decode(AutomationEntry.self, from: Data(#"{"id":"a","name":"家庭提醒","cron":"0 8 * * *","enabled":true,"visibility":"family","owner_id":"another-member"}"#.utf8))
+        XCTAssertTrue(entry.isFamily)
+        XCTAssertNil(entry.instruction)
+    }
+
+    func testFamilyNotificationDoesNotRequirePrivateTaskOrConversation() throws {
+        let entry = try JSONDecoder().decode(ClientNotification.self, from: Data(#"{"id":"a","kind":"automation.updated","scope":"family","created_at":1,"read_at":null,"automation_id":"rule","status":"SUCCEEDED"}"#.utf8))
+        XCTAssertEqual(entry.title, "家庭执行结果")
+        XCTAssertNil(entry.task_id)
+        XCTAssertNil(entry.conversation_id)
+    }
+}
+
+extension ClientDisplayContractTests {
+    @MainActor
+    func testPairedDeviceReadsServerDisplaysWithoutMutatingData() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["HOMEAI_READONLY_CLIENT_CHECK"] == "1" || env["TEST_RUNNER_HOMEAI_READONLY_CLIENT_CHECK"] == "1" else {
+            throw XCTSkip("仅在用户授权的已配对真机上执行，只读检查不会建立新配对")
+        }
+        let api = AppServices.api
+        await api.restoreConnectionIfNeeded()
+        let namespace = try await api.syncNamespace()
+        let memories = try JSONDecoder().decode([DataEntry].self, from: await api.request("GET", "/api/v1/memory/entries", expectedNamespace: namespace))
+        XCTAssertTrue(memories.allSatisfy { $0.kind == "memory.fact" && !$0.isFamily })
+        let rules = try JSONDecoder().decode([AutomationEntry].self, from: await api.request("GET", "/api/v1/automations", expectedNamespace: namespace))
+        XCTAssertTrue(rules.allSatisfy { ["personal", "family"].contains($0.visibility ?? "personal") })
+        let notices = try JSONDecoder().decode(NotificationInboxView.Page.self, from: await api.request("GET", "/api/v1/notifications?limit=50", expectedNamespace: namespace))
+        XCTAssertTrue(notices.items.allSatisfy { ["personal", "family"].contains($0.scope) })
+        struct Status: Decodable { let push_configured: Bool; let worker_online: Bool; let status: String }
+        let status = try JSONDecoder().decode(Status.self, from: await api.request("GET", "/api/v1/notifications/status", expectedNamespace: namespace))
+        XCTAssertTrue(status.worker_online)
+        XCTAssertTrue(["ready", "not_configured", "invalid_configuration"].contains(status.status))
+        print("SERVER_DISPLAY_READ_OK memory=\(memories.count) automation=\(rules.count) notifications=\(notices.items.count) apns_configured=\(status.push_configured)")
+    }
+}

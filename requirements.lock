@@ -73,3 +73,7 @@ google-crc32c==1.8.0
 ifaddr==0.2.0
 pyee==14.0.0
 pylibsrtp==1.0.0
+
+h2==4.4.1
+hpack==4.2.0
+hyperframe==6.1.0

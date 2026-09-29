@@ -114,6 +114,7 @@ class Skill(Contract):
 
 
 class AutomationInput(Contract):
+    visibility: Literal["personal", "family"] = "personal"
     name: str = Field(min_length=1, max_length=100)
     cron: str = ""
     trigger_kind: Literal["cron", "event"] = "cron"
@@ -178,6 +179,7 @@ class TaskState(Contract):
 
 
 class TaskStateNotification(Contract):
+    notification_revision: str | None = None
     schema_version: Literal['1.0'] = '1.0'
     type: Literal['task.snapshot', 'heartbeat']
     has_more: bool = False

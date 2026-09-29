@@ -37,6 +37,7 @@ struct TaskStateEvent: Decodable, Sendable {
     let type: String
     let tasks: [Item]
     let has_more: Bool
+    let notification_revision: String?
 }
 
 struct TaskEventSubscription: Sendable {

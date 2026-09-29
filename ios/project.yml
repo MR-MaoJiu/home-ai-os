@@ -49,6 +49,7 @@ targets:
     entitlements:
       path: HomeAI/HomeAI.entitlements
       properties:
+        aps-environment: development
         com.apple.developer.healthkit: true
     scheme:
       testTargets: [HomeAITests]

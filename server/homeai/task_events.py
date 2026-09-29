@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from sqlalchemy import select
 from .crypto import digest
 from .contracts import TaskStateNotification
-from .db import Credential, Device, Principal, Task, Invocation, now, scope
+from .db import Credential, Device, Principal, Task, Invocation, Notification, now, scope
 from .security import authenticate, own
 
 router = APIRouter(prefix='/api/v1', tags=['任务状态流'])
@@ -27,7 +27,8 @@ def snapshot(app, actor, token_digest, task_id):
             has_more, rows = len(rows) > 100, rows[:100]
         ids = [row.id for row in rows]
         steps = list(db.scalars(select(Invocation).where(Invocation.task_id.in_(ids)).order_by(Invocation.task_id, Invocation.step))) if ids else []
-        return TaskStateNotification(type='task.snapshot', has_more=has_more, tasks=[
+        notification=db.scalar(select(Notification.id).where(Notification.owner_id==actor.user_id,Notification.household_id==actor.household_id).order_by(Notification.created_at.desc(),Notification.id.desc()).limit(1))
+        return TaskStateNotification(type='task.snapshot', notification_revision=notification, has_more=has_more, tasks=[
             {'id': row.id, 'status': row.status, 'cancel_requested': row.cancel_requested,
              'steps': [{'step': item.step, 'status': item.status} for item in steps if item.task_id == row.id]}
             for row in rows]).model_dump()

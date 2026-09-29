@@ -3,29 +3,12 @@ import UIKit
 
 @main struct HomeAIApp: App {
     @State private var state = AppState()
-    @State private var reminderSource: RecordReference?
+    @UIApplicationDelegateAdaptor(HomeAINotificationDelegate.self) private var notifications
     @Environment(\.scenePhase) private var phase
     var body: some Scene {
         WindowGroup {
             RootView().environment(state).task { await state.resumeForeground() }
                 .background(KeyboardDismissalInstaller())
-                .onOpenURL { url in
-                    guard url.scheme == SystemReminderSync.markerScheme, url.query == nil, url.fragment == nil,
-                          url.pathComponents.count == 2, let identifier = UUID(uuidString: String(url.path.dropFirst())) else { return }
-                    Task { await state.perform {
-                        await state.api.restoreConnectionIfNeeded()
-                        let namespace = try await state.api.syncNamespace()
-                        let owner = try await state.api.ownerIdentity(expectedNamespace: namespace)
-                        guard owner.namespace == url.host else { throw APIClient.APIError.message("此提醒属于另一服务器或成员，请先核对配对") }
-                        let recordID = identifier.uuidString.lowercased()
-                        let raw = try await state.api.request("GET", "/api/v1/data/" + recordID, expectedNamespace: namespace)
-                        let record = try JSONDecoder().decode(DataEntry.self, from: raw)
-                        guard record.kind == "reminder.item", record.owner_id == owner.userID else { throw APIClient.APIError.message("此链接不是当前成员的家庭提醒") }
-                        reminderSource = RecordReference(id: recordID, title: "家庭提醒来源", version: nil)
-                    } }
-                }
-                .sheet(item: $reminderSource) { source in NavigationStack { RecordSourceView(source: source) }.environment(state) }
-                .onChange(of: state.connectionRevision) { _, _ in reminderSource = nil }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
                     Task { await state.resumeForeground() }
                 }
@@ -97,18 +80,27 @@ private final class KeyboardDismissalView: UIView, UIGestureRecognizerDelegate {
 
 struct RootView: View {
     @State private var navigation = IntentRouter.shared
+    @State private var notifications = ClientNotifications.shared
     @Environment(AppState.self) private var state
     var body: some View {
         @Bindable var state = state
         TabView(selection: $navigation.destination) {
             Tab("AI", systemImage: "sparkles", value: HomeDestination.ai) { NavigationStack { ChatView().id(state.connectionRevision) } }
-            Tab("记忆", systemImage: "brain", value: HomeDestination.memory) { NavigationStack { MemberMemoryView() } }
-            Tab("自动化", systemImage: "bolt", value: HomeDestination.automations) { NavigationStack { AutomationsView() } }
-            Tab("数据", systemImage: "externaldrive", value: HomeDestination.data) { NavigationStack { DataView() } }
+            Tab("记忆", systemImage: "brain", value: HomeDestination.memory) { NavigationStack { MemberMemoryView() }.id(state.connectionRevision) }
+            Tab("自动化", systemImage: "bolt", value: HomeDestination.automations) { NavigationStack { AutomationsView() }.id(state.connectionRevision) }
+            Tab("数据", systemImage: "externaldrive", value: HomeDestination.data) { NavigationStack { DataView() }.id(state.connectionRevision) }
             Tab("设置", systemImage: "gearshape", value: HomeDestination.settings) { NavigationStack { SettingsView() } }
         }
-        .task(id: state.connectionRevision) { if state.connected { state.startForegroundEvents() } }
+        .task(id: state.connectionRevision) {
+            if state.connected {
+                state.startForegroundEvents()
+                await ClientNotifications.shared.synchronize(api: state.api)
+            }
+        }
         .onChange(of: state.connected) { _, connected in if connected { state.startForegroundEvents() } }
+        .sheet(isPresented: Binding(get: { notifications.pendingNotificationID != nil }, set: { if !$0 { notifications.pendingNotificationID = nil } })) {
+            NavigationStack { NotificationInboxView(highlightID: notifications.pendingNotificationID) }.environment(state)
+        }
         .tint(.teal)
         .alert(state.pairingNotice ? (state.pairingFeedback == .success ? "连接成功" : "连接未完成") : "操作未完成", isPresented: Binding(get: { state.pairingNotice || state.error != nil }, set: { if !$0 { state.pairingNotice = false; state.error = nil } })) {
             Button("知道了", role: .cancel) { state.pairingNotice = false; state.error = nil }

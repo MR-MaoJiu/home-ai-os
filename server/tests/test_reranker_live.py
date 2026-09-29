@@ -84,9 +84,9 @@ async def test_real_knowledge_reranking_revocation_and_failure(workflow):
         assert cached['status']=='SUCCEEDED' and cached['result']['reranking']=='applied',cached
         other=SignedClient(user.client,app.db,household=household)
         assert other.request('POST','/api/v1/knowledge/search',{'query':'什么时候检查备份？'}).json()['matches']==[]
-        assert user.request('PUT',f'/api/v1/data/{records[1]}/grants/{other.user_id}').status_code==200
+        assert user.request('PUT',f'/api/v1/data/{records[1]}/visibility',{'visibility':'family'}).status_code==200
         assert other.request('POST','/api/v1/knowledge/search',{'query':'什么时候检查备份？'}).json()['matches'][0]['record_id']==records[1]
-        assert user.request('DELETE',f'/api/v1/data/{records[1]}/grants/{other.user_id}').status_code==200
+        assert user.request('PUT',f'/api/v1/data/{records[1]}/visibility',{'visibility':'personal'}).status_code==200
         assert other.request('POST','/api/v1/knowledge/search',{'query':'什么时候检查备份？'}).json()['matches']==[]
         # 真实错误端点返回拒绝；降级不能伪装成模型重排成功。
         with app.db() as db:

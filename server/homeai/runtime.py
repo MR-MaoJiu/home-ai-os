@@ -4,12 +4,12 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
-from sqlalchemy import select, text
-from .db import Task, Invocation, Approval, Disclosure, Principal, Device, now, uid, scope
+from sqlalchemy import select, text, or_
+from .db import Automation, Task, Invocation, Approval, Disclosure, Principal, Device, now, uid, scope
 from .crypto import canonical, digest
 from .data import audit, emit, read_record, serialize, ingest
 from .contracts import DataRecord, TaskRequest
-from .security import Actor
+from .security import Actor, own
 from .policy import CAPABILITIES
 from .privacy import ensure_model_safe, cloud_context, redact
 
@@ -63,6 +63,7 @@ async def _run_step(app, task_id, user_id=None):
         user = db.get(Principal, task.owner_id)
         scope(db, user.id, user.household_id)
         body = app.vault.open(task.request, user.id + ":task:" + task.id)
+        db.info["family_automation"] = body.get("_automation_scope")=="family"
         db.info["automation_chain"] = body.get("_automation_chain", [])
         actor = Actor(user.id, user.household_id, body["device_id"], user.role)
         device = db.get(Device, actor.device_id)
@@ -73,10 +74,11 @@ async def _run_step(app, task_id, user_id=None):
         step_number = next((index for index in range(len(steps) or 1) if index not in finished), None)
         if step_number is None:
             task.status = "SUCCEEDED"
+            emit(db, actor, "task.updated", task.id)
             db.commit()
             return
         invocation = next((item for item in invocations if item.step == step_number), None)
-        internal_effects = {"calendar.create@v1", "reminder.create@v1", "memory.commit@v1"}
+        internal_effects = {"calendar.create@v1", "reminder.create@v1", "memory.commit@v1", "automation.create@v1", "automation.stop@v1"}
         if invocation and invocation.status == "EXECUTING" and CAPABILITIES[invocation.capability][1] and invocation.capability not in internal_effects:
             task.status, task.error = "NEEDS_RECONCILIATION", "进程中断，外部结果不明，需要人工核对"
             invocation.status = task.status
@@ -220,9 +222,32 @@ async def _run_step(app, task_id, user_id=None):
             task.request = app.vault.seal(body, user.id + ":task:" + task.id)
             invocation.status = "EXECUTING"
             db.commit()
-            if capability in {"calendar.create@v1", "reminder.create@v1", "memory.commit@v1"}:
+            if capability == 'automation.list@v1':
+                result={'automations':[{'id':row.id,'name':row.name,'visibility':row.visibility,'enabled':row.enabled,'cron':row.cron,'mine':row.owner_id==actor.user_id} for row in db.scalars(select(Automation).where(Automation.household_id==actor.household_id,or_(Automation.owner_id==actor.user_id,Automation.visibility=='family')))]}
+            elif capability == 'automation.create@v1':
+                if body.get('_automation_id'):raise HTTPException(403,'自动化不能自行创建更多自动化')
+                from .automation_service import create
+                args={**args,'timezone':body.get('timezone','Asia/Shanghai')}
+                automation=create(app,db,actor,args,invocation.id)
+                result={'automation_id':automation.id,'status':'scheduled','visibility':automation.visibility,'next_run':automation.next_run}
+            elif capability == 'automation.stop@v1':
+                if body.get('_automation_id'):raise HTTPException(403,'自动化不能自行停用其他规则')
+                automation=own(db,Automation,args.get('automation_id',''),actor)
+                automation.enabled=False
+                result={'automation_id':automation.id,'status':'disabled'}
+            elif capability == 'memory.commit@v1':
+                from .db import ConversationTurn
+                from .memory import create_chat_candidate
+                turn=db.scalar(select(ConversationTurn).where(ConversationTurn.task_id==task.id,ConversationTurn.owner_id==actor.user_id))
+                if not turn or set(args)!={'content'} or not isinstance(args['content'],str) or not 1<=len(args['content'])<=20000:raise HTTPException(422,'记忆只能根据当前聊天提出候选')
+                candidate=create_chat_candidate(app,db,actor,turn.conversation_id,turn.id,args['content'],invocation.id)
+                result={'candidate_id':candidate.id,'status':'succeeded','memory_status':'PENDING','next_action':'候选创建已完成。请用户在记忆页确认，不要再次创建同一候选。'}
+            elif capability in {"calendar.create@v1", "reminder.create@v1"}:
                 kind = {"calendar.create@v1": "calendar.event", "reminder.create@v1": "reminder.item", "memory.commit@v1": "memory.fact"}[capability]
                 record = ingest(db, actor, DataRecord(source="core", source_id=invocation.id, kind=kind, version=1, payload=args), app.vault)
+                if body.get('_automation_scope')=='family':
+                    from .visibility import change_record
+                    change_record(db,actor,record,'family')
                 result = {"record_id": record.id, "status": "stored", "device_sync": "pending"}
                 if capability == "reminder.create@v1" and args.get("due_at") is not None:
                     result.update(due_at=args["due_at"], notify_at_due=args.get("notify_at_due", False),

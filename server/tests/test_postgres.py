@@ -32,9 +32,9 @@ async def test_real_rls_opa_outbox():
         assert db.scalar(text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user")) is False
         scope(db,bob.user_id,household)
         assert db.get(Record,rid) is None
-    assert alice.request('PUT','/api/v1/data/'+rid+'/grants/'+bob.user_id).status_code==200
+    assert alice.request('PUT','/api/v1/data/'+rid+'/visibility',{'visibility':'family'}).status_code==200
     assert bob.request('GET','/api/v1/data/'+rid).status_code==200
-    assert alice.request('DELETE','/api/v1/data/'+rid+'/grants/'+bob.user_id).status_code==200
+    assert alice.request('PUT','/api/v1/data/'+rid+'/visibility',{'visibility':'personal'}).status_code==200
     assert bob.request('GET','/api/v1/data/'+rid).status_code==404
     response=alice.request('POST','/api/v1/tasks',{'idempotency_key':str(uuid.uuid4()),'capability':'reminder.create@v1','arguments':{'title':'集成测试提醒'}})
     assert response.status_code==202,response.text

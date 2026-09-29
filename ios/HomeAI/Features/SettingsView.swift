@@ -1,5 +1,4 @@
 import SwiftUI
-import PhotosUI
 import VisionKit
 import CryptoKit
 import LocalAuthentication
@@ -7,12 +6,9 @@ import LocalAuthentication
 struct SettingsView: View {
     @Environment(AppState.self) private var state
     @AppStorage("backgroundSyncEnabled") private var backgroundSyncEnabled = false
-    @State private var selectedPhoto: PhotosPickerItem?
-    @State private var syncMessage = ""
     @State private var scanning = false
     @State private var pendingPairing: String?
     @State private var scannerError: String?
-    @State private var location = LocationCapture()
     var body: some View {
         Form {
             Section("家庭服务器") {
@@ -40,32 +36,15 @@ struct SettingsView: View {
                 Text("只同步已授权的服务器数据，不在后台录音，也不会自动扩大系统数据授权。执行时间由 iOS 决定，锁屏时可能无法访问受保护缓存。").font(.caption).foregroundStyle(.secondary)
                 if !state.backgroundSyncStatus.isEmpty { Text(state.backgroundSyncStatus).font(.caption) }
             }
-            Section("语音") {
-                NavigationLink("音色与语音朗读") { SpeechView() }.disabled(!state.connected)
-            }
             AppIconSettingsSection()
-            Section("系统提醒写入") {
-                NavigationLink("选择系统列表与同步规则") { ReminderSyncSettings() }.disabled(!state.connected)
+            Section("通知") {
+                NavigationLink("执行结果与提醒") { NotificationInboxView() }.disabled(!state.connected)
+                NotificationSettingsContent()
             }
             Section("数据共享") {
                 NavigationLink("健康与位置的持续共享") { ContinuousSharingView() }.disabled(!state.connected)
                 Text("上传资料与长期记忆分别存储在家庭服务器。图片和文件在数据页逐条共享。").font(.caption)
             }
-            Section("按需授权同步") {
-                Button("同步未来 30 天日历") { sync { try await $0.calendar() } }
-                Button("导入手机已有提醒") { sync { try await $0.reminders() } }
-                Button("同步联系人") { sync { try await $0.contacts() } }
-                Button("同步最近 7 天睡眠数据") { sync { try await $0.sleep() } }
-                Button("同步本次位置") {
-                    Task { await state.perform {
-                        let coordinate = try await location.once()
-                        try await ConnectorSync(api: state.api).uploadRecord(source: "location", sourceID: UUID().uuidString, kind: "location.point", payload: ["latitude": .number(coordinate.latitude), "longitude": .number(coordinate.longitude), "observed_at": .string(Date().ISO8601Format())])
-                        syncMessage = "本次位置已同步"
-                    } }
-                }
-                PhotosPicker("选择一张照片同步", selection: $selectedPhoto, matching: .images)
-                if !syncMessage.isEmpty { Text(syncMessage).font(.caption).foregroundStyle(.secondary) }
-            }.disabled(!state.connected || state.busy)
             Section("管理端登录") {
                 NavigationLink("管理端动态码") { AdminCodeView() }
             }
@@ -73,9 +52,9 @@ struct SettingsView: View {
                 Link("基于 Home AI OS · 查看源码", destination: URL(string: "https://github.com/MR-MaoJiu/home-ai-os")!)
             }
             Section("隐私") {
-                Label("个人数据默认仅在本地处理", systemImage: "hand.raised")
+                Label("资料保存在家庭服务器，按成员隔离", systemImage: "hand.raised")
                 Text("授权由 iOS 系统管理，可随时在系统设置中撤回。已上传的数据需要在数据页面单独删除。").font(.caption).foregroundStyle(.secondary)
-                Text("当前为开发版本：推送、后台调度真机表现、完整脱敏链与生产插件隔离仍需验收。").font(.caption).foregroundStyle(.secondary)
+                Text("服务器负责执行任务与自动化；本机只提交请求、接收通知和展示结果。").font(.caption).foregroundStyle(.secondary)
             }
         }.navigationTitle("设置")
             .sheet(isPresented: $scanning, onDismiss: {
@@ -100,18 +79,6 @@ struct SettingsView: View {
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { scanning = false } } }
                 }
             }
-            .onChange(of: selectedPhoto) { _, photo in
-                guard let photo else { return }
-                Task { await state.perform {
-                    guard let data = try await photo.loadTransferable(type: Data.self) else { return }
-                    let prepared = try PhotoPreparation.jpeg(data)
-                    try await ConnectorSync(api: state.api).uploadRecord(source: "photos", sourceID: DeviceIdentity.hash(data), kind: "photo.selected", payload: ["name": .string("用户选择的照片"), "content_base64": .string(prepared.base64EncodedString())])
-                    syncMessage = "照片已同步"
-                } }
-            }
-    }
-    func sync(_ work: @escaping @MainActor (ConnectorSync) async throws -> Void) {
-        Task { await state.perform { try await work(ConnectorSync(api: state.api)); syncMessage = "同步完成" } }
     }
 }
 
