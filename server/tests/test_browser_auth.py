@@ -48,3 +48,23 @@ def test_code_only_login_and_replay(system,alice):
     r=c.post('/api/v1/browser/login',json={'username':'admin','code':code},headers={'Origin':'https://testserver'})
     assert r.status_code==200,r.text
     assert c.post('/api/v1/browser/login',json={'username':'admin','code':code},headers={'Origin':'https://testserver'}).status_code==401
+
+
+def test_management_works_after_stepup_expires_for_24h(system,alice):
+    from homeai.db import Credential,Nonce,now
+    from homeai.crypto import digest
+    c,result=bootstrap(system,alice)
+    response=c.post('/api/v1/browser/totp/confirm',json={'code':pyotp.TOTP(result['secret']).now()},headers=csrf(c))
+    assert response.status_code==200
+    token=c.cookies.get('__Host-homeai-session')
+    with system[2]() as db:
+        session=db.get(Credential,digest(token.encode()))
+        assert 86390 < session.expires_at-now() <= 86400
+        db.get(Nonce,'web-stepup:'+session.digest).expires_at=now()-1
+        db.commit()
+    body={'variant':'qwen3-4b','enabled':False}
+    assert c.put('/api/v1/builtins/local-model',json=body,headers=csrf(c)).status_code==202
+    assert c.put('/api/v1/builtins/local-model',json=body).status_code==403
+    with system[2]() as db:
+        db.get(Credential,digest(token.encode())).expires_at=now()-1;db.commit()
+    assert c.put('/api/v1/builtins/local-model',json=body,headers=csrf(c)).status_code==401

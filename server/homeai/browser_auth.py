@@ -15,6 +15,7 @@ from .data import audit
 router=APIRouter(prefix='/api/v1/browser',tags=['网页认证'])
 COOKIE='__Host-homeai-session'
 CSRF='__Host-homeai-csrf'
+BROWSER_SESSION_SECONDS=24*60*60
 ph=PasswordHasher()
 DUMMY_HASH=ph.hash(secrets.token_hex(24))
 
@@ -47,8 +48,8 @@ def same_origin(request):
 
 def cookies(response,token):
     csrf=secrets.token_urlsafe(32)
-    response.set_cookie(COOKIE,token,secure=True,httponly=True,samesite='strict',path='/',max_age=28800)
-    response.set_cookie(CSRF,csrf,secure=True,httponly=False,samesite='strict',path='/',max_age=28800)
+    response.set_cookie(COOKIE,token,secure=True,httponly=True,samesite='strict',path='/',max_age=BROWSER_SESSION_SECONDS)
+    response.set_cookie(CSRF,csrf,secure=True,httponly=False,samesite='strict',path='/',max_age=BROWSER_SESSION_SECONDS)
     return csrf
 
 
@@ -66,11 +67,7 @@ def get_browser_actor(request, setup=False):
         device=db.get(Device,session.device_id)
         user=db.get(Principal,session.user_id)
         if not device or device.revoked or not user:raise HTTPException(401,'网页设备已撤销')
-        sensitive = request.method not in {'GET','HEAD','OPTIONS'} and request.url.path.startswith(('/api/v1/builtins','/api/v1/integrations','/api/v1/secrets','/api/v1/providers','/api/v1/members','/api/v1/devices','/api/v1/pairing/address','/api/v1/remote/stun','/api/v1/remote/applications','/api/v1/remote/disable','/api/v1/remote/migrate','/api/v1/remote/resume','/api/v1/remote/refresh-node'))
-        sensitive = sensitive or (request.method == 'POST' and request.url.path.startswith('/api/v1/tasks/') and request.url.path.endswith('/reconcile'))
-        if sensitive:
-            proof=db.get(Nonce,'web-stepup:'+session.digest)
-            if not proof or proof.expires_at<=now():raise HTTPException(403,'需要重新验证动态验证码')
+        # 动态码登录后的整个有效会话内允许管理操作，不再每五分钟重复验证。
         return Actor(user.id,user.household_id,device.id,user.role)
 
 
@@ -143,8 +140,8 @@ def confirm(body:Code,request:Request,response:Response):
         account.totp_enabled=True
         old=db.get(Credential,digest(request.cookies[COOKIE].encode()))
         db.delete(old)
-        token=credential(db,actor.user_id,'browser',28800,actor.device_id)
-        db.add(Nonce(id='web-stepup:'+digest(token.encode()),expires_at=now()+300))
+        token=credential(db,actor.user_id,'browser',BROWSER_SESSION_SECONDS,actor.device_id)
+        db.add(Nonce(id='web-stepup:'+digest(token.encode()),expires_at=now()+BROWSER_SESSION_SECONDS))
         db.commit()
         return {'status':'authenticated','csrf':cookies(response,token)}
 
@@ -164,8 +161,8 @@ def login(body:Login,request:Request,response:Response):
             raise HTTPException(401,'登录信息无效')
         device=Device(id=uid(),user_id=account.user_id,public_key='',name='网页会话')
         db.add(device)
-        token=credential(db,account.user_id,'browser',28800,device.id)
-        db.add(Nonce(id='web-stepup:'+digest(token.encode()),expires_at=now()+300))
+        token=credential(db,account.user_id,'browser',BROWSER_SESSION_SECONDS,device.id)
+        db.add(Nonce(id='web-stepup:'+digest(token.encode()),expires_at=now()+BROWSER_SESSION_SECONDS))
         if attempt:db.delete(attempt)
         db.commit()
         return {'status':'authenticated','csrf':cookies(response,token)}
@@ -199,6 +196,6 @@ def reauthenticate(body:Reauthenticate,request:Request):
             failed(db,key,attempt);raise HTTPException(401,'重新验证失败')
         identifier='web-stepup:'+digest(request.cookies[COOKIE].encode())
         proof=db.get(Nonce,identifier)
-        if proof:proof.expires_at=now()+300
-        else:db.add(Nonce(id=identifier,expires_at=now()+300))
-        db.commit();return {'verified_for_seconds':300}
+        if proof:proof.expires_at=now()+BROWSER_SESSION_SECONDS
+        else:db.add(Nonce(id=identifier,expires_at=now()+BROWSER_SESSION_SECONDS))
+        db.commit();return {'verified_for_seconds':BROWSER_SESSION_SECONDS}
