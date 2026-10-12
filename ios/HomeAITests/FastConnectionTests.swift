@@ -13,6 +13,12 @@ final class FastConnectionTests: XCTestCase {
     @MainActor func testOutboxPersistsDeduplicatesAndSeparatesMembers() throws {
         let owner = "test-outbox-" + UUID().uuidString
         defer { try? DeviceIdentity.save(Data(), name: "chat.outbox:" + owner) }
+        #if targetEnvironment(simulator)
+        do { try DeviceIdentity.save(Data(), name: "chat.outbox:" + owner) }
+        catch DeviceIdentity.IdentityError.keychain(let status) where status == -34018 {
+            throw XCTSkip("此模拟器应用未签名，缺少 Keychain entitlement；持久化验收须在已签名模拟器或真机执行")
+        }
+        #endif
         let queue = ChatOutbox()
         try queue.activate(owner: owner)
         let message = PendingChatSend(conversationID: "conversation", clientKey: "same-message", content: "公开测试", timezone: "Asia/Shanghai")
