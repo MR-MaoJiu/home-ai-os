@@ -35,7 +35,7 @@ final class AppAudioLease: @unchecked Sendable {
             let session = AVAudioSession.sharedInstance()
             do {
                 switch requested {
-                case .call: try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .defaultToSpeaker])
+                case .call: try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
                 case .speech: try session.setCategory(.playback, mode: .spokenAudio)
                 case .recording: try session.setCategory(.record, mode: .measurement)
                 case .remotePlayback:

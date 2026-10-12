@@ -22,4 +22,4 @@ iOS 直连使用固定版本 WebRTC 153.0.0（stasel/WebRTC 二进制发行）�
 
 ## 加密备用通道
 
-端到端加密备用通道使用 PyHPKE 0.6.4（MIT），实现 RFC 9180 HPKE。项目与许可证：<https://github.com/dajiaji/pyhpke>。iOS 使用系统 CryptoKit 的 HPKE 实现。
+端到端加密备用通道使用 PyHPKE 0.6.5（MIT），实现 RFC 9180 HPKE。项目与许可证：<https://github.com/dajiaji/pyhpke>。iOS 使用系统 CryptoKit 的 HPKE 实现。

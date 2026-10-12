@@ -77,3 +77,5 @@ pylibsrtp==1.0.0
 h2==4.4.1
 hpack==4.2.0
 hyperframe==6.1.0
+
+pyhpke==0.6.5
