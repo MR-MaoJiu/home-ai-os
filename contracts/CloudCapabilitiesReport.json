@@ -17,6 +17,16 @@
       "title": "Privacy",
       "type": "boolean"
     },
+    "image_generation": {
+      "default": false,
+      "title": "Image Generation",
+      "type": "boolean"
+    },
+    "image_editing": {
+      "default": false,
+      "title": "Image Editing",
+      "type": "boolean"
+    },
     "status": {
       "enum": [
         "configured",
@@ -62,7 +72,9 @@
           "text",
           "tools",
           "vision",
-          "privacy"
+          "privacy",
+          "image_generation",
+          "image_editing"
         ]
       },
       "title": "Errors",

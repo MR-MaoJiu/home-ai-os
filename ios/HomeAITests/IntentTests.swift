@@ -133,6 +133,19 @@ final class NativeOrchestrationTests: XCTestCase {
         XCTAssertEqual(restored.clientContext?.location?.observed_at, coarse.observed_at)
     }
 
+    @MainActor
+    func testAutomaticCoarseLocationRequiresExistingSystemPermissionAndForegroundPreference() {
+        for permission in [CLAuthorizationStatus.authorizedAlways, .authorizedWhenInUse] {
+            XCTAssertTrue(ClientContextSampler.permitsAutomaticCapture(locationHintsEnabled: true, authorization: permission, applicationState: .active))
+            XCTAssertFalse(ClientContextSampler.permitsAutomaticCapture(locationHintsEnabled: false, authorization: permission, applicationState: .active))
+            XCTAssertFalse(ClientContextSampler.permitsAutomaticCapture(locationHintsEnabled: true, authorization: permission, applicationState: .inactive))
+            XCTAssertFalse(ClientContextSampler.permitsAutomaticCapture(locationHintsEnabled: true, authorization: permission, applicationState: .background))
+        }
+        for permission in [CLAuthorizationStatus.notDetermined, .denied, .restricted] {
+            XCTAssertFalse(ClientContextSampler.permitsAutomaticCapture(locationHintsEnabled: true, authorization: permission, applicationState: .active))
+        }
+    }
+
     func testEncryptedUploadQueuePersistsChunksAndInvalidatesNamespace() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("media-queue-test-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -177,6 +190,69 @@ final class NativeOrchestrationTests: XCTestCase {
         await cache.invalidate(namespace: "qa", revoked: true)
         let revoked = await cache.read(key: "asset-chunk:second:0", namespace: "qa")
         XCTAssertNil(revoked)
+    }
+
+    @MainActor
+    func testHTMLFileSwitchesBetweenFullSourceAndIsolatedStaticPage() async throws {
+        let html = """
+        <!doctype html><html><head>
+        <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' data:">
+        <base href="https://example.invalid/">
+        <style>#heading { color: rgb(12, 34, 56); }</style>
+        </head><body><h1 id="heading">文件网页预览</h1>
+        <img id="local-image" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==">
+        <img src="https://example.invalid/tracker" onerror="document.getElementById('heading').textContent='错误事件已执行'">
+        <iframe srcdoc="<script>parent.document.getElementById('heading').textContent='框架脚本已执行'</script>"></iframe>
+        <a id="external" href="https://example.invalid/navigation">外部页面</a>
+        <script>document.getElementById('heading').textContent='文件脚本已执行';</script>
+        </body></html>
+        """
+        let controller = UIHostingController(rootView: HTMLFileContent(text: html))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene); window.rootViewController = controller; window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func find<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+            if let matched = view as? T { return matched }
+            return view.subviews.compactMap { find(type, in: $0) }.first
+        }
+        for _ in 0..<40 {
+            controller.view.layoutIfNeeded()
+            if find(UISegmentedControl.self, in: controller.view) != nil { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let picker = try XCTUnwrap(find(UISegmentedControl.self, in: controller.view))
+        XCTAssertEqual(picker.selectedSegmentIndex, 0)
+        XCTAssertEqual(find(UITextView.self, in: controller.view)?.text, html)
+        XCTAssertNil(find(WKWebView.self, in: controller.view))
+        picker.selectedSegmentIndex = 1; picker.sendActions(for: .valueChanged)
+        var browser: WKWebView?
+        var output: [String: Any]?
+        for _ in 0..<80 {
+            controller.view.layoutIfNeeded(); browser = find(WKWebView.self, in: controller.view)
+            if let browser, let value = try? await browser.evaluateJavaScript("({title:document.getElementById('heading')?.textContent,color:document.getElementById('heading')?getComputedStyle(document.getElementById('heading')).color:null,image:document.getElementById('local-image')?.naturalWidth,base:document.baseURI})"),
+               let fields = value as? [String: Any], fields["image"] as? Int == 1 {
+                output = fields; break
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let result = try XCTUnwrap(output)
+        let web = try XCTUnwrap(browser)
+        XCTAssertEqual(result["title"] as? String, "文件网页预览")
+        XCTAssertEqual(result["color"] as? String, "rgb(12, 34, 56)")
+        XCTAssertFalse((result["base"] as? String ?? "").contains("example.invalid"))
+        XCTAssertFalse(web.configuration.defaultWebpagePreferences.allowsContentJavaScript)
+        XCTAssertFalse(web.configuration.websiteDataStore.isPersistent)
+        _ = try await web.evaluateJavaScript("document.getElementById('external').click()")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(web.url?.scheme, "about")
+        picker.selectedSegmentIndex = 0; picker.sendActions(for: .valueChanged)
+        for _ in 0..<40 {
+            controller.view.layoutIfNeeded()
+            if find(UITextView.self, in: controller.view)?.text == html && find(WKWebView.self, in: controller.view) == nil { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(find(UITextView.self, in: controller.view)?.text, html)
+        XCTAssertNil(find(WKWebView.self, in: controller.view))
     }
 
     @MainActor

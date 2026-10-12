@@ -10,5 +10,9 @@ export function modelConfiguration(form: FormData) {
  if(cloud&&url.protocol!=='https:')throw new Error('云端模型需要 HTTPS 接口地址。');
  const model=String(form.get('model')??'').trim();
  if(!model)throw new Error('请填写服务商提供的模型名称。');
- return {id,version:'1.0.0',adapter:'openai',endpoint,model,cloud,capabilities:{'model.generate@v1':'chat'},allowed_hosts:[url.hostname]};
+ const kind=String(form.get('interface')??'chat');
+ const mappings:Record<string,Record<string,string>>={chat:{'model.generate@v1':'chat'},image_generation:{'image.generate@v1':'generations'},image_editing:{'image.edit@v1':'edits'},image_both:{'image.generate@v1':'generations','image.edit@v1':'edits'}};
+ if(!Object.prototype.hasOwnProperty.call(mappings,kind))throw new Error('请选择支持的模型接口类型。');
+ if(kind!=='chat'&&/\/images\/(?:generations|edits)$/.test(url.pathname))throw new Error('请填写 Base URL（例如 https://服务地址/v1），不要包含 /images/generations 或 /images/edits。');
+ return {id,version:'1.0.0',adapter:'openai',endpoint,model,cloud,capabilities:mappings[kind],allowed_hosts:[url.hostname]};
 }

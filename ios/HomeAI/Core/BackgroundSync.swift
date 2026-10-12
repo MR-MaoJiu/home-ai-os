@@ -63,7 +63,7 @@ final class ClientNotifications {
         } catch { status = "通知授权未完成：" + error.localizedDescription }
     }
 
-    private static var pushEnvironment: String {
+    static var pushEnvironment: String {
         // 导出后的签名配置可能改变环境，以应用自身的 provisioning profile 为准。
         if let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
            let data = try? Data(contentsOf: url),
@@ -154,6 +154,7 @@ final class ClientNotifications {
 final class HomeAINotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        VoiceCalls.shared.registerPushes()
         return true
     }
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

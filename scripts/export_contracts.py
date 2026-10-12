@@ -6,20 +6,39 @@ from homeai.api import create_app
 from homeai.config import Settings
 from homeai.crypto import Vault
 from homeai.contracts import DataRecord, TaskRequest, ProviderManifest, Skill, TaskStateNotification
-from homeai.chat_contracts import ClientContext, MessagePart, Mention
+from homeai.chat_contracts import ClientContext, MessagePart, Mention, DataReference
 from homeai.chat_outputs import ChatOutputPart, SourceReference, CloudCapabilitiesReport
 from homeai.conversations import Message
 from homeai.media import UploadInput
 from homeai.model_routing import ConfigurationInput
 from homeai.client_actions import ResponseInput, DenialInput
+from homeai.auto_review import AutoReviewInput
+from homeai.shell_tools import ShellRequest, HostRequest
+from homeai.host_inspection_tools import HostInspectionRequest
+from homeai.android_workspace import InputRequest as AndroidInputRequest, ControlRequest as AndroidControlRequest, BindingRequest as AndroidBindingRequest, InputFocusRequest
+from homeai.android_stream import StreamOffer, DisplayRequest
+from homeai.android_gestures import GesturePacket
+from homeai.android_tools import AndroidLaunch
 
 MODELS = {
-    **{model.__name__: model for model in (DataRecord, TaskRequest, ProviderManifest, Skill, TaskStateNotification, ClientContext, MessagePart, Mention, ChatOutputPart, SourceReference, CloudCapabilitiesReport)},
+    **{model.__name__: model for model in (DataRecord, TaskRequest, ProviderManifest, Skill, TaskStateNotification, ClientContext, MessagePart, Mention, DataReference, ChatOutputPart, SourceReference, CloudCapabilitiesReport)},
     'ConversationMessage': Message,
     'MediaUploadRequest': UploadInput,
     'ModelRoutingConfiguration': ConfigurationInput,
     'ClientActionResponse': ResponseInput,
     'ClientActionDenial': DenialInput,
+    'DeviceAutoReviewInput': AutoReviewInput,
+    'ShellRunRequest': ShellRequest,
+    'HostActionRequest': HostRequest,
+    'HostInspectionRequest': HostInspectionRequest,
+    'AndroidInputRequest': AndroidInputRequest,
+    'AndroidControlRequest': AndroidControlRequest,
+    'AndroidBindingRequest': AndroidBindingRequest,
+    'AndroidStreamOffer': StreamOffer,
+    'AndroidDisplayRequest': DisplayRequest,
+    'AndroidInputFocusRequest': InputFocusRequest,
+    'AndroidGesturePacket': GesturePacket,
+    'AndroidLaunchRequest': AndroidLaunch,
 }
 
 

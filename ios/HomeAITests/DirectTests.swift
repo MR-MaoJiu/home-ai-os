@@ -4,6 +4,77 @@ import UIKit
 @testable import HomeAI
 
 final class DirectTests: XCTestCase {
+    func testEventRecoveryKeepsReachabilityAfterAnotherRequestSucceeded() {
+        let identity = ForegroundEventRecovery.Identity(runID: UUID(), connection: UUID(), generation: UUID(), namespace: "home-device")
+        let pending = ForegroundEventRecovery(identity: identity, responseRevision: 10)
+        XCTAssertTrue(pending.shouldMarkOffline(current: identity, responseRevision: 10, error: URLError(.timedOut)))
+        XCTAssertFalse(pending.shouldMarkOffline(current: identity, responseRevision: 11, error: URLError(.timedOut)), "探测期间另一个已鉴权请求成功，迟到超时不能让聊天掉线")
+    }
+
+    func testEventRecoveryRejectsPreviousStreamAndChangedIdentity() {
+        let identity = ForegroundEventRecovery.Identity(runID: UUID(), connection: UUID(), generation: UUID(), namespace: "home-device")
+        let pending = ForegroundEventRecovery(identity: identity, responseRevision: 10)
+        let changed: [ForegroundEventRecovery.Identity?] = [
+            nil,
+            .init(runID: UUID(), connection: identity.connection, generation: identity.generation, namespace: identity.namespace),
+            .init(runID: identity.runID, connection: UUID(), generation: identity.generation, namespace: identity.namespace),
+            .init(runID: identity.runID, connection: identity.connection, generation: UUID(), namespace: identity.namespace),
+            .init(runID: identity.runID, connection: identity.connection, generation: identity.generation, namespace: "other-device"),
+        ]
+        for current in changed {
+            XCTAssertFalse(pending.shouldMarkOffline(current: current, responseRevision: 10, error: URLError(.networkConnectionLost)), "旧订阅失败不能覆盖新订阅、配对或后台停止后的状态")
+        }
+    }
+
+    func testEventRecoveryCancellationDoesNotChangeReachability() {
+        let identity = ForegroundEventRecovery.Identity(runID: UUID(), connection: UUID(), generation: UUID(), namespace: "home-device")
+        let pending = ForegroundEventRecovery(identity: identity, responseRevision: 10)
+        XCTAssertFalse(pending.shouldMarkOffline(current: identity, responseRevision: 10, error: CancellationError()))
+        XCTAssertFalse(pending.shouldMarkOffline(current: identity, responseRevision: 10, error: URLError(.cancelled)))
+    }
+
+    @MainActor
+    func testPairedMemoryAndDataUseSeparateChannelsWithoutWrites() async throws {
+        guard ProcessInfo.processInfo.environment["HOMEAI_READONLY_MEMORY_DATA_CHECK"] == "1" else { throw XCTSkip("仅在原配对真机上只读检查记忆和数据通道") }
+        let api = AppServices.api
+        await api.restoreConnectionIfNeeded()
+        let namespace = try await api.syncNamespace()
+        let data = try JSONDecoder().decode(DataPage.self, from: await api.request("GET", "/api/v1/data", expectedNamespace: namespace))
+        let memories = try JSONDecoder().decode([DataEntry].self, from: await api.request("GET", "/api/v1/memory/entries", expectedNamespace: namespace))
+        XCTAssertTrue(data.records.allSatisfy(\.isBusinessData))
+        XCTAssertTrue(memories.allSatisfy(\.isMemory))
+        XCTAssertTrue(Set(data.records.map(\.id)).isDisjoint(with: Set(memories.map(\.id))))
+        print("MEMORY_DATA_REAL data_count=\(data.records.count) memory_count=\(memories.count) separate=true")
+    }
+
+    @MainActor
+    func testPairedDeviceConnectionTimingWithoutBusinessWrites() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["HOMEAI_READONLY_CONNECTION_TIMING"] == "1" else { throw XCTSkip("仅在已授权真机上只读测量现有配对连接") }
+        let current = AppServices.api
+        await current.restoreConnectionIfNeeded()
+        _ = try await current.request("GET", "/api/v1/me")
+        guard let raw = DeviceIdentity.read("connection") else { return XCTFail("缺少原配对连接") }
+        let saved = try JSONDecoder().decode(Connection.self, from: raw)
+        guard saved.directAccess?.transport_policy == "direct_only", saved.expiresAt.timeIntervalSinceNow > 120 else {
+            throw XCTSkip("需要有效的既有纯直连授权，测试不会替换配对或单独轮换凭据")
+        }
+        let api = APIClient(persistConnection: false)
+        try await api.restoreAcceptanceConnection(saved, devicePublicKey: DeviceIdentity().publicPEM())
+        let started = Date()
+        _ = try await api.request("GET", "/api/v1/me")
+        let first = Int(Date().timeIntervalSince(started) * 1000)
+        let warmStarted = Date()
+        for _ in 0..<3 { _ = try await api.request("GET", "/api/v1/me") }
+        let warm = Int(Date().timeIntervalSince(warmStarted) * 1000 / 3)
+        let evidence = try await api.request("GET", "/api/v1/direct/evidence")
+        let value = try XCTUnwrap(JSONSerialization.jsonObject(with: evidence) as? [String: Any])
+        let pairs = try XCTUnwrap(value["pairs"] as? [[String: Any]])
+        XCTAssertTrue(pairs.allSatisfy { $0["remote_type"] as? String != "relay" })
+        print("CONNECTION_REAL first_direct_ms=\(first) reused_request_ms=\(warm) public_path=\(pairs.allSatisfy { $0["remote_private"] as? Bool == false })")
+        await api.disableDirect()
+    }
+
     func testPlatformTLSOnDevice() async throws {
         let env = ProcessInfo.processInfo.environment
         guard env["HOMEAI_PLATFORM_TLS_CHECK"] == "1" else { throw XCTSkip("仅在真实设备网络诊断时启用") }

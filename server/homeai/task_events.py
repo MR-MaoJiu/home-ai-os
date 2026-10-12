@@ -25,16 +25,26 @@ def snapshot(app, actor, token_digest, task_id):
             rows = list(db.scalars(select(Task).where(Task.owner_id == actor.user_id)
                 .order_by(Task.created_at.desc(), Task.id).limit(101)))
             has_more, rows = len(rows) > 100, rows[:100]
+        from .android_tasks import usage_projection
+        android_usage = {row.id: usage_projection(app.vault.open(row.request, row.owner_id + ':task:' + row.id), row.id) for row in rows}
         ids = [row.id for row in rows]
         steps = list(db.scalars(select(Invocation).where(Invocation.task_id.in_(ids)).order_by(Invocation.task_id, Invocation.step))) if ids else []
         notification=db.scalar(select(Notification.id).where(Notification.owner_id==actor.user_id,Notification.household_id==actor.household_id).order_by(Notification.created_at.desc(),Notification.id.desc()).limit(1))
         def event_revision(condition):
             return db.scalar(select(func.max(Outbox.id)).where(Outbox.owner_id==actor.user_id,condition)) or 0
-        data_revision=event_revision(Outbox.kind.like('record.%'))
+        action_revision=event_revision(Outbox.kind=='client.action.updated')
+        if action_revision:
+            notification=(notification or '')+':actions:'+str(action_revision)
+        from .record_channels import data_event_clause
+        data_revision=event_revision(data_event_clause())
         memory_revision=event_revision(or_(Outbox.kind=='memory.updated',Outbox.record_kind=='memory.fact'))
         automation_revision=event_revision(Outbox.kind=='automation.updated')
-        return TaskStateNotification(type='task.snapshot', data_revision=data_revision,memory_revision=memory_revision,automation_revision=automation_revision,notification_revision=notification, has_more=has_more, tasks=[
-            {'id': row.id, 'status': row.status, 'cancel_requested': row.cancel_requested,
+        from .android_workspace import get_binding
+        android = get_binding(app, db, actor)
+        android_revision = event_revision(Outbox.kind.like('android.%'))
+        return TaskStateNotification(type='task.snapshot', android_revision=android_revision,
+            android_active_task_id=android.active_task_id if android else None, data_revision=data_revision,memory_revision=memory_revision,automation_revision=automation_revision,notification_revision=notification, has_more=has_more, tasks=[
+            {'id': row.id, 'status': row.status, 'cancel_requested': row.cancel_requested, **android_usage[row.id],
              'steps': [{'step': item.step, 'status': item.status} for item in steps if item.task_id == row.id]}
             for row in rows]).model_dump()
 

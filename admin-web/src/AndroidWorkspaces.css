@@ -1,0 +1,12 @@
+.android-workspaces .section-title{flex-wrap:wrap}
+.android-workspaces .section-title h2{margin-bottom:0}
+.android-workspaces .section-title+p{margin-top:18px}
+.android-workspaces fieldset{border:0;padding:0;margin:0;min-width:0}
+.android-workspaces legend{font-size:16px;font-weight:600;margin-bottom:4px}
+.android-workspaces fieldset>label{display:block;margin:18px 0;line-height:1.6}
+.android-workspaces fieldset>label>input,.android-workspaces fieldset>label>select,.android-workspaces textarea{display:block;margin-top:7px}
+.android-workspaces textarea{width:100%;min-height:110px;border:1px solid #cfd9e1;border-radius:8px;padding:12px 13px;background:white;color:#152532;font:inherit;resize:vertical}
+.android-workspaces textarea:focus-visible,.android-workspaces select:focus-visible{outline:3px solid #79c6c6;outline-offset:3px}
+.android-workspaces fieldset>.primary{margin-top:18px}
+.android-workspaces .android-package{display:block;overflow-wrap:anywhere}
+.android-workspaces .android-device-note{margin-top:12px}

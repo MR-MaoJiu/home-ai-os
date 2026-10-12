@@ -4,6 +4,7 @@ from sqlalchemy import select, or_, and_, exists
 from sqlalchemy.orm import aliased
 from .db import Record, Revision, Grant, Audit, Outbox, uid, now, scope
 from .crypto import canonical, digest
+from .artifact_sources import sources_visible, notify_source_change
 
 
 def audit(db, actor, action, resource_id, details=None):
@@ -23,6 +24,8 @@ def event_metadata(db, kind, resource_id):
 def emit(db, actor, kind, resource_id):
     db.add(Outbox(household_id=actor.household_id, owner_id=actor.user_id, kind=kind,
                  resource_id=resource_id, **event_metadata(db, kind, resource_id)))
+    if kind in {'record.changed', 'record.deleted', 'record.revoked'}:
+        notify_source_change(db, actor, resource_id)
 
 
 def accessible(db, actor, include_deleted=False):
@@ -32,8 +35,8 @@ def accessible(db, actor, include_deleted=False):
     parent = aliased(Record)
     parent_visible = exists(select(parent.id).where(parent.id == Record.source_id, parent.owner_id == Record.owner_id,
         parent.household_id == actor.household_id, parent.deleted.is_(False), parent.kind.in_(['document.file', 'document.import', 'photo.file', 'video.file']),
-        or_(parent.owner_id == actor.user_id, and_(parent.visibility == 'family', parent.sensitivity != 'SECRET'))))
-    query = query.where(or_(Record.kind != 'document.parsed', Record.source != 'document_parse', parent_visible))
+        or_(parent.owner_id == actor.user_id, and_(parent.visibility == 'family', parent.sensitivity != 'SECRET')), sources_visible(actor, parent)))
+    query = query.where(or_(Record.kind != 'document.parsed', Record.source != 'document_parse', parent_visible), sources_visible(actor))
     if db.info.get("family_automation"):
         query=query.where(Record.visibility=="family",~Record.kind.like("memory.%"))
     return query if include_deleted else query.where(Record.deleted.is_(False))

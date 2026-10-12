@@ -16,7 +16,7 @@ def test_cli_metadata_registration_without_api_or_database():
         env={**os.environ,'PYTHONPATH':str(Path('server').resolve())})
     tables=set(json.loads(result.stdout))
     assert {'media_uploads','media_chunks','media_jobs','model_configurations','model_verifications',
-        'model_usage','redaction_artifacts','client_actions','task_data_grants','memory_learning',
+        'model_usage','image_usage','member_budgets','redaction_artifacts','client_actions','task_data_grants','memory_learning',
         'memory_forget_tombstones','memory_forget_sources'}<=tables
     help_result=subprocess.run([sys.executable,'-m','homeai.cli','worker','--help'],capture_output=True,text=True,check=True,
         env={**os.environ,'PYTHONPATH':str(Path('server').resolve())})

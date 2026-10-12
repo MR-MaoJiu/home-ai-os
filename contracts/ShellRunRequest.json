@@ -1,0 +1,101 @@
+{
+  "$defs": {
+    "InputFile": {
+      "additionalProperties": false,
+      "properties": {
+        "record_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_id",
+        "filename"
+      ],
+      "title": "InputFile",
+      "type": "object"
+    },
+    "OutputFile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "kind": {
+          "default": "file",
+          "enum": [
+            "image",
+            "video",
+            "file"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "OutputFile",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "language": {
+      "default": "shell",
+      "enum": [
+        "shell",
+        "python"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "script": {
+      "maxLength": 20000,
+      "minLength": 1,
+      "title": "Script",
+      "type": "string"
+    },
+    "impact_summary": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Impact Summary",
+      "type": "string"
+    },
+    "inputs": {
+      "items": {
+        "$ref": "#/$defs/InputFile"
+      },
+      "maxItems": 8,
+      "title": "Inputs",
+      "type": "array"
+    },
+    "outputs": {
+      "items": {
+        "$ref": "#/$defs/OutputFile"
+      },
+      "maxItems": 8,
+      "title": "Outputs",
+      "type": "array"
+    },
+    "timeout_seconds": {
+      "default": 120,
+      "maximum": 300,
+      "minimum": 1,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "script"
+  ],
+  "title": "ShellRequest",
+  "type": "object"
+}

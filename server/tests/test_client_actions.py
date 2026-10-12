@@ -118,7 +118,7 @@ def test_data_owner_must_approve_cross_member_cloud_scope(system,alice):
     with pytest.raises(HTTPException):request_action(system,alice,tid,'cloud.disclose',params)
     aid=request_action(system,alice,tid,'cloud.disclose',params,bob.user_id)
     view=bob.request('GET','/api/v1/client-actions/'+aid).json()
-    assert view['purpose']=='允许本次任务向指定云模型披露所选资料的脱敏内容'
+    assert view['purpose']=='请确认将你为本次任务提供的资料发送至云模型。'
     assert '私人聊天' not in str(view)
     assert response(alice,aid).status_code==404
     assert response(bob,aid).status_code==200

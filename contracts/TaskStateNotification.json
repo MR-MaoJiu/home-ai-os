@@ -3,6 +3,35 @@
     "TaskState": {
       "additionalProperties": false,
       "properties": {
+        "used_android": {
+          "default": false,
+          "title": "Used Android",
+          "type": "boolean"
+        },
+        "android_workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Android Workspace Id"
+        },
+        "android_task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Android Task Id"
+        },
         "id": {
           "title": "Id",
           "type": "string"
@@ -57,6 +86,30 @@
   },
   "additionalProperties": false,
   "properties": {
+    "android_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Android Revision"
+    },
+    "android_active_task_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Android Active Task Id"
+    },
     "data_revision": {
       "anyOf": [
         {

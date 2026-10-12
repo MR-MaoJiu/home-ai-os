@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.homeai.androidinput" android:versionCode="1" android:versionName="1.0">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <application android:label="Home AI 远程输入" android:allowBackup="false" android:usesCleartextTraffic="false">
+        <activity android:name=".TouchTestActivity" android:exported="true" android:permission="android.permission.DUMP" android:label="Home AI 手势验收" />
+        <activity android:name=".VideoTestActivity" android:exported="true" android:permission="android.permission.DUMP" android:label="Home AI 视频验收" />
+        <service android:name=".HomeAIInputService" android:exported="true" android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter><action android:name="android.view.InputMethod" /></intent-filter>
+            <meta-data android:name="android.view.im" android:resource="@xml/method" />
+        </service>
+    </application>
+</manifest>

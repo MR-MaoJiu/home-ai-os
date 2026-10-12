@@ -11,11 +11,20 @@ def check_dependencies(db,actor,payload):
         record=read_authorized_record(db,actor,identifier,payload)
         if record.sensitivity=='SECRET':raise HTTPException(403,'来源已变为秘密，结果不可继续使用')
         if identifier in versions and record.version!=versions[identifier]:raise HTTPException(409,'来源版本已变化，请重新执行')
+    for identifier, version in payload.get('_output_resources', {}).items():
+        record = read_authorized_record(db, actor, identifier, payload)
+        if record.version != version or record.sensitivity == 'SECRET':
+            raise HTTPException(409, '返回资源已变更，旧附件已隐藏')
 
 
 def capture_result_dependencies(db,actor,payload,capability,result):
     versions=payload.setdefault('_record_dependencies',{})
-    if capability=='knowledge.search@v1':
+    if capability in {'resource.send@v1', 'resource.fetch@v1', 'resource.script@v1', 'image.generate@v1', 'image.edit@v1', 'shell.run@v1', 'host.execute@v1', 'host.inspect@v1'}:
+        entries = []
+        for part in result.get('parts', []):
+            if part.get('record_id') and type(part.get('version')) is int:
+                payload.setdefault('_output_resources', {})[part['record_id']] = part['version']
+    elif capability=='knowledge.search@v1':
         entries=[{'id':row['record_id'],'version':row['version']} for row in result.get('matches',[])]
     elif capability in {'memory.search@v1','calendar.search@v1','memory.semantic.search@v1','memory.graph.search@v1','client.request@v1','member.read@v1'}:
         entries=result.get('records',[]) if isinstance(result,dict) else result

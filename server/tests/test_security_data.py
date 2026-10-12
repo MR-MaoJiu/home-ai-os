@@ -9,6 +9,17 @@ def record(source_id='one',version=1,payload=None,kind='calendar.event'):
 
 
 def put(client, data=None):
+    # 历史规范记忆在隔离数据库直接建立，数据上传接口不再具有写记忆权限。
+    if data and data.get('kind','').startswith('memory.'):
+        from homeai.db import Principal
+        from homeai.security import Actor
+        from homeai.data import ingest
+        from homeai.contracts import DataRecord
+        with client.factory() as db:
+            user=db.get(Principal,client.user_id)
+            item=ingest(db,Actor(user.id,user.household_id,client.device_id,user.role),DataRecord.model_validate(data),client.client.app.state.vault)
+            db.commit()
+            return item.id
     response=client.request('POST','/api/v1/data/sync',{'records':[data or record()]})
     assert response.status_code == 200,response.text
     return response.json()['records'][0]['id']

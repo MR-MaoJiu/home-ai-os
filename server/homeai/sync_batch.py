@@ -8,6 +8,8 @@ from .sync_order import lock_changes
 
 
 def apply_batch(db,actor,body,vault):
+    from .record_channels import validate_data_upload
+    for item in body.records:validate_data_upload(item)
     scope(db,actor.user_id,actor.household_id);lock_changes(db)
     fingerprint=digest(canonical(body.model_dump()))
     receipt=None

@@ -53,10 +53,10 @@ async def test_public_search_runs_without_approval_returns_real_results_and_disc
 @pytest.mark.asyncio
 async def test_sensitive_queries_fail_before_approval_and_network(workflow):
     app, user = workflow
-    for query in ['联系 test@example.com', '电话 13800138000']:
+    for query, category in [('联系 test@example.com', '邮箱地址'), ('电话 13800138000', '手机号码')]:
         tid = create(user, [{'capability': 'web.search@v1', 'arguments': {'query': query}}])
         await run_task(app, tid, user.user_id)
         task = user.request('GET', '/api/v1/tasks/' + tid).json()
         assert task['status'] == 'FAILED'
-        assert '个人信息' in task['error']
+        assert category in task['error'] and '不能发送到搜索引擎' in task['error']
     assert user.request('GET', '/api/v1/approvals').json() == []

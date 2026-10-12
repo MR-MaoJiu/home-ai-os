@@ -82,13 +82,14 @@ enum ServerTrust {
         return url
     }
 
-    static func probe(url text: String, serverID: String, publicKey: String) async throws -> Verified {
+    static func probe(url text: String, serverID: String, publicKey: String, timeout: TimeInterval = 20) async throws -> Verified {
         let base = try origin(text)
         let nonce = (UUID().uuidString + UUID().uuidString).replacingOccurrences(of: "-", with: "").lowercased()
         let observer = IdentityProbeSession()
         let config = URLSessionConfiguration.ephemeral
         config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCredentialStorage = nil
-        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForRequest = timeout
+        config.timeoutIntervalForResource = timeout + 0.5
         let session = URLSession(configuration: config, delegate: observer, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         var request = URLRequest(url: base.appendingPathComponent("api/v1/server/identity").appending(queryItems: [URLQueryItem(name: "nonce", value: nonce)]))

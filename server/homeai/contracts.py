@@ -172,6 +172,9 @@ class TaskStepState(Contract):
 
 
 class TaskState(Contract):
+    used_android: bool = False
+    android_workspace_id: str | None = None
+    android_task_id: str | None = None
     id: str
     status: str = Field(max_length=64)
     cancel_requested: bool
@@ -179,6 +182,8 @@ class TaskState(Contract):
 
 
 class TaskStateNotification(Contract):
+    android_revision: int | None = None
+    android_active_task_id: str | None = None
     data_revision: int | None = None
     memory_revision: int | None = None
     automation_revision: int | None = None

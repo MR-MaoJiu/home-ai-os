@@ -189,7 +189,7 @@ def asset_view(app, db, actor, record):
     if 'media_upload_id' not in metadata:
         raise HTTPException(422, '此记录不是分块上传媒体')
     job = db.scalar(select(MediaJob).where(MediaJob.record_id == record.id)) if record.owner_id == actor.user_id else None
-    return {key: metadata.get(key) for key in ('kind', 'name', 'mime_type', 'size', 'sha256', 'duration_seconds', 'width', 'height')} | {
+    return {key: metadata.get(key) for key in ('kind', 'name', 'mime_type', 'size', 'sha256', 'duration_seconds', 'width', 'height', 'provenance')} | {
         'record_id': record.id, 'version': record.version,
         'processing': {'status': job.status, 'error': job.error, 'result_record_id': job.result_record_id} if job else {'status': 'unavailable'}}
 

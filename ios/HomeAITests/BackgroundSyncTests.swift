@@ -112,6 +112,33 @@ final class ClientCacheTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    func testConcurrentConnectionFailureReturnsOneSharedAttempt() async throws {
+        let work = SharedClientOperation<Int>()
+        let gate = AsyncOperationGate()
+        let counter = CacheRequestCounter()
+        try await gate.acquire()
+        let jobs = (0..<8).map { _ in Task {
+            try await work.run(key: "connection-generation") {
+                await counter.increment()
+                try await gate.acquire(); await gate.release()
+                throw URLError(.cannotConnectToHost)
+            }
+        } }
+        for _ in 0..<10000 {
+            if await work.waitingCount(key: "connection-generation") == jobs.count { break }
+            await Task.yield()
+        }
+        let waiters = await work.waitingCount(key: "connection-generation")
+        XCTAssertEqual(waiters, jobs.count)
+        await gate.release()
+        for job in jobs {
+            do { _ = try await job.value; XCTFail("连接失败不能伪装成功") }
+            catch let error as URLError { XCTAssertEqual(error.code, .cannotConnectToHost) }
+        }
+        let count = await counter.value
+        XCTAssertEqual(count, 1, "多个页面不能逐个重建同一失败连接")
+    }
+
     func testCancellingOnePageDoesNotCancelSharedRefresh() async throws {
         let work = SharedClientOperation<Int>()
         let gate = AsyncOperationGate()

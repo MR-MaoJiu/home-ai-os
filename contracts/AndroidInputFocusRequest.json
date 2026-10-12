@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "epoch": {
+      "minimum": 1,
+      "title": "Epoch",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "epoch"
+  ],
+  "title": "InputFocusRequest",
+  "type": "object"
+}

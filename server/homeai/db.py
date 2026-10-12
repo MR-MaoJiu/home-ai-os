@@ -31,6 +31,7 @@ class Device(Base):
     public_key: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(String)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_review_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false')
 
 
 class Credential(Base):

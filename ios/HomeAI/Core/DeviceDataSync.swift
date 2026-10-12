@@ -9,7 +9,7 @@ actor DeviceDataSync {
     private struct Changes: Decodable { let records: [DataEntry]; let removed_ids: [String]; let next_cursor: Int; let has_more: Bool }
     private struct Ack: Codable { let cursor: Int; let snapshot_id: String? }
     private struct PendingSnapshot: Codable { let id: String; let watermark: Int; var offset: Int; var records: [DataEntry] }
-    private struct Cache: Codable { var format_version: Int? = 2; var cursor: Int; var records: [DataEntry]; var pendingAck: Ack?; var snapshot: PendingSnapshot? }
+    private struct Cache: Codable { var format_version: Int? = 3; var cursor: Int; var records: [DataEntry]; var pendingAck: Ack?; var snapshot: PendingSnapshot? }
     private let work = SharedClientOperation<Result>()
 
     func cachedSnapshot(api: APIClient) async -> Result? {
@@ -119,9 +119,12 @@ actor DeviceDataSync {
 
     static func merge(_ records: [DataEntry], updates: [DataEntry], removed: [String]) -> [DataEntry] {
         var indexed = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { _, newest in newest })
-        for record in updates { indexed[record.id] = record }
+        for record in updates {
+            if record.isBusinessData { indexed[record.id] = record }
+            else { indexed.removeValue(forKey: record.id) }
+        }
         for identifier in removed { indexed.removeValue(forKey: identifier) }
-        return Array(indexed.values)
+        return indexed.values.filter(\.isBusinessData)
     }
 
     private func cacheURL(_ namespace: String) throws -> URL {
@@ -143,7 +146,7 @@ actor DeviceDataSync {
     private func load(_ file: URL, _ key: SymmetricKey) throws -> Cache {
         let box = try AES.GCM.SealedBox(combined: Data(contentsOf: file))
         let cache = try JSONDecoder().decode(Cache.self, from: AES.GCM.open(box, using: key))
-        guard cache.format_version == 2 else { throw APIClient.APIError.message("缓存格式已升级，正在重新获取资料目录") }
+        guard cache.format_version == 3 else { throw APIClient.APIError.message("数据与记忆通道已分开，正在重新获取数据目录") }
         return cache
     }
 

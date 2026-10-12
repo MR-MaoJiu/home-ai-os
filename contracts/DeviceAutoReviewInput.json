@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "acknowledged": {
+      "default": false,
+      "title": "Acknowledged",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled"
+  ],
+  "title": "AutoReviewInput",
+  "type": "object"
+}

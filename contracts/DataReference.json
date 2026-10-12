@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "record_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Record Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "record_id",
+    "version"
+  ],
+  "title": "DataReference",
+  "type": "object"
+}

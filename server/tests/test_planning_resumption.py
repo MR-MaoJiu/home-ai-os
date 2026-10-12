@@ -72,7 +72,7 @@ async def test_waiting_media_with_cloud_vision_resumes_after_only_pending_text_f
     status,body=task_state(system,alice,tid)
     assert status=='WAITING_MEDIA'
     assert body['_media_wait_record_id']==text['record_id']
-    assert traffic==[]
+    assert not any(host != 'fast.test' for host,_ in traffic)
     # 实际内置UTF-8解析只完成第一个文件；不伪造视觉结果或把图片任务标成成功。
     await process_user(system[0].state,alice.user_id,'h1')
     with system[2]() as db:
@@ -103,8 +103,10 @@ def test_history_snapshot_excludes_task_that_completed_after_message_creation(sy
     with system[2]() as db:
         scope(db,alice.user_id,'h1');task=db.get(Task,second['task_id'])
         body=system[0].state.vault.open(task.request,alice.user_id+':task:'+task.id)
-        assert body['_history_snapshot']==[]
-        assert history(system[0].state,db,actor,body)==[]
+        assert len(body['_history_snapshot'])==1 and body['_history_snapshot'][0]['pending'] is True
+        frozen=history(system[0].state,db,actor,body)
+        assert all('迟到的第一轮回答' not in item['content'] for item in frozen)
+        assert any('先等待我补充内容' in item['content'] for item in frozen)
     finish(system,alice,second['task_id'],'第二轮已完成')
     third=send(alice,identifier,'现在开启后续问题').json()
     with system[2]() as db:
@@ -170,3 +172,15 @@ async def test_consent_wait_preserves_planning_budget_and_does_not_replan_until_
     assert body['_model_rounds']==1 and body['_cloud_calls']==1
     assert body['_model_token_charge']==8 and body['_cloud_token_charge']==8
     assert len([host for host,_ in traffic if host=='model.example'])==1
+
+
+@pytest.mark.parametrize('message', ['请分析这些附件。','描述这张图片','帮我识别照片的内容'])
+def test_actual_image_analysis_does_not_require_artificial_tools(message):
+    from homeai.task_goals import supplied_image_analysis
+    assert supplied_image_analysis(message)
+
+
+@pytest.mark.parametrize('message', ['请分析这些附件并发送邮件','分析图片后提醒我','分析图片并删除原件','打开图片并导出报告','我要生成一张图片'])
+def test_image_analysis_never_substitutes_for_requested_actions(message):
+    from homeai.task_goals import supplied_image_analysis
+    assert not supplied_image_analysis(message)

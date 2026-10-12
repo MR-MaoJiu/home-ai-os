@@ -31,7 +31,7 @@ def test_chat_memory_hooks_and_forget_rls(tmp_path):
         assert len(entries)==1 and entries[0]['payload']['source_quote']=='我喜欢游泳'
         rid=entries[0]['id']
         assert bob.request('GET','/api/v1/memory/entries').json()==[]
-        assert alice.request('DELETE','/api/v1/data/'+rid).status_code==200
+        assert alice.request('DELETE','/api/v1/memory/entries/'+rid).status_code==200
         with app.state.db() as db:
             actor=Actor(alice.user_id,household,alice.device_id,'adult')
             assert first['id'] in forget_source_turns(db,actor)
@@ -48,9 +48,9 @@ def test_chat_memory_hooks_and_forget_rls(tmp_path):
         assert len(candidates)==1
         confirmed=alice.request('POST','/api/v1/memory/candidates/'+candidates[0]['id']+'/confirm')
         assert confirmed.status_code==200,confirmed.text
-        record=alice.request('GET','/api/v1/data/'+confirmed.json()['record_id']).json()
+        record=alice.request('GET','/api/v1/memory/entries/'+confirmed.json()['record_id']).json()
         assert record['sensitivity']=='SENSITIVE'
-        assert bob.request('GET','/api/v1/data/'+record['id']).status_code==404
+        assert bob.request('GET','/api/v1/memory/entries/'+record['id']).status_code==404
         for response in (second,sensitive):alice.request('POST','/api/v1/tasks/'+response['task_id']+'/cancel')
     finally:
         client.close();app.state.db.kw['bind'].dispose()

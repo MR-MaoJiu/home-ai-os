@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "mode": {
+      "enum": [
+        "paused",
+        "human",
+        "ai"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "expected_epoch": {
+      "minimum": 1,
+      "title": "Expected Epoch",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "mode",
+    "expected_epoch"
+  ],
+  "title": "ControlRequest",
+  "type": "object"
+}

@@ -77,7 +77,7 @@ async def test_pgvector_uses_canonical_content():
         results=await search(app.state,db,Actor(alice.user_id,household,alice.device_id,'adult'),'相关问题')
         assert results[0]['id']==rid
         assert results[0]['payload']['content']=='原始规范事实'
-    assert alice.request('DELETE','/api/v1/data/'+rid).status_code==200
+    assert alice.request('DELETE','/api/v1/memory/entries/'+rid).status_code==200
     with app.state.db() as db:
         scope(db,alice.user_id,household)
         assert await search(app.state,db,Actor(alice.user_id,household,alice.device_id,'adult'),'相关问题')==[]

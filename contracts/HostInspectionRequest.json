@@ -1,0 +1,31 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "targets": {
+      "items": {
+        "enum": [
+          "cpu",
+          "memory",
+          "screenshot"
+        ],
+        "type": "string"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Targets",
+      "type": "array"
+    },
+    "purpose": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Purpose",
+      "type": "string"
+    }
+  },
+  "required": [
+    "targets",
+    "purpose"
+  ],
+  "title": "HostInspectionRequest",
+  "type": "object"
+}

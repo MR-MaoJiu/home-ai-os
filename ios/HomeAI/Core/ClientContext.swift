@@ -40,9 +40,41 @@ final class ClientContextSampler: NSObject, @preconcurrency CLLocationManagerDel
     private var networkType = "unknown"
     private var lastLocation: CLLocation?
     private var continuation: CheckedContinuation<ClientLocation, Error>?
+    private var captureID: UUID?
     private var timeout: Task<Void, Never>?
     private var requestedPrecision = "coarse"
+    private var requiresExistingPermission = false
+    private var automaticReviewIsEnabled: (@MainActor () -> Bool)?
     var locationStatus = "未提供位置"
+
+    var canAutomaticallyCaptureCoarseLocation: Bool {
+        Self.permitsAutomaticCapture(locationHintsEnabled: Self.locationHintsEnabled,
+            authorization: manager.authorizationStatus, applicationState: UIApplication.shared.applicationState)
+    }
+
+    static func permitsAutomaticCapture(locationHintsEnabled: Bool, authorization: CLAuthorizationStatus,
+                                        applicationState: UIApplication.State) -> Bool {
+        locationHintsEnabled && applicationState == .active &&
+            [.authorizedWhenInUse, .authorizedAlways].contains(authorization)
+    }
+
+    func canCaptureWithoutPermissionPrompt(precision: String) -> Bool {
+        Self.permitsReviewedCapture(precision: precision, authorization: manager.authorizationStatus,
+            accuracyAuthorization: manager.accuracyAuthorization, applicationState: UIApplication.shared.applicationState)
+    }
+
+    static func permitsReviewedCapture(precision: String, authorization: CLAuthorizationStatus,
+                                       accuracyAuthorization: CLAccuracyAuthorization, applicationState: UIApplication.State) -> Bool {
+        applicationState == .active && [.authorizedWhenInUse, .authorizedAlways].contains(authorization) &&
+            (precision == "coarse" || (precision == "precise" && accuracyAuthorization == .fullAccuracy))
+    }
+
+    private var existingCapturePermissionRemainsValid: Bool {
+        if let automaticReviewIsEnabled {
+            return automaticReviewIsEnabled() && canCaptureWithoutPermissionPrompt(precision: requestedPrecision)
+        }
+        return canAutomaticallyCaptureCoarseLocation
+    }
 
     override init() {
         super.init()
@@ -56,7 +88,12 @@ final class ClientContextSampler: NSObject, @preconcurrency CLLocationManagerDel
             else if path.usesInterfaceType(.cellular) { type = "cellular" }
             else if path.usesInterfaceType(.wiredEthernet) { type = "wired" }
             else { type = "other" }
-            Task { @MainActor in self?.networkType = type }
+            Task { @MainActor in
+                guard let self else { return }
+                let changed = self.networkType != "unknown" && self.networkType != type
+                self.networkType = type
+                if changed { await AppServices.api.networkPathChanged() }
+            }
         }
         monitor.start(queue: DispatchQueue(label: "homeai.context.network"))
     }
@@ -88,7 +125,7 @@ final class ClientContextSampler: NSObject, @preconcurrency CLLocationManagerDel
     }
 
     func refreshAllowedLocation() {
-        guard Self.locationHintsEnabled, UIApplication.shared.applicationState == .active,
+        guard continuation == nil, Self.locationHintsEnabled, UIApplication.shared.applicationState == .active,
               [.authorizedWhenInUse, .authorizedAlways].contains(manager.authorizationStatus) else { return }
         manager.desiredAccuracy = kCLLocationAccuracyKilometer
         manager.requestLocation()
@@ -102,22 +139,39 @@ final class ClientContextSampler: NSObject, @preconcurrency CLLocationManagerDel
         } else { lastLocation = nil; locationStatus = "不向对话提供位置" }
     }
 
-    func captureLocation(precision: String = "coarse") async throws -> ClientLocation {
+    func captureLocation(precision: String = "coarse", allowPermissionPrompt: Bool = true,
+                         automaticReviewIsEnabled: (@MainActor () -> Bool)? = nil) async throws -> ClientLocation {
         guard UIApplication.shared.applicationState == .active else { throw APIClient.APIError.message("请保持 App 在前台以提供位置") }
         guard continuation == nil else { throw APIClient.APIError.message("已有位置请求正在进行") }
+        if !allowPermissionPrompt {
+            let permitted = automaticReviewIsEnabled.map { $0() && canCaptureWithoutPermissionPrompt(precision: precision) } ??
+                (precision == "coarse" && canAutomaticallyCaptureCoarseLocation)
+            guard permitted else {
+                throw APIClient.APIError.message("位置需要你确认后提供，请操作请求卡片。")
+            }
+        }
+        requiresExistingPermission = !allowPermissionPrompt
+        self.automaticReviewIsEnabled = automaticReviewIsEnabled
+        let identifier = UUID(); captureID = identifier
         requestedPrecision = precision == "precise" ? "precise" : "coarse"
         manager.desiredAccuracy = requestedPrecision == "precise" ? kCLLocationAccuracyNearestTenMeters : kCLLocationAccuracyKilometer
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
-                timeout = Task { try? await Task.sleep(for: .seconds(30)); if !Task.isCancelled { finish(.failure(APIClient.APIError.message("位置读取超时，可稍后重试"))) } }
-                if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
+                timeout = Task { try? await Task.sleep(for: .seconds(30)); if !Task.isCancelled, captureID == identifier { finish(.failure(APIClient.APIError.message("位置读取超时，可稍后重试"))) } }
+                if manager.authorizationStatus == .notDetermined, allowPermissionPrompt { manager.requestWhenInUseAuthorization() }
                 else { locationManagerDidChangeAuthorization(manager) }
             }
-        } onCancel: { Task { @MainActor in self.finish(.failure(CancellationError())) } }
+        } onCancel: { Task { @MainActor in
+            if self.captureID == identifier { self.finish(.failure(CancellationError())) }
+        } }
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if continuation != nil, requiresExistingPermission, !existingCapturePermissionRemainsValid {
+            finish(.failure(APIClient.APIError.message("位置授权或前台状态已变化，请确认后重试。")))
+            return
+        }
         if [.denied, .restricted].contains(manager.authorizationStatus) {
             lastLocation = nil; locationStatus = "位置未授权"; finish(.failure(APIClient.APIError.message("位置未授权，可在系统设置中调整")))
         } else if [.authorizedWhenInUse, .authorizedAlways].contains(manager.authorizationStatus) {
@@ -125,6 +179,10 @@ final class ClientContextSampler: NSObject, @preconcurrency CLLocationManagerDel
         }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        if continuation != nil, requiresExistingPermission, !existingCapturePermissionRemainsValid {
+            finish(.failure(APIClient.APIError.message("位置授权或前台状态已变化，请确认后重试。")))
+            return
+        }
         guard let value = locations.last, value.horizontalAccuracy >= 0 else { return }
         lastLocation = value; locationStatus = "已获得位置样本，聊天仅使用大致位置"
         let result = requestedPrecision == "precise" && manager.accuracyAuthorization == .fullAccuracy ? ClientLocation(latitude: value.coordinate.latitude, longitude: value.coordinate.longitude,
@@ -135,6 +193,9 @@ final class ClientContextSampler: NSObject, @preconcurrency CLLocationManagerDel
     private func finish(_ result: Result<ClientLocation, Error>) {
         timeout?.cancel(); timeout = nil
         let waiting = continuation; continuation = nil
+        captureID = nil
+        requiresExistingPermission = false
+        automaticReviewIsEnabled = nil
         waiting?.resume(with: result)
     }
 }

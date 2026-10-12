@@ -5,6 +5,21 @@ import UIKit
 @testable import HomeAI
 
 final class SyncTests: XCTestCase {
+    func testDataCacheExcludesMemoriesAndInternalConversationInput() throws {
+        let decoder = JSONDecoder()
+        func record(_ id: String, _ kind: String) throws -> DataEntry {
+            try decoder.decode(DataEntry.self, from: JSONSerialization.data(withJSONObject: ["id": id,"kind": kind,"sensitivity": "PRIVATE","payload": [:]]))
+        }
+        let photo = try record("photo", "photo.file")
+        let memory = try record("memory", "memory.fact")
+        let input = try record("input", "client_input.text")
+        let records = DeviceDataSync.merge([memory, photo], updates: [input, memory], removed: [])
+        XCTAssertEqual(records.map(\.id), ["photo"])
+        XCTAssertTrue(memory.isMemory)
+        XCTAssertFalse(photo.isMemory)
+        XCTAssertFalse(input.isBusinessData)
+    }
+
     func testMergeUpdatesAndRemovesWithoutDuplicates() throws {
         let decoder = JSONDecoder()
         let original = try decoder.decode(DataEntry.self, from: Data(#"{"id":"a","kind":"note","sensitivity":"PRIVATE","payload":{"title":"old"}}"#.utf8))

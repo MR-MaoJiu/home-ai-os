@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "package": {
+      "maxLength": 200,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+$",
+      "title": "Package",
+      "type": "string"
+    },
+    "purpose": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Purpose",
+      "type": "string"
+    }
+  },
+  "required": [
+    "package",
+    "purpose"
+  ],
+  "title": "AndroidLaunch",
+  "type": "object"
+}

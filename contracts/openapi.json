@@ -5,6 +5,561 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/voice/settings": {
+      "get": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Read Settings",
+        "operationId": "read_settings_api_v1_voice_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Save Settings",
+        "operationId": "save_settings_api_v1_voice_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Preferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/device": {
+      "put": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Register",
+        "operationId": "register_api_v1_voice_device_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Registration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Unregister",
+        "operationId": "unregister_api_v1_voice_device_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/calls": {
+      "post": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Start",
+        "operationId": "start_api_v1_voice_calls_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Start"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/test-call": {
+      "post": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Test Call",
+        "operationId": "test_call_api_v1_voice_test_call_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Start"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/calls/{identifier}": {
+      "get": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Read Call",
+        "operationId": "read_call_api_v1_voice_calls__identifier__get",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/calls/{identifier}/accept": {
+      "post": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Accept",
+        "operationId": "accept_api_v1_voice_calls__identifier__accept_post",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/calls/{identifier}/end": {
+      "post": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "End",
+        "operationId": "end_api_v1_voice_calls__identifier__end_post",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/calls/{identifier}/turns": {
+      "post": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Audio Turn",
+        "operationId": "audio_turn_api_v1_voice_calls__identifier__turns_post",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/calls/{identifier}/turns/{turn_id}": {
+      "get": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Read Turn",
+        "operationId": "read_turn_api_v1_voice_calls__identifier__turns__turn_id__get",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Turn Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/calls/{identifier}/turns/{turn_id}/audio/{index}": {
+      "get": {
+        "tags": [
+          "语音与通话"
+        ],
+        "summary": "Read Audio",
+        "operationId": "read_audio_api_v1_voice_calls__identifier__turns__turn_id__audio__index__get",
+        "parameters": [
+          {
+            "name": "identifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identifier"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Turn Id"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Index"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/privacy-review": {
+      "get": {
+        "tags": [
+          "隐私复核"
+        ],
+        "summary": "Read Review",
+        "operationId": "read_review_api_v1_tasks__task_id__privacy_review_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "隐私复核"
+        ],
+        "summary": "Decide Review",
+        "operationId": "decide_review_api_v1_tasks__task_id__privacy_review_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/manage/models": {
       "get": {
         "tags": [
@@ -79,6 +634,592 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/models/{provider_id}/verify-images": {
+      "post": {
+        "tags": [
+          "模型用途与验证"
+        ],
+        "summary": "Verify Image Provider",
+        "operationId": "verify_image_provider_api_v1_manage_models__provider_id__verify_images_post",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageVerificationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/member-budgets": {
+      "get": {
+        "tags": [
+          "成员额度"
+        ],
+        "summary": "Read Member Budgets",
+        "operationId": "read_member_budgets_api_v1_manage_member_budgets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/member-budgets/{member_id}": {
+      "put": {
+        "tags": [
+          "成员额度"
+        ],
+        "summary": "Update Member Budget",
+        "operationId": "update_member_budget_api_v1_manage_member_budgets__member_id__put",
+        "parameters": [
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberBudgetInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/shell": {
+      "get": {
+        "tags": [
+          "服务端 Shell"
+        ],
+        "summary": "Configuration Status",
+        "operationId": "configuration_status_api_v1_manage_shell_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/workspace": {
+      "get": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "Read Workspace",
+        "operationId": "read_workspace_api_v1_android_workspace_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/control": {
+      "post": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "Change Control",
+        "operationId": "change_control_api_v1_android_control_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/input-focus": {
+      "post": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "Prepare Text Input",
+        "operationId": "prepare_text_input_api_v1_android_input_focus_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputFocusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/input": {
+      "post": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "Send Input",
+        "operationId": "send_input_api_v1_android_input_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/android/devices": {
+      "get": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "List Devices",
+        "operationId": "list_devices_api_v1_manage_android_devices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/android/bindings": {
+      "get": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "List Bindings",
+        "operationId": "list_bindings_api_v1_manage_android_bindings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manage/android/bindings/{member_id}": {
+      "put": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "Bind Device",
+        "operationId": "bind_device_api_v1_manage_android_bindings__member_id__put",
+        "parameters": [
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "成员 Android 工作区"
+        ],
+        "summary": "Unbind Device",
+        "operationId": "unbind_device_api_v1_manage_android_bindings__member_id__delete",
+        "parameters": [
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/stream/config": {
+      "get": {
+        "tags": [
+          "安卓屏幕直连"
+        ],
+        "summary": "Configuration",
+        "operationId": "configuration_api_v1_android_stream_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/stream/offer": {
+      "post": {
+        "tags": [
+          "安卓屏幕直连"
+        ],
+        "summary": "Negotiate",
+        "operationId": "negotiate_api_v1_android_stream_offer_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamOffer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/stream/{session_id}/close": {
+      "post": {
+        "tags": [
+          "安卓屏幕直连"
+        ],
+        "summary": "Close",
+        "operationId": "close_api_v1_android_stream__session_id__close_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/android/stream/{session_id}/display": {
+      "get": {
+        "tags": [
+          "安卓屏幕直连"
+        ],
+        "summary": "Display Status",
+        "operationId": "display_status_api_v1_android_stream__session_id__display_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "安卓屏幕直连"
+        ],
+        "summary": "Display Control",
+        "operationId": "display_control_api_v1_android_stream__session_id__display_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisplayRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -554,6 +1695,112 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/client-actions/{action_id}/android-continue": {
+      "post": {
+        "tags": [
+          "客户端请求与成员授权"
+        ],
+        "summary": "Continue Android",
+        "operationId": "continue_android_api_v1_client_actions__action_id__android_continue_post",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AndroidContinue"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/current/auto-review": {
+      "get": {
+        "tags": [
+          "设备自动审核"
+        ],
+        "summary": "Get Setting",
+        "operationId": "get_setting_api_v1_devices_current_auto_review_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "设备自动审核"
+        ],
+        "summary": "Set Setting",
+        "operationId": "set_setting_api_v1_devices_current_auto_review_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoReviewInput"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1974,6 +3221,47 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/chat-speech": {
+      "get": {
+        "tags": [
+          "持久化会话"
+        ],
+        "summary": "Chat Speech",
+        "description": "逐段朗读前重取聊天投影；等待和流式状态不等同于无权读取。",
+        "operationId": "chat_speech_api_v1_tasks__task_id__chat_speech_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -3661,6 +4949,94 @@
         }
       }
     },
+    "/api/v1/tasks/{task_id}/retry": {
+      "get": {
+        "tags": [
+          "任务恢复"
+        ],
+        "summary": "Retry Preview",
+        "operationId": "retry_preview_api_v1_tasks__task_id__retry_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "任务恢复"
+        ],
+        "summary": "Retry Task",
+        "operationId": "retry_task_api_v1_tasks__task_id__retry_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sync/snapshot": {
       "post": {
         "tags": [
@@ -4074,6 +5450,82 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "记忆"
+        ],
+        "summary": "Read Entry",
+        "operationId": "read_entry_api_v1_memory_entries__record_id__get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "记忆"
+        ],
+        "summary": "Forget Entry",
+        "operationId": "forget_entry_api_v1_memory_entries__record_id__delete",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -5019,6 +6471,22 @@
         ],
         "title": "AddressInput"
       },
+      "AndroidContinue": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "AndroidContinue"
+      },
       "Apply": {
         "properties": {
           "portal_url": {
@@ -5040,6 +6508,48 @@
           "plan_id"
         ],
         "title": "Apply"
+      },
+      "AudioInput": {
+        "properties": {
+          "client_key": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "Client Key"
+          },
+          "content_base64": {
+            "type": "string",
+            "maxLength": 2800000,
+            "minLength": 1,
+            "title": "Content Base64"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "client_key",
+          "content_base64"
+        ],
+        "title": "AudioInput"
+      },
+      "AutoReviewInput": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "acknowledged": {
+            "type": "boolean",
+            "title": "Acknowledged",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "AutoReviewInput"
       },
       "AutomationInput": {
         "properties": {
@@ -5219,6 +6729,37 @@
         "additionalProperties": false,
         "type": "object",
         "title": "BackupSettingsInput"
+      },
+      "BindingRequest": {
+        "properties": {
+          "serial": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Serial"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "packages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Packages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "serial",
+          "label"
+        ],
+        "title": "BindingRequest"
       },
       "Body_upload_api_v1_files_post": {
         "properties": {
@@ -5470,6 +7011,15 @@
             ],
             "title": "Cloud Planner"
           },
+          "cloud_planner_thinking": {
+            "type": "string",
+            "enum": [
+              "provider_default",
+              "disabled"
+            ],
+            "title": "Cloud Planner Thinking",
+            "default": "provider_default"
+          },
           "vision": {
             "anyOf": [
               {
@@ -5481,29 +7031,106 @@
             ],
             "title": "Vision"
           },
+          "image_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Generation"
+          },
+          "image_editing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Editing"
+          },
           "shared_cloud": {
             "type": "boolean",
             "title": "Shared Cloud",
             "default": false
           },
           "household_daily_tokens": {
-            "type": "integer",
-            "maximum": 100000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "const": "unlimited"
+              }
+            ],
             "title": "Household Daily Tokens",
             "default": 0
           },
           "member_daily_tokens": {
-            "type": "integer",
-            "maximum": 10000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "const": "unlimited"
+              }
+            ],
             "title": "Member Daily Tokens",
+            "default": 0
+          },
+          "household_daily_images": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Household Daily Images",
+            "default": 0
+          },
+          "member_daily_images": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Member Daily Images",
             "default": 0
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "ConfigurationInput"
+      },
+      "ControlRequest": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "paused",
+              "human",
+              "ai"
+            ],
+            "title": "Mode"
+          },
+          "expected_epoch": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Epoch"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "expected_epoch"
+        ],
+        "title": "ControlRequest"
       },
       "Create": {
         "properties": {
@@ -5582,6 +7209,28 @@
         ],
         "title": "DataRecord"
       },
+      "DataReference": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Record Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "record_id",
+          "version"
+        ],
+        "title": "DataReference"
+      },
       "Decision": {
         "properties": {
           "decision": {
@@ -5622,6 +7271,26 @@
         ],
         "title": "DenialInput"
       },
+      "DisplayRequest": {
+        "properties": {
+          "screen_off": {
+            "type": "boolean",
+            "title": "Screen Off"
+          },
+          "expected_epoch": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Epoch"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "screen_off",
+          "expected_epoch"
+        ],
+        "title": "DisplayRequest"
+      },
       "EditMemory": {
         "properties": {
           "content": {
@@ -5656,6 +7325,177 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "ImageVerificationInput": {
+        "properties": {
+          "generate": {
+            "type": "boolean",
+            "title": "Generate",
+            "default": false
+          },
+          "edit": {
+            "type": "boolean",
+            "title": "Edit",
+            "default": false
+          },
+          "confirm_usage": {
+            "type": "boolean",
+            "const": true,
+            "title": "Confirm Usage"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm_usage"
+        ],
+        "title": "ImageVerificationInput"
+      },
+      "InputFocusRequest": {
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Epoch"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "epoch"
+        ],
+        "title": "InputFocusRequest"
+      },
+      "InputRequest": {
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Epoch"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Sequence"
+          },
+          "frame_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 16,
+            "title": "Frame Id"
+          },
+          "focus_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focus Token"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "tap",
+              "swipe",
+              "back",
+              "home",
+              "text",
+              "launch"
+            ],
+            "title": "Action"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          },
+          "x2": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X2"
+          },
+          "y2": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y2"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "package": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "epoch",
+          "sequence",
+          "frame_id",
+          "action"
+        ],
+        "title": "InputRequest"
       },
       "Inspect": {
         "properties": {
@@ -5779,6 +7619,47 @@
         ],
         "title": "Login"
       },
+      "MemberBudgetInput": {
+        "properties": {
+          "daily_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "const": "unlimited"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Tokens"
+          },
+          "daily_images": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Images"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "daily_tokens",
+          "daily_images"
+        ],
+        "title": "MemberBudgetInput"
+      },
       "MemberInput": {
         "properties": {
           "name": {
@@ -5849,6 +7730,14 @@
             "type": "array",
             "maxItems": 20,
             "title": "Mentions"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/DataReference"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "References"
           },
           "client_context": {
             "anyOf": [
@@ -5956,6 +7845,17 @@
             "type": "array",
             "maxItems": 2,
             "title": "Stun Urls"
+          },
+          "allow_encrypted_relay": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Encrypted Relay"
           }
         },
         "additionalProperties": false,
@@ -6151,6 +8051,51 @@
           "operator"
         ],
         "title": "Predicate"
+      },
+      "Preferences": {
+        "properties": {
+          "incoming_enabled": {
+            "type": "boolean",
+            "title": "Incoming Enabled",
+            "default": false
+          },
+          "quiet_start": {
+            "type": "integer",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Quiet Start",
+            "default": 22
+          },
+          "quiet_end": {
+            "type": "integer",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Quiet End",
+            "default": 8
+          },
+          "daily_limit": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Daily Limit",
+            "default": 4
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "default": "Asia/Shanghai"
+          },
+          "speaker": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Speaker",
+            "default": "中文女"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Preferences"
       },
       "ProviderManifest": {
         "properties": {
@@ -6380,6 +8325,32 @@
         ],
         "title": "Reconciliation"
       },
+      "Registration": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 32,
+            "pattern": "^[0-9a-fA-F]+$",
+            "title": "Token"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "sandbox",
+              "production"
+            ],
+            "title": "Environment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "token",
+          "environment"
+        ],
+        "title": "Registration"
+      },
       "ReminderInput": {
         "properties": {
           "idempotency_key": {
@@ -6452,6 +8423,11 @@
               }
             ],
             "title": "Text"
+          },
+          "automatic_review": {
+            "type": "boolean",
+            "title": "Automatic Review",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -6460,6 +8436,63 @@
           "idempotency_key"
         ],
         "title": "ResponseInput"
+      },
+      "RetryRequest": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "RetryRequest"
+      },
+      "ReviewDecision": {
+        "properties": {
+          "review_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Review Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "retry",
+              "force",
+              "edit"
+            ],
+            "title": "Decision"
+          },
+          "edits": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "maxProperties": 100,
+            "title": "Edits"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "review_id",
+          "decision",
+          "idempotency_key"
+        ],
+        "title": "ReviewDecision"
       },
       "SearchQuery": {
         "properties": {
@@ -6616,6 +8649,22 @@
         ],
         "title": "SourceLookup"
       },
+      "Start": {
+        "properties": {
+          "client_key": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "Client Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "client_key"
+        ],
+        "title": "Start"
+      },
       "Step": {
         "properties": {
           "capability": {
@@ -6672,6 +8721,33 @@
           "predicates"
         ],
         "title": "StepCondition"
+      },
+      "StreamOffer": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "offer",
+            "title": "Type"
+          },
+          "sdp": {
+            "type": "string",
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Sdp"
+          },
+          "audio_enabled": {
+            "type": "boolean",
+            "title": "Audio Enabled",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "sdp"
+        ],
+        "title": "StreamOffer"
       },
       "SyncBatch": {
         "properties": {

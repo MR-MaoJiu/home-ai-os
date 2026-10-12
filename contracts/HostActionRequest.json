@@ -1,0 +1,16 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "action_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Action Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "action_id"
+  ],
+  "title": "HostRequest",
+  "type": "object"
+}

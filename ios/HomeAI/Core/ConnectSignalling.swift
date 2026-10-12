@@ -68,7 +68,11 @@ enum ConnectSignalling {
         request.setValue(try DeviceIdentity().sign(Data(proof.utf8)), forHTTPHeaderField: "X-Connect-Signature")
         let (stream, response) = try await response(request, stage: "platform_signalling")
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw APIClient.APIError.message("连接平台拒绝协商或暂时不可用")
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            #if DEBUG
+            print("HOMEAI_NETWORK stage=platform_signalling status=\(status) method=\(method)")
+            #endif
+            throw APIClient.APIError.message("连接平台拒绝协商或暂时不可用（HTTP \(status)）")
         }
         var result = Data()
         for try await byte in stream {

@@ -21,7 +21,11 @@ from .runtime import submit
 from .model_routing import router as model_routing_router
 from .client_actions import router as client_actions_router
 from .media import router as media_router
+from . import image_generation  # 注册图片用量账本，供迁移检查和测试建表。
+from .member_budgets import router as member_budgets_router
+from . import encrypted_relay  # 注册密文派发回执，保持测试建表与运行模型一致。
 from . import auto_memory  # 在测试建表及迁移元数据读取前登记规范表。
+from . import android_workspace  # 成员专属安卓工作区与执行回执。
 
 
 def create_app(settings=None, vault=None, db_factory=None, policy=None, registry=None):
@@ -29,19 +33,29 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     @asynccontextmanager
     async def lifespan(app):
         signalling = None
+        relay = None
         if app.state.settings.direct_enabled:
             import aiortc  # 显式启用时要求真实传输依赖就绪。
             from .connect_signalling import run_agent
             signalling = asyncio.create_task(run_agent(app))
+        if app.state.settings.direct_enabled or app.state.settings.encrypted_relay_enabled:
+            from .encrypted_relay import run_agent as run_relay
+            relay = asyncio.create_task(run_relay(app))
         try:
             yield
         finally:
+            if relay:
+                relay.cancel()
+                await asyncio.gather(relay, return_exceptions=True)
             if signalling:
                 signalling.cancel()
                 await asyncio.gather(signalling, return_exceptions=True)
             manager = getattr(app.state, 'direct_sessions', None)
             if manager:
                 await manager.close()
+            android_manager = getattr(app.state, 'android_screen_sessions', None)
+            if android_manager:
+                await android_manager.close()
     app = FastAPI(lifespan=lifespan, title="Home AI OS", version="0.1.0", docs_url=None if settings.environment == "production" else "/docs")
     from .limits import BodyLimitMiddleware
     app.add_middleware(BodyLimitMiddleware)
@@ -50,8 +64,20 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     app.state.db = db_factory or database(settings.database_url)[1]
     app.state.policy = policy or Policy(settings.opa_url)
     app.state.registry = registry or Registry(app.state.vault)
+    from .voice_calls import router as voice_router
+    app.include_router(voice_router)
+    from .privacy_review import router as privacy_review_router
+    app.include_router(privacy_review_router)
     app.include_router(model_routing_router)
+    app.include_router(member_budgets_router)
+    from .shell_tools import router as shell_router
+    app.include_router(shell_router)
+    app.include_router(android_workspace.router)
+    from .android_stream import router as android_stream_router
+    app.include_router(android_stream_router)
     app.include_router(client_actions_router)
+    from .auto_review import router as auto_review_router
+    app.include_router(auto_review_router)
     app.include_router(media_router)
     from .sharing import router as sharing_router
     app.include_router(sharing_router)
@@ -117,7 +143,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
 
     @app.get("/api/v1/me")
     def me(actor: Actor = auth):
-        return actor.__dict__
+        from .server_identity import configured_addresses
+        return {**actor.__dict__, 'server_addresses': configured_addresses(app.state)}
 
     @app.get("/api/v1/devices")
     def devices(actor: Actor = auth):
@@ -150,7 +177,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     @app.get("/api/v1/data")
     def records(actor: Actor = auth, after: str = "", limit: int = 100):
         with app.state.db() as db:
-            rows = db.scalars(accessible(db, actor).where(Record.id > after).order_by(Record.id).limit(min(max(limit, 1), 200))).all()
+            from .record_channels import business_data_clause
+            rows = db.scalars(accessible(db, actor).where(business_data_clause(), Record.id > after).order_by(Record.id).limit(min(max(limit, 1), 200))).all()
             return {"records": [serialize(r, v) for r in rows], "next_cursor": rows[-1].id if rows else None}
 
     @app.get("/api/v1/data/changes")
@@ -159,7 +187,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
             scope(db, actor.user_id, actor.household_id)
             from .sync_order import lock_changes
             lock_changes(db)
-            rows = db.scalars(select(Outbox).where(Outbox.owner_id == actor.user_id, Outbox.id > after, Outbox.kind.like("record.%")).order_by(Outbox.id).limit(100)).all()
+            from .record_channels import data_event_clause
+            rows = db.scalars(select(Outbox).where(Outbox.owner_id == actor.user_id, Outbox.id > after, data_event_clause()).order_by(Outbox.id).limit(100)).all()
             return {"changes": [{"cursor": r.id, "type": r.kind, "record_id": r.resource_id} for r in rows], "next_cursor": rows[-1].id if rows else after}
 
     @app.get("/api/v1/data/{record_id}")
@@ -167,6 +196,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
         with app.state.db() as db:
             from .documents import checked_payload
             record=read_record(db,actor,record_id)
+            from .record_channels import is_business_data
+            if not is_business_data(record):raise HTTPException(404, '该记录不属于数据，请使用记忆或原任务入口')
             value=serialize(record,v)
             value['payload']=checked_payload(db,actor,record,v,value['payload'])
             return value
@@ -175,6 +206,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
     def delete_record(record_id: str, actor: Actor = auth):
         with app.state.db() as db:
             record = own(db, Record, record_id, actor)
+            from .record_channels import is_business_data
+            if not is_business_data(record):raise HTTPException(403, '记忆请在记忆页面遗忘，任务内部记录不能通过数据页面删除')
             from .deletion import delete_tree
             deleted_ids = delete_tree(db, actor, record, v, settings.state_dir)
             return {"deleted": True, "deleted_ids": deleted_ids, "derived_purge": "pending"}
@@ -303,7 +336,9 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
         redacted = False
         try: check_dependencies(db, actor, payload)
         except HTTPException: redacted = True
-        return {"id": task.id, "status": task.status, "error": "来源授权或版本已变化，旧结果已隐藏" if redacted else task.error, "result_redacted": redacted, "result": v.open(task.result, task.owner_id + ":task-result:" + task.id) if task.result and not redacted else None, "execution": {"agent": bool(payload.get("_agent")), "planned_steps": len(payload.get("steps", [])), "max_steps": payload.get("max_steps", 8), "model_rounds": payload.get("_model_rounds", 0), "model_token_charge": payload.get("_model_token_charge", 0), "max_model_tokens": payload.get("max_model_tokens"), "deadline": task.deadline}}
+        from .android_tasks import usage_projection
+        from .privacy_review import display_task_error
+        return {**usage_projection(payload, task.id), "id": task.id, "status": task.status, "budget_recoverable": payload.get('_budget_failure',{}).get('recoverable') if task.status=='WAITING_BUDGET' else None, "error": "来源授权或版本已变化，旧结果已隐藏" if redacted else display_task_error(task, payload), "result_redacted": redacted, "result": v.open(task.result, task.owner_id + ":task-result:" + task.id) if task.result and not redacted else None, "execution": {"agent": bool(payload.get("_agent")), "planned_steps": len(payload.get("steps", [])), "max_steps": payload.get("max_steps", 8), "model_rounds": payload.get("_model_rounds", 0), "model_token_charge": payload.get("_model_token_charge", 0), "max_model_tokens": payload.get("max_model_tokens"), "deadline": task.deadline}}
 
     @app.get("/api/v1/tasks/{task_id}")
     def get_task(task_id: str, actor: Actor = auth):
@@ -319,6 +354,8 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
                 task.status = "CANCELED"
             from .client_actions import cancel_task_actions
             cancel_task_actions(app.state, db, actor, task)
+            from .android_tasks import release_finished_in_session
+            release_finished_in_session(app.state, db, actor, task)
             emit(db, actor, 'task.updated', task.id)
             db.commit()
             return task_view(task, db, actor)
@@ -352,26 +389,11 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
 
     @app.post("/api/v1/approvals/{approval_id}")
     def decide(approval_id: str, body: Decision, actor: Actor = auth):
+        from .approval_service import decide as decide_approval
         with app.state.db() as db:
-            approval = own(db, Approval, approval_id, actor)
-            invocation = db.get(Invocation, approval.invocation_id)
-            task = own(db, Task, invocation.task_id, actor)
-            db.refresh(task, with_for_update=True)
-            db.refresh(approval, with_for_update=True)
-            if approval.decision != "PENDING" or approval.expires_at <= now():
-                raise HTTPException(409, "审批已处理或过期")
-            if task.status != "AWAITING_APPROVAL" or task.cancel_requested:
-                raise HTTPException(409, "任务不再等待审批")
-            if body.decision == "APPROVED":
-                from .result_access import check_dependencies
-                check_dependencies(db, actor, v.open(task.request, actor.user_id + ':task:' + task.id))
-            approval.decision = body.decision
-            task.status = "APPROVED" if body.decision == "APPROVED" else "CANCELED"
-            if body.decision == "REJECTED":
-                task.cancel_requested = True
-            audit(db, actor, "approval." + body.decision.lower(), approval.id)
+            result = decide_approval(app.state, db, actor, approval_id, body.decision)
             db.commit()
-            return {"status": task.status}
+            return result
 
     @app.get("/api/v1/activity")
     def activity(actor: Actor = auth):
@@ -420,7 +442,7 @@ def create_app(settings=None, vault=None, db_factory=None, policy=None, registry
                 scope(db, actor.user_id, actor.household_id)
                 from .model_routing import verification
                 report=verification(db,actor.household_id,ProviderManifest.model_validate_json(row.manifest))
-                row.enabled, row.health = True, "online" if report.get('text') else "degraded"
+                row.enabled, row.health = True, "online" if any(report.get(key) for key in ('text', 'image_generation', 'image_editing')) else "degraded"
             else:
                 raise HTTPException(422, "不支持的生命周期操作")
             scope(db, actor.user_id, actor.household_id)

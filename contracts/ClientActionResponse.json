@@ -27,6 +27,11 @@
       ],
       "default": null,
       "title": "Text"
+    },
+    "automatic_review": {
+      "default": false,
+      "title": "Automatic Review",
+      "type": "boolean"
     }
   },
   "required": [

@@ -3,7 +3,17 @@ import re
 
 
 def clean_answer(value):
-    return re.sub(r'^(?:<think>.*?</think>|</think>)\s*','',value.strip(),flags=re.S).strip()
+    answer=value.strip()
+    while answer:
+        lower=answer.lower()
+        if lower.startswith('</think>'):
+            answer=answer[len('</think>'):].strip()
+        elif lower.startswith('<think>'):
+            end=lower.find('</think>',len('<think>'))
+            if end<0:return ''
+            answer=answer[end+len('</think>'):].strip()
+        else:break
+    return answer
 
 
 def faithful_answer(app,db,actor,body,value):

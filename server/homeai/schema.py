@@ -2,7 +2,7 @@
 from importlib import import_module
 from .db import Base
 
-MODEL_MODULES = ('model_routing', 'client_actions', 'media', 'auto_memory')
+MODEL_MODULES = ('model_routing', 'client_actions', 'media', 'auto_memory', 'image_generation', 'member_budgets', 'artifact_sources', 'android_workspace', 'voice_calls', 'encrypted_relay')
 
 
 def registered_metadata():

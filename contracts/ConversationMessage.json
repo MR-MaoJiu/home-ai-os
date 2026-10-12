@@ -173,6 +173,28 @@
       "title": "CoarseLocation",
       "type": "object"
     },
+    "DataReference": {
+      "additionalProperties": false,
+      "properties": {
+        "record_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "record_id",
+        "version"
+      ],
+      "title": "DataReference",
+      "type": "object"
+    },
     "Mention": {
       "additionalProperties": false,
       "properties": {
@@ -286,6 +308,14 @@
       },
       "maxItems": 20,
       "title": "Mentions",
+      "type": "array"
+    },
+    "references": {
+      "items": {
+        "$ref": "#/$defs/DataReference"
+      },
+      "maxItems": 20,
+      "title": "References",
       "type": "array"
     },
     "client_context": {

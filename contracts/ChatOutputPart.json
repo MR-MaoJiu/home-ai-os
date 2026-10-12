@@ -1,4 +1,98 @@
 {
+  "$defs": {
+    "ResourceProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "enum": [
+            "generated",
+            "edited",
+            "retrieved",
+            "script_retrieved",
+            "shell_created",
+            "server_capture"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "retrieved_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieved At"
+        },
+        "source_versions": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Source Versions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "origin"
+      ],
+      "title": "ResourceProvenance",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "allOf": [
     {
@@ -307,6 +401,17 @@
       ],
       "default": null,
       "title": "Template"
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResourceProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

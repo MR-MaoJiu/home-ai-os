@@ -23,6 +23,25 @@ struct MediaUploadLimits: Codable, Sendable {
     }
 }
 
+struct MediaAssetProvenance: Codable, Sendable {
+    let origin: String?
+    let source_url: String?
+    var label: String? {
+        switch origin {
+        case "generated": "AI生成"
+        case "edited": "AI编辑"
+        case "retrieved", "script_retrieved": "来源文件"
+        case "shell_created": "Shell处理文件"
+        case "server_capture": "服务器截屏"
+        default: nil
+        }
+    }
+    var safeSourceURL: URL? {
+        guard let source_url, let url = URL(string: source_url) else { return nil }
+        return ChatMarkdownDocument.safeURL(url)
+    }
+}
+
 struct MediaAsset: Codable, Identifiable, Sendable {
     struct Processing: Codable, Sendable { let status: String; let task_id: String?; let error: String?; let result_record_id: String? }
     let record_id: String
@@ -34,6 +53,7 @@ struct MediaAsset: Codable, Identifiable, Sendable {
     let sha256: String
     let duration_seconds: Double?
     let processing: Processing?
+    var provenance: MediaAssetProvenance? = nil
     var id: String { record_id }
 }
 
@@ -259,20 +279,49 @@ final class MediaDraft {
     let scope: String
     private var operation: Task<Void, Never>?
     private var resumeRequested = false
+    private var restoreGeneration = UUID()
     init(scope: String = "chat") { self.scope = scope }
     var ready: Bool { !items.isEmpty && items.allSatisfy { $0.asset != nil } }
 
-    func restore(api: APIClient) async {
+    @discardableResult
+    func restore(api: APIClient) async -> Bool {
+        let generation = UUID(); restoreGeneration = generation
         do {
             let current = try await api.syncNamespace()
-            if namespace != current { pause(); await operation?.value; items = []; namespace = current }
-            items = try await MediaUploadStore.shared.list(namespace: current, scope: scope)
+            guard !Task.isCancelled, restoreGeneration == generation else { return false }
+            if namespace != current {
+                pause(); await operation?.value
+                let actual = await api.cachedNamespace()
+                guard !Task.isCancelled, restoreGeneration == generation, actual == current else { return false }
+                items = []; namespace = current
+            }
+            let restored = try await MediaUploadStore.shared.list(namespace: current, scope: scope)
+            let restoredIdentity = await api.cachedNamespace()
+            guard Self.acceptsRestoreSnapshot(request: generation, latest: restoreGeneration, namespace: current, currentNamespace: namespace, authenticatedNamespace: restoredIdentity, canceled: Task.isCancelled) else { return false }
+            items = restored
             if scope == "data" {
-                for item in items where item.asset != nil { try? await MediaUploadStore.shared.remove(id: item.id, namespace: current) }
+                for item in restored where item.asset != nil {
+                    let removalIdentity = await api.cachedNamespace()
+                    guard Self.acceptsRestoreSnapshot(request: generation, latest: restoreGeneration, namespace: current, currentNamespace: namespace, authenticatedNamespace: removalIdentity, canceled: Task.isCancelled) else { return false }
+                    try? await MediaUploadStore.shared.remove(id: item.id, namespace: current)
+                }
+                let cleanupIdentity = await api.cachedNamespace()
+                guard Self.acceptsRestoreSnapshot(request: generation, latest: restoreGeneration, namespace: current, currentNamespace: namespace, authenticatedNamespace: cleanupIdentity, canceled: Task.isCancelled) else { return false }
                 items.removeAll { $0.asset != nil }
             }
-            limits = await MediaUploadLimits.fetch(api: api, namespace: current)
-        } catch { self.error = error.localizedDescription }
+            let configuration = await MediaUploadLimits.fetch(api: api, namespace: current)
+            let limitsIdentity = await api.cachedNamespace()
+            guard Self.acceptsRestoreSnapshot(request: generation, latest: restoreGeneration, namespace: current, currentNamespace: namespace, authenticatedNamespace: limitsIdentity, canceled: Task.isCancelled) else { return false }
+            limits = configuration
+            return true
+        } catch {
+            if !Task.isCancelled && restoreGeneration == generation { self.error = error.localizedDescription }
+            return false
+        }
+    }
+    nonisolated static func acceptsRestoreSnapshot(request: UUID, latest: UUID, namespace: String,
+                                                  currentNamespace: String?, authenticatedNamespace: String?, canceled: Bool) -> Bool {
+        !canceled && request == latest && namespace == currentNamespace && namespace == authenticatedNamespace
     }
     func enqueue(file: URL, name: String, kind: String, mime: String, api: APIClient) async {
         do {

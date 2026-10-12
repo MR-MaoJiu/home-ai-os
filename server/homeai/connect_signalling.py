@@ -153,21 +153,6 @@ async def run_agent(app):
                         raise ValueError('连接许可期限无效')
                     permit_until = expiry
                     manager.platform_expiry = expiry
-                from .pairing import process_enrollment
-                try:
-                    pending = await broker.request('GET','/api/direct/enrollments')
-                except httpx.HTTPStatusError as error:
-                    if error.response.status_code != 404:raise
-                    pending = []
-                if not isinstance(pending,list) or len(pending)>16:raise ValueError('配对队列无效')
-                for item in pending:
-                    try:
-                        ciphertext=await process_enrollment(app.state,config,item)
-                        await broker.request('POST','/api/direct/enrollments/'+item['id']+'/response',{'ciphertext':ciphertext})
-                    except Exception as error:
-                        # 仅保留错误类型，不记录请求、配对码或会话。
-                        private_write(app.state.settings.state_dir/'enrollment-status.json',json.dumps({'state':'failed','error_type':type(error).__name__,'checked_at':time.time()}))
-                        continue
                 offers = await broker.request('GET', '/api/direct/offers')
                 if not isinstance(offers, list) or len(offers) > 16:
                     raise ValueError('信令队列格式无效')
@@ -185,6 +170,21 @@ async def run_agent(app):
                         cache[session_id] = (envelope['payload']['expires'], answer)
                     if cache[session_id][1] is not None:
                         await broker.request('POST', '/api/direct/answers/'+session_id, {'envelope': cache[session_id][1]})
+                from .pairing import process_enrollment
+                try:
+                    pending = await broker.request('GET','/api/direct/enrollments')
+                except httpx.HTTPStatusError as error:
+                    if error.response.status_code != 404:raise
+                    pending = []
+                if not isinstance(pending,list) or len(pending)>16:raise ValueError('配对队列无效')
+                for item in pending:
+                    try:
+                        ciphertext=await process_enrollment(app.state,config,item)
+                        await broker.request('POST','/api/direct/enrollments/'+item['id']+'/response',{'ciphertext':ciphertext})
+                    except Exception as error:
+                        # 仅保留错误类型，不记录请求、配对码或会话。
+                        private_write(app.state.settings.state_dir/'enrollment-status.json',json.dumps({'state':'failed','error_type':type(error).__name__,'checked_at':time.time()}))
+                        continue
                 private_write(app.state.settings.state_dir/'direct-status.json', json.dumps({'state': 'signalling_online', 'checked_at': time.time()}))
             except asyncio.CancelledError:
                 raise
@@ -195,7 +195,7 @@ async def run_agent(app):
                     manager.platform_expiry = 0
                     await manager.close_source('platform',reason='authorization_denied' if denied else 'permit_expired')
                 private_write(app.state.settings.state_dir/'direct-status.json', json.dumps({'state': 'signalling_unavailable', 'error_type': type(error).__name__, 'checked_at': time.time()}))
-            await asyncio.sleep(2)
+            await asyncio.sleep(app.state.settings.direct_signalling_poll_seconds)
     finally:
         await manager.close_source('platform')
         if getattr(app.state,'connect_http_client',None) is client:del app.state.connect_http_client

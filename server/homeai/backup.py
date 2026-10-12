@@ -192,7 +192,13 @@ def invalidate_restored_authorizations(factory,vault):
                     if action.kind=='cloud.disclose':counts['revoked_cloud_consents']+=1
             for task in db.scalars(select(Task).where(Task.owner_id==user.id)):
                 payload=vault.open(task.request,user.id+':task:'+task.id)
-                if not (payload.get('_task_grants') or payload.get('_cloud_consents') or payload.get('_client_wait')):continue
+                privacy_review=any(key in payload for key in ('_privacy_review','_privacy_review_submissions'))
+                if not (payload.get('_task_grants') or payload.get('_cloud_consents') or payload.get('_client_wait') or privacy_review):continue
+                if privacy_review:
+                    # 冻结副本及决定回执均只适用于原运行现场，不能随旧备份恢复批准或重放响应。
+                    for key in ('_privacy_review','_privacy_review_submissions','_privacy_failure'):
+                        payload.pop(key,None)
+                    task.request=vault.seal(payload,user.id+':task:'+task.id)
                 task.result=None;task.cancel_requested=True
                 if task.status not in TERMINAL_TASKS:
                     task.status='CANCELED';task.error='从备份恢复的临时授权已失效，请重新发起请求';counts['canceled_tasks']+=1

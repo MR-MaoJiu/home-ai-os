@@ -7,6 +7,10 @@ from .data import serialize
 def model_record(record, vault, limit=4000):
     value=serialize(record,vault)
     payload=value['payload']
+    if record.kind in {'health.snapshot','health.sleep'}:
+        from .health_summary import model_payload
+        return {**value,'payload':model_payload(record,payload,limit),'payload_deferred':True,
+            'context_note':'健康数据采用服务端确定性统计；原始样本仍保留，不能当作聊天记忆。'}
     # 任务补充可能包含否定或修正约束，不能默默截掉后半段；过大时由总上下文预算暂停。
     if record.kind=='client_input.text':return value
     if len(canonical(payload))<=limit:return value

@@ -24,6 +24,15 @@ def read_config(app):
     path=app.settings.state_dir/'remote-config.enc'
     return app.vault.open(path.read_text(),'remote-config') if path.exists() else None
 
+def relay_enabled(app, config=None):
+    path = app.settings.state_dir/'remote-network.enc'
+    if path.exists():
+        prefs = app.vault.open(path.read_text(), 'remote-network')
+        if config and prefs.get('household_id') != config.get('household_id'):
+            return False
+        return bool(prefs.get('allow_encrypted_relay', app.settings.encrypted_relay_enabled))
+    return app.settings.encrypted_relay_enabled
+
 @router.get('/status')
 def status(request:Request,actor=Depends(authenticate)):
     owner(actor);config=read_config(request.app.state)
@@ -37,7 +46,7 @@ def status(request:Request,actor=Depends(authenticate)):
     prefs=request.app.state.vault.open(path.read_text(),'remote-network') if path.exists() else {'mode':'platform','stun_urls':[]}
     binding_scope(prefs,actor)
     return {'network':prefs,'portal_url':config.get('portal_url') if config else None,'configured':config is not None,'enabled':bool(direct and config.get('enabled')),'previously_enabled':bool(config and not direct and config.get('enabled')),
-            'transport_policy':'direct_only','direct_ready':bool(direct and request.app.state.settings.direct_enabled),'relay_allowed':False,
+            'transport_policy':'direct_only','direct_ready':bool(direct and request.app.state.settings.direct_enabled),'relay_allowed':relay_enabled(request.app.state,config),
             'migration_required':bool(config and not direct),'runtime':current if direct else {'state':'direct_not_ready'}}
 
 @router.post('/disable')
@@ -147,6 +156,7 @@ class NetworkInput(BaseModel):
     model_config=ConfigDict(extra='forbid')
     mode:str=Field(pattern='^(platform|custom)$')
     stun_urls:list[str]=Field(default_factory=list,max_length=2)
+    allow_encrypted_relay:bool|None=None
 
 @router.put('/stun')
 def configure_stun(body:NetworkInput,request:Request,actor=Depends(authenticate)):
@@ -157,7 +167,8 @@ def configure_stun(body:NetworkInput,request:Request,actor=Depends(authenticate)
     try:urls=validate_stun_urls(body.stun_urls)
     except ValueError:raise HTTPException(422,'只接受 STUN 地址，禁止 TURN') from None
     if body.mode=='custom' and not urls:raise HTTPException(422,'自定义模式需要至少一个 STUN 地址')
-    value={'mode':body.mode,'stun_urls':urls if body.mode=='custom' else [],'household_id':actor.household_id}
+    enabled=relay_enabled(app,read_config(app)) if body.allow_encrypted_relay is None else body.allow_encrypted_relay
+    value={'allow_encrypted_relay':enabled,'mode':body.mode,'stun_urls':urls if body.mode=='custom' else [],'household_id':actor.household_id}
     private_write(app.settings.state_dir/'remote-network.enc',app.vault.seal(value,'remote-network'))
     log_change(app,actor,'remote.network_updated')
     return {'saved':True,'requires_new_pairing':True}

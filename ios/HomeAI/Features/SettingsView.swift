@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage(ClientContextSampler.locationPreference) private var coarseLocationEnabled = true
     @State private var contextSampler = ClientContextSampler.shared
     @AppStorage("backgroundSyncEnabled") private var backgroundSyncEnabled = false
+    @AppStorage(ChatAutomaticSpeech.preferenceKey) private var automaticReading = true
     @State private var scanning = false
     @State private var pendingPairing: String?
     @State private var scannerError: String?
@@ -39,9 +40,15 @@ struct SettingsView: View {
                 if !state.backgroundSyncStatus.isEmpty { Text(state.backgroundSyncStatus).font(.caption) }
             }
             AppIconSettingsSection()
+            Section("聊天") {
+                Toggle("自动朗读回答", isOn: $automaticReading)
+                    .accessibilityIdentifier("automaticAnswerReading")
+                Text("在聊天页朗读新回复；支持流式的回答会按完整句开始朗读。录音、通话或离开聊天页时停止。").font(.caption).foregroundStyle(.secondary)
+            }
             Section("通知") {
                 NavigationLink("执行结果与提醒") { NotificationInboxView() }.disabled(!state.connected)
                 NotificationSettingsContent()
+                NavigationLink("语音与主动来电") { VoiceCallSettingsView() }.disabled(!state.connected)
             }
             Section("数据共享") {
                 NavigationLink("健康与位置的持续共享") { ContinuousSharingView() }.disabled(!state.connected)
@@ -55,6 +62,16 @@ struct SettingsView: View {
             }
             Section("成员") {
                 NavigationLink("成员请求与消息") { ClientActionInbox(notificationID: nil) }
+            }
+            Section("安卓执行设备") {
+                Button { state.androidPresentation.showFullScreen() } label: {
+                    HStack {
+                        Text("我的安卓设备")
+                        Spacer()
+                        Image(systemName: "arrow.up.left.and.arrow.down.right").foregroundStyle(.secondary)
+                    }
+                }.foregroundStyle(.primary).disabled(!state.connected)
+                    .accessibilityIdentifier("android.open.fullscreen")
             }
             Section("管理端登录") {
                 NavigationLink("管理端动态码") { AdminCodeView() }

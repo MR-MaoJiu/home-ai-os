@@ -5,13 +5,27 @@ import UIKit
 @MainActor @Observable
 final class AppState {
     let api: APIClient
+    let androidPresentation: AndroidPresentationCoordinator
     init(api: APIClient = AppServices.api) {
         self.api = api
+        androidPresentation = AndroidPresentationCoordinator(api: api)
+        androidPresentation.showChat = { IntentRouter.shared.destination = .ai }
         Task { [weak self] in
             await api.setAuthorizationFailureHandler { [weak self] namespace in
                 await self?.invalidateAuthorization(namespace: namespace)
             }
+            await api.setReachabilityHandler { [weak self] namespace, generation in
+                await self?.authenticatedConnectionResponded(namespace: namespace, generation: generation)
+            }
         }
+    }
+
+    func authenticatedConnectionResponded(namespace: String, generation: UUID) async {
+        guard connected, UIApplication.shared.applicationState == .active,
+              await api.cachedNamespace() == namespace, await api.connectionGeneration() == generation else { return }
+        authenticatedResponseRevision += 1
+        serverReachable = true
+        await confirmConnectionRecovered()
     }
 
     enum PairingFeedback: Equatable {
@@ -49,6 +63,7 @@ final class AppState {
     func pair(scannedText: String) async {
         guard pairingFeedback != .connecting else { return }
         guard !busy else { reportPairingFailure("另一个操作正在进行，请稍后重新扫码。"); return }
+        androidPresentation.identityChanged()
         busy = true; error = nil; pairingNotice = false; pairingFeedback = .connecting
         pairingRecoveryGeneration = nil
         let generationBeforePairing = await api.connectionGeneration()
@@ -56,7 +71,7 @@ final class AppState {
         backgroundRun?.1.cancel()
         defer {
             busy = false
-            if connected { startForegroundEvents() }
+            if connected { startForegroundEvents(); androidPresentation.foreground() }
         }
         var attemptedPairing = false
         do {
@@ -127,6 +142,7 @@ final class AppState {
     private var eventRun: Task<Void, Never>?
     private var eventRunID: UUID?
     private var eventConnectionRevision: UUID?
+    private var authenticatedResponseRevision = 0
     private var backgroundRun: (UUID, Task<Void, Never>)?
     var connected = false
     // 配对凭据与实际连通状态分开，避免离线时仍显示绿灯。
@@ -160,6 +176,7 @@ final class AppState {
         if let eventRun, !eventRun.isCancelled, eventConnectionRevision == connectionRevision { return }
         eventRun?.cancel()
         let identifier = UUID()
+        let connection = connectionRevision
         eventRunID = identifier; eventConnectionRevision = connectionRevision
         eventRun = Task { [weak self] in
             guard let self else { return }
@@ -170,18 +187,33 @@ final class AppState {
             }
             var retries = 0
             while !Task.isCancelled && self.connected && UIApplication.shared.applicationState == .active {
+                let namespace: String
+                do { namespace = try await self.api.syncNamespace() }
+                catch {
+                    guard !Task.isCancelled, self.connected, self.eventRunID == identifier,
+                          self.connectionRevision == connection else { return }
+                    self.taskEventStatus = "正在恢复家庭身份与任务状态"
+                    retries += 1
+                    do { try await Task.sleep(for: .seconds(min(30, 1 << min(retries, 5)))) }
+                    catch { return }
+                    continue
+                }
+                guard let scope = await self.eventRecoveryIdentity(runID: identifier, connection: connection) else { return }
                 do {
-                    let namespace = try await self.api.syncNamespace()
                     let subscription = try await self.api.taskEvents(expectedNamespace: namespace)
                     defer { Task { await self.api.closeTaskEvents(subscription.id) } }
+                    guard await self.eventRecoveryIdentity(runID: identifier, connection: connection) == scope else { return }
                     self.taskEventStatus = "正在连接任务状态…"
                     for try await event in subscription.events {
                         try Task.checkCancellation()
                         guard namespace == (try await self.api.syncNamespace()) else { return }
                         try Task.checkCancellation()
+                        guard await self.eventRecoveryIdentity(runID: identifier, connection: connection) == scope else { return }
+                        self.authenticatedResponseRevision += 1
                         self.serverReachable = true
                         await self.confirmConnectionRecovered()
                         if event.type == "task.snapshot" {
+                            self.androidPresentation.receiveTaskSnapshot(event.tasks, activeID: event.android_active_task_id)
                             guard namespace == (try await self.api.syncNamespace()), !Task.isCancelled else { return }
                             if self.taskStates != event.tasks || self.notificationRevision != event.notification_revision {
                                 self.taskStates = event.tasks
@@ -211,31 +243,45 @@ final class AppState {
                         }
                     }
                     guard !Task.isCancelled else { return }
-                    self.serverReachable = false
                 } catch is CancellationError { return }
                 catch {
                     if Task.isCancelled { return }
-                    self.serverReachable = false
-                    self.taskEventStatus = "连接中断，正在恢复任务状态"
-                    // 用正常签名请求确认授权；刷新失败不伪装在线。
-                    do {
-                        _ = try await self.api.request("GET", "/api/v1/me")
-                        try Task.checkCancellation()
-                        self.serverReachable = true
-                        await self.confirmConnectionRecovered()
-                    }
-                    catch let APIClient.APIError.http(code, _) where code == 401 {
-                        self.connected = false
-                        self.activity = []; self.approvals = []; self.taskStates = []
+                }
+                guard await self.eventRecoveryIdentity(runID: identifier, connection: connection) == scope else { return }
+                self.taskEventStatus = "连接中断，正在恢复任务状态"
+                // 状态订阅结束不代表业务通道离线；独立探测后再更新整体可达状态。
+                let recovery = ForegroundEventRecovery(identity: scope, responseRevision: self.authenticatedResponseRevision)
+                do {
+                    _ = try await self.api.request("GET", "/api/v1/me", expectedNamespace: scope.namespace)
+                    try Task.checkCancellation()
+                    guard await self.eventRecoveryIdentity(runID: identifier, connection: connection) == scope else { return }
+                    self.serverReachable = true
+                    await self.confirmConnectionRecovered()
+                } catch {
+                    let current = await self.eventRecoveryIdentity(runID: identifier, connection: connection)
+                    guard current == scope, !Task.isCancelled else { return }
+                    if case APIClient.APIError.http(401, _) = error {
+                        await self.invalidateAuthorization(namespace: scope.namespace)
                         self.taskEventStatus = "授权已失效，请重新配对"
                         return
-                    } catch { }
-                    retries += 1
+                    }
+                    if recovery.shouldMarkOffline(current: current, responseRevision: self.authenticatedResponseRevision, error: error) {
+                        self.serverReachable = false
+                    }
                 }
+                retries += 1
                 do { try await Task.sleep(for: .seconds(min(30, 1 << min(retries, 5)))) }
                 catch { return }
             }
         }
+    }
+
+    private func eventRecoveryIdentity(runID: UUID, connection: UUID) async -> ForegroundEventRecovery.Identity? {
+        let namespace = await api.pairedNamespace()
+        let generation = await api.connectionGeneration()
+        guard !Task.isCancelled, connected, UIApplication.shared.applicationState == .active,
+              eventRunID == runID, connectionRevision == connection, let namespace else { return nil }
+        return .init(runID: runID, connection: connection, generation: generation, namespace: namespace)
     }
 
     func configureBackgroundSync(enabled: Bool) {
@@ -245,6 +291,13 @@ final class AppState {
     }
 
     func resumeForeground() async {
+        guard pairingFeedback != .connecting else { return }
+        // 每次回前台先恢复实时状态；上一次数据同步尚未结束也不能挡住这一步。
+        await restore()
+        guard connected, UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else { return }
+        startForegroundEvents()
+        androidPresentation.foreground()
+        Task { _ = try? await api.request("GET", "/api/v1/me") }
         if let foregroundRun { await foregroundRun.value; return }
         let operation = Task { [weak self] in await self?.performForegroundRefresh() }
         let task = Task { _ = await operation.value }
@@ -270,6 +323,7 @@ final class AppState {
 
     func invalidateAuthorization(namespace: String) async {
         guard await api.pairedNamespace() == namespace else { return }
+        androidPresentation.identityChanged()
         records = []; automations = []; activity = []; approvals = []; taskStates = []
         dataFollowup?.cancel(); dataFollowup = nil
         automationFollowup?.cancel(); automationFollowup = nil
@@ -409,6 +463,23 @@ final class AppState {
     }
 }
 
+/// 恢复探测只影响发起时的订阅与身份；期间已有成功响应时，迟到失败不能把通道改成离线。
+struct ForegroundEventRecovery {
+    struct Identity: Equatable {
+        let runID: UUID
+        let connection: UUID
+        let generation: UUID
+        let namespace: String
+    }
+    let identity: Identity
+    let responseRevision: Int
+
+    func shouldMarkOffline(current: Identity?, responseRevision: Int, error: Error) -> Bool {
+        guard current == identity, responseRevision == self.responseRevision else { return false }
+        return !(error is CancellationError) && (error as? URLError)?.code != .cancelled
+    }
+}
+
 struct DataEntry: Codable, Identifiable, Sendable {
     let id: String
     let kind: String
@@ -421,6 +492,8 @@ struct DataEntry: Codable, Identifiable, Sendable {
     let visibility: String?
     let payload_deferred: Bool?
     var isFamily: Bool { visibility == "family" }
+    var isMemory: Bool { kind.hasPrefix("memory.") }
+    var isBusinessData: Bool { !isMemory && !kind.hasPrefix("client_input.") }
     let payload: [String: JSONValue]
     var title: String { payload["title"]?.description ?? payload["name"]?.description ?? kind }
 }
@@ -446,7 +519,7 @@ struct AutomationEntry: Codable, Identifiable, Sendable {
 }
 struct ApprovalEntry: Codable, Identifiable, Sendable { let id: String; let task_id: String?; let capability: String; let arguments: [String: JSONValue] }
 
-indirect enum JSONValue: Codable, Sendable, CustomStringConvertible {
+indirect enum JSONValue: Codable, Sendable, Equatable, CustomStringConvertible {
     case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()

@@ -17,7 +17,16 @@ from .security import Actor
 log = logging.getLogger("homeai.worker")
 
 
-async def cycle(app, js=None):
+async def cycle(app, js=None, *, concurrent=False):
+    # 主循环持续接收新消息；每个任务仍使用 run_task 的数据库派发锁。
+    running=getattr(app,'running_tasks',{})
+    app.running_tasks=running
+    for identifier,work in list(running.items()):
+        if work.done():
+            running.pop(identifier)
+            try:work.result()
+            except asyncio.CancelledError:pass
+            except Exception as error:log.error('独立任务执行失败：%s',type(error).__name__)
     from .client_actions import expire_requests
     expire_requests(app)
     cleanup_context = now()-getattr(app,'context_cleanup_at',0)>300
@@ -25,9 +34,13 @@ async def cycle(app, js=None):
     with app.db() as db:
         users = [(u.id, u.household_id, u.role) for u in db.scalars(select(Principal))]
     for user_id, household, role in users:
+        from .auto_review import process_pending
+        await process_pending(app, user_id, household, role)
         with app.db() as db:
             scope(db, user_id, household)
             actor = Actor(user_id, household, 'scheduler', role)
+            from .encrypted_relay import RelayReceipt
+            db.execute(delete(RelayReceipt).where(RelayReceipt.owner_id == user_id, RelayReceipt.expires < now()))
             from .model_routing import RedactionArtifact
             db.execute(delete(RedactionArtifact).where(RedactionArtifact.owner_id == user_id, RedactionArtifact.expires_at <= now()))
             for paused in db.scalars(select(Task).where(Task.owner_id==user_id,Task.status=='WAITING_MEDIA').with_for_update(skip_locked=True)):
@@ -52,8 +65,12 @@ async def cycle(app, js=None):
             old_tasks = db.scalars(select(Task).where(Task.owner_id==user_id,Task.created_at<now()-86400).execution_options(yield_per=100)) if cleanup_context else []
             for old_task in old_tasks:
                 payload=app.vault.open(old_task.request,user_id+':task:'+old_task.id)
+                from .privacy_review import purge_expired_review
+                changed = purge_expired_review(payload)
                 if payload.get('_client_context_expires_at',float('inf'))<=now() and '_client_context' in payload:
                     payload.pop('_client_context',None)
+                    changed = True
+                if changed:
                     old_task.request=app.vault.seal(payload,user_id+':task:'+old_task.id)
             expired_approvals = select(Invocation.task_id).join(Approval, Approval.invocation_id == Invocation.id).where(Approval.expires_at <= now())
             for task in db.scalars(select(Task).where(Task.owner_id == user_id, Task.status == "AWAITING_APPROVAL", or_(Task.deadline <= now(), Task.id.in_(expired_approvals))).with_for_update(skip_locked=True)):
@@ -61,10 +78,16 @@ async def cycle(app, js=None):
                 actor = Actor(user_id, household, "scheduler", role)
                 emit(db, actor, "task.updated", task.id)
                 audit(db, actor, "task.expired", task.id)
+            from .task_control import release_unnecessary_approvals
+            release_unnecessary_approvals(app, db, actor)
             db.commit()
             pending = list(db.scalars(select(Task.id).where(Task.owner_id == user_id, Task.status.in_(["RECEIVED", "APPROVED", "EXECUTING"])).limit(20)))
         for task_id in pending:
-            await run_task(app, task_id, user_id)
+            if concurrent:
+                if task_id not in running and len(running)<4:
+                    running[task_id]=asyncio.create_task(run_task(app,task_id,user_id))
+            else:
+                await run_task(app, task_id, user_id)
         with app.db() as db:
             scope(db, user_id, household)
             # 自动化逐步骤按固定幂等键提交；每步经过同一审批与策略路径。
@@ -111,7 +134,7 @@ async def main():
         async with Heartbeat(app, "core-worker") as heartbeat:
             while True:
                 try:
-                    await cycle(app, js)
+                    await cycle(app, js, concurrent=True)
                     await drain(app, sub)
                     with app.db() as db:
                         db.execute(delete(Nonce).where(Nonce.expires_at < now()))
@@ -122,6 +145,9 @@ async def main():
                     log.error("工作循环失败：%s", type(exc).__name__)
                 await asyncio.sleep(1)
     finally:
+        work=list(getattr(app,'running_tasks',{}).values())
+        for item in work:item.cancel()
+        if work:await asyncio.gather(*work,return_exceptions=True)
         await nc.drain()
 
 

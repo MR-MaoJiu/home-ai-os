@@ -34,17 +34,19 @@ class Registry:
                         from .model_routing import shared_key
                         from .security import Actor
                         actor = Actor(db.info.get('user_id',''),db.info.get('household_id',''),'model-resolution','service')
-                        if capability != 'model.generate@v1' or not shared_key(self.vault,db,actor,manifest):
+                        if capability not in {'model.generate@v1', 'image.generate@v1', 'image.edit@v1'} or not shared_key(self.vault,db,actor,manifest):
                             continue
                 matches.append(manifest)
         if not matches:
+            if capability in {'home.states@v1', 'home.execute@v1'}:
+                raise HTTPException(503, '未接入可供当前成员使用的智能家居服务（Home Assistant），需要配置服务地址、凭据和设备授权。这不影响聊天、日程与资料检索。')
             raise HTTPException(503, f"能力尚未配置可用 Provider：{capability}")
         return matches[0]
 
-    async def invoke(self, db, actor, manifest, capability, arguments, invocation_id, *, cloud_permit=None):
+    async def invoke(self, db, actor, manifest, capability, arguments, invocation_id, *, cloud_permit=None, on_text=None):
         if capability not in manifest.capabilities:
             raise HTTPException(403, "能力未映射")
-        if not manifest.cloud and capability.startswith(('model.','photo.analyze')) and self.transport is None:
+        if not manifest.cloud and capability.startswith(('model.','photo.analyze','image.')) and self.transport is None:
             # 注入的传输用于离线契约测试；实际网络出口必须使用明确的本地地址。
             ensure_local_model_endpoint(manifest)
         host = urlparse(manifest.endpoint).hostname
@@ -54,7 +56,7 @@ class Registry:
             raise HTTPException(403, "云端必须使用 HTTPS")
         if manifest.cloud:
             from .cloud_gateway import check_permit
-            check_permit(cloud_permit, actor, manifest, arguments)
+            check_permit(cloud_permit, actor, manifest, arguments, capability)
         headers = {"Idempotency-Key": invocation_id}
         if manifest.secret_id:
             secret = db.get(Secret, manifest.secret_id)
@@ -62,14 +64,17 @@ class Registry:
                 key = self.vault.open(secret.value, actor.user_id + ":secret:" + secret.id)
             else:
                 from .model_routing import shared_key
-                key = shared_key(self.vault, db, actor, manifest) if capability == 'model.generate@v1' else None
+                key = shared_key(self.vault, db, actor, manifest) if capability in {'model.generate@v1', 'image.generate@v1', 'image.edit@v1'} else None
                 if not key:
                     raise HTTPException(403, "Provider 无权使用此凭据")
             headers["Authorization"] = "Bearer " + key
         async with httpx.AsyncClient(timeout=manifest.timeout_seconds, transport=self.transport, follow_redirects=False, trust_env=False, headers=headers) as client:
             mapped = manifest.capabilities[capability]
             if manifest.adapter == "openai":
-                if capability in {"model.generate@v1", "photo.analyze@v1"}:
+                if capability in {'image.generate@v1', 'image.edit@v1'}:
+                    from .image_generation import invoke_adapter
+                    return await invoke_adapter(client, manifest, capability, arguments)
+                elif capability in {"model.generate@v1", "photo.analyze@v1"}:
                     path = "/chat/completions"
                     payload = {"model": manifest.model, "messages": arguments["messages"], "max_tokens": min(arguments.get("max_tokens", 1024), 4096)}
                     if "temperature" in arguments:
@@ -79,6 +84,11 @@ class Registry:
                         payload["temperature"] = temperature
                     if 'response_format' in arguments:
                         payload['response_format'] = arguments['response_format']
+                    if 'thinking' in arguments:
+                        if arguments['thinking'] != {'type':'disabled'}:
+                            raise HTTPException(422, '不支持的思考模式参数')
+                        payload['thinking']={'type':'disabled'}
+                        if not manifest.cloud:payload['chat_template_kwargs']={'enable_thinking':False}
                     if arguments.get("tools"):
                         payload["tools"] = arguments["tools"]
                         payload["tool_choice"] = "auto"
@@ -86,6 +96,9 @@ class Registry:
                     path, payload = "/embeddings", {"model": manifest.model, "input": arguments["input"]}
                 else:
                     path, payload = "/rerank", {"model": manifest.model, "query": arguments["query"], "documents": arguments["documents"]}
+                if on_text is not None and capability == 'model.generate@v1' and not arguments.get('tools'):
+                    from .model_stream import generate
+                    return await generate(client,manifest.endpoint+path,payload,headers,on_text)
                 r = await client.post(manifest.endpoint + path, json=payload, headers=headers)
             elif manifest.adapter == "homeassistant":
                 from .home_control import validate, project_state
@@ -113,14 +126,20 @@ class Registry:
                 query = validate_search(arguments)['query']
                 # 查询使用请求体，避免进入本机 URL 访问日志；上游仍会收到查询词。
                 from .search_results import unavailable,normalize
+                def outcome(value):
+                    # 进程在线不代表上游搜索可用；健康状态采用实际查询回执。
+                    provider = db.get(Provider, manifest.id)
+                    if provider and provider.enabled and ProviderManifest.model_validate_json(provider.manifest) == manifest:
+                        provider.health = 'unavailable' if value['status'] == 'unavailable' else 'degraded' if value['status'] == 'partial' else 'online'
+                    return value
                 try:
                     r = await client.post(manifest.endpoint.rstrip('/') + "/search", data={"q": query, "format": "json", "safesearch": "2"}, headers=headers)
                 except httpx.TransportError as exc:
-                    return unavailable('timeout' if isinstance(exc,httpx.TimeoutException) else 'network_error')
-                if not r.is_success:return unavailable('http_'+str(r.status_code))
-                if len(r.content)>4*1024*1024:return unavailable('response_too_large')
-                try:return normalize(r.json())
-                except ValueError:return unavailable('invalid_json')
+                    return outcome(unavailable('timeout' if isinstance(exc,httpx.TimeoutException) else 'network_error'))
+                if not r.is_success:return outcome(unavailable('http_'+str(r.status_code)))
+                if len(r.content)>4*1024*1024:return outcome(unavailable('response_too_large'))
+                try:return outcome(normalize(r.json()))
+                except ValueError:return outcome(unavailable('invalid_json'))
             elif manifest.adapter == "mcp":
                 # 官方 SDK 处理初始化、会话和流式 HTTP；工具名必须来自显式映射。
                 from mcp import ClientSession

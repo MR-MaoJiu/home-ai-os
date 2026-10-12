@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select,delete,func
 from conftest import SignedClient
-from homeai.db import Conversation,ConversationTurn,MemoryCandidate,Record,scope
+from homeai.db import Conversation,ConversationTurn,MemoryCandidate,Record,Task,scope,now
 from homeai.security import Actor
 from homeai.auto_memory import (MemoryLearning,MemoryForgetTombstone,observe_turn,parse_statement,
     candidate_sensitivity,before_confirm,remember_forget,replay_forget_journal)
@@ -18,8 +18,10 @@ def turn(system,user,content):
     with system[2]() as db:
         scope(db,user.user_id,'h1')
         db.add(Conversation(id=cid,owner_id=user.user_id,household_id='h1',title=app.vault.seal('临时测试',user.user_id+':conversation:'+cid),next_sequence=1))
+        task_id=str(uuid.uuid4())
+        db.add(Task(id=task_id,owner_id=user.user_id,household_id='h1',idempotency_key=task_id,request_hash='test-only',request=app.vault.seal({'record_ids':[],'message':content,'device_id':user.device_id},user.user_id+':task:'+task_id),deadline=now()+600))
         db.add(ConversationTurn(id=tid,owner_id=user.user_id,household_id='h1',conversation_id=cid,sequence=1,client_key=str(uuid.uuid4()),
-            request_hash='test-only',user_message=app.vault.seal(content,user.user_id+':chat-turn:'+tid),task_id=str(uuid.uuid4())))
+            request_hash='test-only',user_message=app.vault.seal(content,user.user_id+':chat-turn:'+tid),task_id=task_id))
         db.commit()
     return tid
 
@@ -39,12 +41,12 @@ def test_literal_own_preference_is_saved_with_exact_provenance_and_deduplicated(
     again=learn(system,alice,text,turn_id=tid)
     assert again['record_id']==result['record_id']
     assert learn(system,alice,'我喜欢喝茶')['status']=='DUPLICATE'
-    record=alice.request('GET','/api/v1/data/'+result['record_id']).json()
+    record=alice.request('GET','/api/v1/memory/entries/'+result['record_id']).json()
     assert record['source']=='conversation_memory' and record['visibility']=='personal'
     assert record['payload']['source_quote']==text and record['payload']['turn_id']==tid
     assert record['payload']['extraction_method']=='literal_preference_v1'
     bob=SignedClient(system[1],system[2])
-    assert bob.request('GET','/api/v1/data/'+result['record_id']).status_code==404
+    assert bob.request('GET','/api/v1/memory/entries/'+result['record_id']).status_code==404
     with system[2]() as db:
         scope(db,alice.user_id,'h1')
         assert db.scalar(select(func.count()).select_from(Record).where(Record.owner_id==alice.user_id,Record.kind=='memory.fact'))==1
@@ -77,7 +79,7 @@ def test_conflict_waits_for_user_without_overwriting_old_memory(system,alice):
     old=learn(system,alice,'我喜欢喝茶')
     conflict=learn(system,alice,'我不喜欢喝茶')
     assert conflict['status']=='CANDIDATE' and conflict['reason']=='conflict'
-    assert alice.request('GET','/api/v1/data/'+old['record_id']).json()['payload']['content']=='我喜欢喝茶'
+    assert alice.request('GET','/api/v1/memory/entries/'+old['record_id']).json()['payload']['content']=='我喜欢喝茶'
     with system[2]() as db:
         scope(db,alice.user_id,'h1');candidate=db.get(MemoryCandidate,conflict['candidate_id'])
         with pytest.raises(HTTPException) as error:before_confirm(system[0].state,db,actor(alice),candidate)
@@ -122,3 +124,21 @@ def test_forget_source_turns_survive_independent_journal_replay(system,alice):
         db.execute(delete(MemoryForgetSource));db.execute(delete(MemoryForgetTombstone));db.commit()
         replay_forget_journal(db,system[0].state.vault,system[0].state.settings.state_dir/'memory-forget.jsonl')
         db.commit();assert tid in forget_source_turns(db,actor(alice))
+
+
+def test_explicit_sensitive_memory_saved_locally_and_repeated_statement_deduplicated(system,alice):
+    first=learn(system,alice,'请记住我有花生过敏。')
+    assert first['status']=='SAVED'
+    entry=alice.request('GET','/api/v1/memory/entries/'+first['record_id']).json()
+    assert entry['sensitivity']=='SENSITIVE' and entry['cloud_policy']=='LOCAL_ONLY'
+    assert learn(system,alice,'请记住我的工作是设计师')['status']=='SAVED'
+    assert learn(system,alice,'请记住我的工作是设计师')['status']=='DUPLICATE'
+    assert alice.request('GET','/api/v1/memory/candidates').json()==[]
+
+
+def test_explicit_preference_update_preserves_record_and_increments_version(system,alice):
+    original=learn(system,alice,'我喜欢喝茶')
+    updated=learn(system,alice,'请记住我不喜欢喝茶')
+    assert updated['status']=='SAVED' and updated['record_id']==original['record_id']
+    entry=alice.request('GET','/api/v1/memory/entries/'+updated['record_id']).json()
+    assert entry['version']==2 and '不喜欢' in entry['payload']['content']

@@ -6,6 +6,16 @@ from .contracts import Contract
 Identifier = Annotated[str, Field(min_length=1, max_length=100)]
 
 
+class ResourceProvenance(Contract):
+    origin: Literal['generated', 'edited', 'retrieved', 'script_retrieved', 'shell_created', 'server_capture']
+    source_url: str | None = Field(default=None, max_length=8192)
+    provider: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=500)
+    created_at: float | None = None
+    retrieved_at: float | None = None
+    source_versions: dict[str, StrictInt] = Field(default_factory=dict)
+
+
 class ChatOutputPart(Contract):
     """客户端输入仍使用 MessagePart；此模型只供服务端注册的输出构造器使用。"""
     model_config = ConfigDict(extra='forbid', json_schema_extra={'allOf': [
@@ -35,6 +45,7 @@ class ChatOutputPart(Contract):
     summary: str | None = Field(default=None, max_length=20000)
     html: str | None = Field(default=None, max_length=65536, description='仅服务端注册模板生成；UTF-8 编码最多 65536 字节', json_schema_extra={'x-max-utf8-bytes':65536})
     template: Literal['table.v1'] | None = None
+    provenance: ResourceProvenance | None = None
 
     @model_validator(mode='after')
     def matching_content(self):
@@ -48,6 +59,8 @@ class ChatOutputPart(Contract):
             if not self.record_id or self.version is None:raise ValueError('附件输出必须引用规范资源和版本')
         elif self.record_id is not None or self.version is not None:
             raise ValueError('只有附件输出使用 record_id 与 version')
+        if not media and self.provenance is not None:
+            raise ValueError('只有附件输出可以标注资源来源')
         if interactive:
             if not self.action_id:raise ValueError('交互输出必须引用服务端请求')
         elif self.action_id is not None:
@@ -76,7 +89,9 @@ class CloudCapabilitiesReport(Contract):
     tools: StrictBool
     vision: StrictBool
     privacy: StrictBool
+    image_generation: StrictBool = False
+    image_editing: StrictBool = False
     status: Literal['configured', 'verified', 'unavailable']
     verified_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     resolved_model: str | None = Field(default=None, max_length=500)
-    errors: dict[Literal['text', 'tools', 'vision', 'privacy'], Annotated[str, Field(max_length=300)]] = Field(default_factory=dict)
+    errors: dict[Literal['text', 'tools', 'vision', 'privacy', 'image_generation', 'image_editing'], Annotated[str, Field(max_length=300)]] = Field(default_factory=dict)

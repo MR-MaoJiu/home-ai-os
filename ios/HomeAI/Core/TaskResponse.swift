@@ -1,7 +1,7 @@
 import Foundation
 
 struct TaskCreated: Decodable { let id: String }
-struct TaskResult: Decodable { let status: String; let error: String?; let result: JSONValue? }
+struct TaskResult: Decodable { let status: String; let error: String?; let result: JSONValue?; var budget_recoverable: Bool? = nil }
 
 struct RecordReference: Identifiable {
     let id: String

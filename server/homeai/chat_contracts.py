@@ -56,6 +56,11 @@ class Mention(Contract):
     member_id: str = Field(min_length=1, max_length=100)
 
 
+class DataReference(Contract):
+    record_id: str = Field(min_length=1, max_length=100)
+    version: int = Field(ge=1, strict=True)
+
+
 class MessagePart(Contract):
     type: Literal['text', 'image', 'video', 'file']
     text: str | None = Field(default=None, max_length=10000)

@@ -226,7 +226,7 @@ async def test_restart_with_persisted_unavailable_withdraws_pending_approval_wit
     from homeai.search_results import unavailable
     first=batch(('search_web',{'query':'Python unavailable'}),('create_reminder',{'title':'不得提前创建'}))
     captured=install_transport(system,[first,answer('搜索不可用，后续提醒未执行。')],{})
-    tid=submit(alice)
+    tid=submit(alice,message='搜索Python公开资料后创建提醒')
     await step(system,alice,tid)
     app=system[0].state
     with system[2]() as db:
@@ -335,3 +335,21 @@ async def test_search_unavailable_preserves_device_cancellation_or_expired_deadl
             assert task.status=='FAILED' and task.deadline<=now()
             assert rows[1].status=='UNAVAILABLE' and task.result is not None
     assert reminder_count(system,alice)==1
+
+
+@pytest.mark.parametrize('response,expected',[
+    ({'results':[],'unresponsive_engines':failures()},'unavailable'),
+    ({'results':[entry()],'unresponsive_engines':failures()},'degraded'),
+    ({'results':[entry()],'unresponsive_engines':[]},'online'),
+    ({'results':[],'unresponsive_engines':[]},'online'),
+])
+async def test_registered_search_health_follows_real_query_outcome(system,alice,response,expected):
+    manifest=ProviderManifest(id='test.query-health',version='1',adapter='searxng',endpoint='http://search.fixture.invalid',
+        allowed_hosts=['search.fixture.invalid'],capabilities={'web.search@v1':'search'})
+    registry=Registry(system[0].state.vault,httpx.MockTransport(lambda _:httpx.Response(200,json=response)))
+    with system[2]() as db:
+        db.add(Provider(id=manifest.id,manifest=manifest.model_dump_json(),enabled=True,health='ready'));db.commit()
+        result=await registry.invoke(db,Actor(alice.user_id,'h1',alice.device_id,'adult'),manifest,'web.search@v1',{'query':'Python documentation'},'health-test')
+        db.commit()
+        assert db.get(Provider,manifest.id).health==expected
+        assert bool(result['results'])==bool(response['results'])

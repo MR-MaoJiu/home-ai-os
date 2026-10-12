@@ -32,10 +32,12 @@ async def test_agent_token_budget_stops_before_model_request(system, alice):
     # 此环境没有模型 Provider；若错误地尝试调用模型会报配置缺失而非预算不足。
     await run_task(system[0].state, tid)
     result = alice.request('GET', '/api/v1/tasks/' + tid).json()
-    assert result['status'] == 'FAILED'
+    assert result['status'] == 'WAITING_BUDGET'
+    assert result['budget_recoverable'] is False
     assert 'Token 预算不足' in result['error']
     assert result['execution']['model_rounds'] == 0
     assert alice.request('GET', '/api/v1/tasks/' + tid + '/steps').json() == []
+    assert alice.request('POST', '/api/v1/tasks/' + tid + '/resume').status_code == 409
 
 
 def test_web_search_is_mapped_without_allowing_extra_authority():

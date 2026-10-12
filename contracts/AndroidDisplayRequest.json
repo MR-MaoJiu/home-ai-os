@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "screen_off": {
+      "title": "Screen Off",
+      "type": "boolean"
+    },
+    "expected_epoch": {
+      "minimum": 1,
+      "title": "Expected Epoch",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "screen_off",
+    "expected_epoch"
+  ],
+  "title": "DisplayRequest",
+  "type": "object"
+}

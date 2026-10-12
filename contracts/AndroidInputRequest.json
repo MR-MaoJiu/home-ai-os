@@ -1,0 +1,138 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "epoch": {
+      "minimum": 1,
+      "title": "Epoch",
+      "type": "integer"
+    },
+    "sequence": {
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "frame_id": {
+      "maxLength": 128,
+      "minLength": 16,
+      "title": "Frame Id",
+      "type": "string"
+    },
+    "focus_token": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 16,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Focus Token"
+    },
+    "action": {
+      "enum": [
+        "tap",
+        "swipe",
+        "back",
+        "home",
+        "text",
+        "launch"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "x": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "X"
+    },
+    "y": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Y"
+    },
+    "x2": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "X2"
+    },
+    "y2": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Y2"
+    },
+    "text": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Text"
+    },
+    "package": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Package"
+    }
+  },
+  "required": [
+    "epoch",
+    "sequence",
+    "frame_id",
+    "action"
+  ],
+  "title": "InputRequest",
+  "type": "object"
+}

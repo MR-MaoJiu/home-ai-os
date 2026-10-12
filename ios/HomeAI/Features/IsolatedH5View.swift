@@ -16,7 +16,7 @@ struct IsolatedH5View: View {
             if taskID != nil && !allowed {
                 if let error { ContentUnavailableView("需要确认内容授权", systemImage: "lock", description: Text(error)) }
                 else { ProgressView("正在确认本次任务授权…") }
-            } else if html.utf8.count <= 64 * 1024 { IsolatedHTML(html: html) }
+            } else if html.utf8.count <= 64 * 1024 { HTMLFileContent(text: html, initialMode: .webpage, allowsScripts: true) }
             else { ContentUnavailableView("页面超过显示限制", systemImage: "doc.badge.ellipsis") }
         }.navigationTitle(taskID != nil && !allowed ? "交互内容" : title).navigationBarTitleDisplayMode(.inline)
             .task(id: state.connectionRevision) {
@@ -52,10 +52,13 @@ struct IsolatedH5View: View {
 struct IsolatedHTML: UIViewRepresentable {
     static let policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; frame-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'"
     let html: String
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    var allowsScripts = true
+    static let staticFilePolicy = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; frame-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'"
+    func makeCoordinator() -> Coordinator { Coordinator(allowsScripts: allowsScripts) }
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = allowsScripts
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.allowsAirPlayForMediaPlayback = false
         // 不安装任何脚本消息处理器，页面没有原生权限或凭据桥。
@@ -92,6 +95,8 @@ struct IsolatedHTML: UIViewRepresentable {
         uiView.stopLoading(); uiView.navigationDelegate = nil; uiView.uiDelegate = nil; uiView.loadHTMLString("", baseURL: nil)
     }
     @MainActor final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let allowsScripts: Bool
+        init(allowsScripts: Bool = true) { self.allowsScripts = allowsScripts }
         var loaded: String?
         var pending: String?
         var ready = false
@@ -99,7 +104,8 @@ struct IsolatedHTML: UIViewRepresentable {
         func render() {
             guard ready, let pending, loaded != pending, let webView else { return }
             loaded = pending
-            let content = "<!doctype html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><meta http-equiv=\"Content-Security-Policy\" content=\"" + IsolatedHTML.policy + "\"></head><body>" + pending + "</body></html>"
+            let policy = allowsScripts ? IsolatedHTML.policy : IsolatedHTML.staticFilePolicy
+            let content = "<!doctype html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><meta http-equiv=\"Content-Security-Policy\" content=\"" + policy + "\"></head><body>" + pending + "</body></html>"
             webView.loadHTMLString(content, baseURL: nil)
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {

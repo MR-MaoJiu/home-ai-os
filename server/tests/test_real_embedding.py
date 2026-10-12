@@ -74,7 +74,7 @@ async def test_embedding_rebuild_update_isolation_delete():
         assert alice.request('GET', '/api/v1/memory/index').json()['pending'] == 1
         await reconcile(app.state, alice.user_id, household)
         assert alice.request('GET', '/api/v1/memory/index').json()['ready'] == 1
-        assert alice.request('DELETE', '/api/v1/data/' + rid).status_code == 200
+        assert alice.request('DELETE', '/api/v1/memory/entries/' + rid).status_code == 200
         await reconcile(app.state, alice.user_id, household)
         assert alice.request('GET', '/api/v1/memory/search?q=电影').json()['records'] == []
         with app.state.db() as db:

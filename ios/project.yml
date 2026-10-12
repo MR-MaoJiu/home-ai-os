@@ -24,7 +24,7 @@ targets:
       path: HomeAI/Info.plist
       properties:
         BGTaskSchedulerPermittedIdentifiers: [dev.homeai.sync.refresh]
-        UIBackgroundModes: [fetch]
+        UIBackgroundModes: [fetch, audio, voip]
         CFBundleURLTypes:
           - CFBundleURLName: dev.homeai.reminder-source
             CFBundleURLSchemes: [homeai-reminder]

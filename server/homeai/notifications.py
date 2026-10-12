@@ -174,6 +174,12 @@ def create_notification(db, household, recipient, event_key, kind, visibility, s
                                notification_id=row.id, device_id=device.id))
 
 
+def interactive_speech(body):
+    """播放界面的语音辅助任务原地反馈；业务任务和自动化仍按原规则通知。"""
+    return (body.get('capability') in {'speech.voices@v1', 'speech.synthesize@v1', 'speech.transcribe@v1'}
+        and not body.get('_agent') and not body.get('steps') and not body.get('_automation_id'))
+
+
 def collect_task_events(app, user_id, household):
     """独立消费 Outbox，不依赖 NATS 是否已发布；收件箱和消费标识原子提交。"""
     with app.db() as db:
@@ -191,6 +197,9 @@ def collect_task_events(app, user_id, household):
             current_event = event.id == latest_event_id and now() - 86400 <= event.created_at <= now() + 60
             if current_event and task and task.owner_id == user_id and task.status in NOTIFY_STATUSES:
                 body = app.vault.open(task.request, user_id + ':task:' + task.id)
+                if interactive_speech(body) or (body.get('_conversation_id') and body.get('_chat_kind')=='chat' and task.status=='SUCCEEDED'):
+                    db.add(Consumption(id='notification:' + event.event_id))
+                    continue
                 automation = db.get(Automation, body.get('_automation_id')) if body.get('_automation_id') else None
                 family = bool(automation and automation.owner_id == user_id and automation.household_id == household
                               and getattr(automation, 'visibility', 'personal') == 'family'
@@ -294,6 +303,14 @@ class APNs:
         self.jwt_at = issued
         return self.jwt
 
+    async def send_voip(self, token, environment, call_id):
+        if await self.refresh() != 'ready':
+            raise APNsConfigurationUnavailable()
+        endpoint = 'https://api.sandbox.push.apple.com' if environment == 'sandbox' else 'https://api.push.apple.com'
+        headers = {'authorization': 'bearer ' + self.authorization(), 'apns-topic': self.configuration.topic + '.voip',
+            'apns-push-type': 'voip', 'apns-priority': '10', 'apns-id': call_id, 'apns-expiration': '0'}
+        return await self.client.post(endpoint + '/3/device/' + token, json={'aps': {}, 'call_id': call_id}, headers=headers)
+
     async def send(self, token, environment, delivery_id, notification_id):
         if await self.refresh() != 'ready':
             raise APNsConfigurationUnavailable()
@@ -315,6 +332,12 @@ async def deliver(app, apns, user_id, household):
             PushDelivery.status.in_(['pending', 'retry']), PushDelivery.retry_at <= now()).order_by(PushDelivery.retry_at).limit(30)))
         for row in rows:
             notification = db.get(Notification, row.notification_id)
+            if notification and notification.task_id:
+                source = db.get(Task, notification.task_id)
+                if source and source.owner_id == user_id and interactive_speech(app.vault.open(source.request, user_id + ':task:' + source.id)):
+                    row.status = 'canceled'
+                    db.commit()
+                    continue
             device = db.get(Device, row.device_id)
             registration = db.scalar(select(PushRegistration).where(PushRegistration.device_id == row.device_id))
             if not notification or notification.read_at or not visible(db, notification) or not device or device.revoked or device.user_id != user_id or not registration or not registration.enabled:

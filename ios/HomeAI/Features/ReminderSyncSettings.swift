@@ -17,6 +17,12 @@ struct ReminderSyncSettings: View {
     @State private var result = ""
 
     private var target: EKCalendar? { calendars.first { $0.calendarIdentifier == selected } }
+    private var confirmationMessage: String {
+        guard let plan = pending else { return "请先预览本次同步。" }
+        var message = "目标：" + plan.calendarName + "。同步本次预览的提醒，并核对该列表中已由 Home AI 创建的条目。"
+        if plan.sourceType != EKSourceType.local.rawValue { message += "内容会按所选账号的同步设置发送到该账号服务。" }
+        return message
+    }
     var body: some View {
         Form {
             Section("写入系统提醒事项") {
@@ -87,7 +93,7 @@ struct ReminderSyncSettings: View {
             Button("确认本次同步") { Task { await sync() } }
             Button("取消", role: .cancel) { pending = nil }
         } message: {
-            Text("目标：\(pending?.calendarName ?? "未选择")。本次会同步预览中的提醒，并核对以前由 Home AI 创建的条目。所选账号可能将内容上传至云端；不会覆盖已发现的双向冲突。")
+            Text(confirmationMessage)
         }
     }
 

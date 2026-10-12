@@ -24,11 +24,18 @@ def validate_search(arguments):
     if set(arguments) != {'query'} or not isinstance(arguments.get('query'), str):
         raise HTTPException(422, '联网搜索只接受 query 文本')
     query = arguments['query'].strip()
-    if not 1 <= len(query) <= 500 or any(ord(char) < 32 for char in query) or '!' in query:
-        raise HTTPException(422, '查询为空、过长或含不允许的控制语法')
+    if not query:
+        raise HTTPException(422, '搜索词不能为空')
+    if len(query) > 500:
+        raise HTTPException(422, '搜索词超过 500 个字符，请缩短后重试')
+    if any(ord(char) < 32 for char in query):
+        raise HTTPException(422, '搜索词包含控制字符，请移除后重试')
+    if '!' in query:
+        raise HTTPException(422, '搜索词包含不允许的 ! 控制语法，请移除后重试')
     ensure_model_safe(query)
-    if PII.search(query):
-        raise HTTPException(403, '查询包含已识别的个人信息，禁止发送到搜索引擎')
+    if match := PII.search(query):
+        kind = {'email': '邮箱地址', 'phone': '手机号码', 'id': '身份证号码', 'card': '银行卡号码'}[match.lastgroup]
+        raise HTTPException(403, '搜索词包含已识别的' + kind + '，不能发送到搜索引擎')
     return {'query': query}
 
 

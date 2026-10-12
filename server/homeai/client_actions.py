@@ -21,8 +21,58 @@ router = APIRouter(prefix='/api/v1', tags=['客户端请求与成员授权'])
 WAITING_STATUS = 'WAITING_CLIENT'
 ACTION_SECONDS = 24 * 60 * 60
 DATA_KINDS = {'choose_files', 'choose_photos', 'capture_location', 'read_health', 'provide_text', 'choose_option', 'authorize_records', 'data.share'}
-ACTION_KINDS = DATA_KINDS | {'cloud.disclose', 'member.notify'}
+ACTION_KINDS = DATA_KINDS | {'cloud.disclose', 'member.notify', 'android.assist'}
 TERMINAL_TASKS = {'SUCCEEDED', 'FAILED', 'CANCELED', 'NEEDS_RECONCILIATION'}
+
+
+def display_purpose(kind, purpose):
+    """兼容历史卡片，仅替换确知为系统生成的通用模板。"""
+    if kind == 'cloud.disclose' and purpose in {
+        '当前任务需要披露敏感或仅本地资料，请单独确认',
+        '允许本次任务向指定云模型披露所选资料的脱敏内容',
+    }:
+        return '请确认本次所选资料的云端披露。'
+    if purpose == '成员请求你为本次任务提供资料。仅你主动选择的内容会用于这次任务，不会改成家庭共享。':
+        return member_request_purpose(kind)
+    return purpose
+
+
+def member_request_purpose(kind):
+    subject = {'choose_files': '选择文件', 'choose_photos': '选择照片', 'capture_location': '提供位置',
+               'read_health': '提供健康数据', 'provide_text': '补充信息', 'choose_option': '选择一个选项',
+               'authorize_records': '授权所选资料', 'data.share': '选择共享资料'}.get(kind, '提供资料')
+    return '成员请求你为本次任务' + subject + '。'
+
+
+def _legacy_request_copy_matches(app, action, actor, kind, purpose, parameters, target):
+    """旧系统模板换文案时复用原待办，原授权载荷和摘要保持不变。"""
+    if action.status != 'PENDING' or action.expires_at <= now() or action.kind != kind or action.owner_id != target or action.household_id != actor.household_id:
+        return False
+    previous = payload_of(app, action)
+    if previous.get('parameters') != parameters:
+        return False
+    old_purpose = previous.get('purpose')
+    if action.request_hash != digest(canonical({'kind': kind, 'purpose': old_purpose, 'parameters': parameters, 'target': target})):
+        return False
+    if target != actor.user_id:
+        if kind == 'cloud.disclose':
+            return old_purpose == '允许本次任务向指定云模型披露所选资料的脱敏内容' and purpose == '请确认将你为本次任务提供的资料发送至云模型。'
+        return (kind in DATA_KINDS and old_purpose == '成员请求你为本次任务提供资料。仅你主动选择的内容会用于这次任务，不会改成家庭共享。'
+                and purpose == member_request_purpose(kind))
+    if kind != 'cloud.disclose' or old_purpose != '当前任务需要披露敏感或仅本地资料，请单独确认':
+        return False
+    if purpose == '请确认本次资料的云端披露。':
+        return True
+    prefix, suffix = '本次将向云模型发送', '，请确认。'
+    if not purpose.startswith(prefix) or not purpose.endswith(suffix):
+        return False
+    from .cloud_gateway import PRIVACY_CATEGORIES
+    allowed = {value for code, value in PRIVACY_CATEGORIES.items() if code != 'unknown'} | {
+        '附件图像（图像内容无法可靠脱敏）', '位置信息', '敏感资料', '标记为仅本地处理的资料',
+        '本地检测标记为敏感的内容（未返回具体类别）', '你为本次任务提供的资料',
+    }
+    reasons = purpose[len(prefix):-len(suffix)].split('、')
+    return all(reason in allowed for reason in reasons) and reasons == sorted(set(reasons))
 
 
 class ClientAction(Owned, Base):
@@ -117,6 +167,42 @@ def _instant(value):
     return parsed.timestamp()
 
 
+class HealthRequestValidationError(HTTPException):
+    """时间参数尚未派发即可修正；不能用此类型捕获其他权限或执行错误。"""
+    def __init__(self, code, detail):
+        super().__init__(422, detail)
+        self.code = code
+
+
+def _health_instant(values, key):
+    import math
+    label = '开始时间' if key == 'start_at' else '结束时间'
+    if key not in values or values[key] is None or values[key] == '':
+        raise HealthRequestValidationError('health_time_missing', '健康查询缺少' + label)
+    value = values[key]
+    if not isinstance(value, str) or len(value) > 50:
+        raise HealthRequestValidationError('health_time_invalid_format', '健康查询' + label + '必须是带时区的 ISO 8601 时间')
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        raise HealthRequestValidationError('health_time_invalid_format', '健康查询' + label + '不是有效的 ISO 8601 时间') from None
+    if parsed.tzinfo is None:
+        raise HealthRequestValidationError('health_time_missing_timezone', '健康查询' + label + '缺少时区')
+    try:
+        instant = parsed.timestamp()
+    except (ValueError, OverflowError):
+        raise HealthRequestValidationError('health_time_invalid_format', '健康查询' + label + '超出可解析范围') from None
+    if not math.isfinite(instant):
+        raise HealthRequestValidationError('health_time_non_finite', '健康查询' + label + '不是有限时间')
+    return instant
+
+
+def validate_planned_health_request(arguments):
+    """仅预检健康请求，不改日期、不创建待办、不推断或授予权限。"""
+    if isinstance(arguments, dict) and arguments.get('kind') == 'read_health':
+        parameters_for('read_health', arguments.get('parameters'))
+
+
 def parameters_for(kind, values):
     if kind not in ACTION_KINDS or not isinstance(values, dict) or len(canonical(values)) > 12000:
         raise HTTPException(422, '客户端请求类型或参数无效')
@@ -129,6 +215,7 @@ def parameters_for(kind, values):
         'authorize_records': {'record_ids'}, 'data.share': {'record_ids'},
         'cloud.disclose': {'scope_hash', 'record_versions', 'provider_id'},
         'member.notify': {'summary'},
+        'android.assist': {'workspace_id', 'reason', 'code'},
     }
     if set(values) - fields[kind]:
         raise HTTPException(422, '客户端请求含不允许的参数')
@@ -145,14 +232,15 @@ def parameters_for(kind, values):
         if not isinstance(result['precision'],str) or result['precision'] not in {'coarse', 'precise'} or type(result['max_age_seconds']) is not int or not 0 <= result['max_age_seconds'] <= 3600:
             raise HTTPException(422, '位置精度或新鲜度范围无效')
     if kind == 'read_health':
-        if not isinstance(result.get('types'), list) or not result['types'] or any(not isinstance(value,str) or value not in {'sleep','steps','heart_rate','body_mass'} for value in result['types']) or len(set(result['types']))!=len(result['types']):
-            raise HTTPException(422, '健康类型只允许睡眠、步数、心率和体重，且不能重复')
-        try:
-            start, end = _instant(result['start_at']), _instant(result['end_at'])
-            if not 0 < end - start <= 31 * 86400 or end > now() + 300:
-                raise ValueError()
-        except (KeyError, ValueError, TypeError, OverflowError):
-            raise HTTPException(422, '健康数据时间范围无效或超过31天') from None
+        if not isinstance(result.get('types'), list) or not result['types'] or len(result['types']) > len(HEALTH_UNITS) or any(not isinstance(value,str) or value not in HEALTH_UNITS for value in result['types']) or len(set(result['types']))!=len(result['types']):
+            raise HTTPException(422, '健康指标必须来自支持的指标清单，且不能重复')
+        start, end = _health_instant(result, 'start_at'), _health_instant(result, 'end_at')
+        if end <= start:
+            raise HealthRequestValidationError('health_time_invalid_order', '健康查询结束时间必须晚于开始时间')
+        if end - start > 31 * 86400:
+            raise HealthRequestValidationError('health_time_range_exceeded', '单次健康查询不能超过 31 天')
+        if end > now() + 300:
+            raise HealthRequestValidationError('health_time_future_end', '健康查询结束时间在未来；查询今天只能截至当前时间，不能填写今晚23:59:59')
     if kind == 'provide_text':
         result.setdefault('max_length', 4000); result.setdefault('prompt', '')
         if re.search(r'密码|口令|私钥|验证码|恢复码|助记词|api[ _-]?key|access[ _-]?token',str(result['prompt']),re.I):
@@ -177,9 +265,34 @@ def parameters_for(kind, values):
             raise HTTPException(422, '披露记录版本无效')
         if not isinstance(result.get('provider_id'), str) or not 1 <= len(result['provider_id']) <= 100:
             raise HTTPException(422, '披露目标无效')
+    if kind == 'android.assist':
+        if set(result) != {'workspace_id', 'reason', 'code'} or any(not isinstance(value, str) or not 1 <= len(value) <= 1000 for value in result.values()):
+            raise HTTPException(422, '安卓协助范围无效')
     if kind == 'member.notify' and (not isinstance(result.get('summary'), str) or not 1 <= len(result['summary']) <= 1000):
         raise HTTPException(422, '通知摘要无效')
     return result
+
+
+def clarification_arguments(values):
+    """模型显式提问转换成现有本人待办；不从普通回复猜测等待状态。"""
+    question = values.get('question')
+    if not isinstance(question, str) or not 1 <= len(question.strip()) <= 1000:
+        raise HTTPException(422, '补充问题需要说明本次缺少的信息')
+    question = question.strip()
+    options = values.get('options', [])
+    if not isinstance(options, list):
+        raise HTTPException(422, '补充问题的选项必须是列表')
+    # 与普通补充文本共用凭据校验，不能通过选择题收集密码或验证码。
+    parameters_for('provide_text', {'prompt': question})
+    if options:
+        parameters = parameters_for('choose_option', {'prompt': question, 'options': options})
+        for option in parameters['options']:
+            parameters_for('provide_text', {'prompt': option['label']})
+        kind = 'choose_option'
+    else:
+        parameters = parameters_for('provide_text', {'prompt': question, 'max_length': 4000})
+        kind = 'provide_text'
+    return {'target_member_id': 'self', 'kind': kind, 'purpose': question, 'parameters': parameters}
 
 
 def _notice(app, db, action, status='PENDING'):
@@ -191,7 +304,9 @@ def _notice(app, db, action, status='PENDING'):
             Notification.event_key == 'client-action:' + action.id))
 
 
-def create_request(app, db, actor, task, kind, purpose, parameters, *, target_member_id=None, invocation=None, request_key=None):
+def create_request(app, db, actor, task, kind, purpose, parameters, *, target_member_id=None, invocation=None, request_key=None, _android_core=False):
+    if kind == 'android.assist' and not _android_core:
+        raise HTTPException(403, '安卓协助只能由执行器在真实阻塞时创建')
     if task.owner_id != actor.user_id or task.household_id != actor.household_id or task.status in TERMINAL_TASKS or task.cancel_requested:
         raise HTTPException(409, '任务不能再请求客户端数据')
     if not isinstance(purpose, str) or not 1 <= len(purpose) <= 1000:
@@ -208,7 +323,7 @@ def create_request(app, db, actor, task, kind, purpose, parameters, *, target_me
         raise HTTPException(403, '成员通知必须通过明确审批的通知能力执行')
     parameters = parameters_for(kind, parameters)
     if target!=actor.user_id and kind!='cloud.disclose':
-        purpose='成员请求你为本次任务提供资料。仅你主动选择的内容会用于这次任务，不会改成家庭共享。'
+        purpose=member_request_purpose(kind)
         if isinstance(parameters.get('prompt'),str):parameters['prompt']=parameters['prompt'][:160]
     if kind == 'cloud.disclose':
         if target != actor.user_id and not parameters['record_versions']:
@@ -218,12 +333,12 @@ def create_request(app, db, actor, task, kind, purpose, parameters, *, target_me
             if record.owner_id != target or record.version != version or record.sensitivity == 'SECRET':
                 raise HTTPException(403,'云端授权范围必须属于批准者本人且版本有效')
         if target != actor.user_id:
-            purpose = '允许本次任务向指定云模型披露所选资料的脱敏内容'
+            purpose = '请确认将你为本次任务提供的资料发送至云模型。'
     request_key = request_key or (invocation.id if invocation else digest(canonical({'kind':kind, 'parameters':parameters, 'target':target})))
     fingerprint = digest(canonical({'kind':kind, 'purpose':purpose, 'parameters':parameters, 'target':target}))
     existing = db.scalar(select(ClientAction).where(ClientAction.requester_id == actor.user_id, ClientAction.task_id == task.id, ClientAction.request_key == request_key))
     if existing:
-        if existing.request_hash != fingerprint:
+        if existing.request_hash != fingerprint and not _legacy_request_copy_matches(app, existing, actor, kind, purpose, parameters, target):
             raise HTTPException(409, '请求标识已绑定其他内容')
         if existing.status == 'PENDING' and existing.expires_at > now():
             return {'status':'waiting_client', 'client_action_id':existing.id, 'expires_at':existing.expires_at}
@@ -425,6 +540,21 @@ def refresh_member_notices(app):
             db.commit()
 
 
+def _automatic_capture_allowed(app, db, action, actor):
+    if action.kind not in {'capture_location', 'read_health'} or action.status != 'PENDING' or action.expires_at <= now():
+        return False
+    if action.owner_id != actor.user_id or action.requester_id != actor.user_id:
+        return False
+    device = db.get(Device, actor.device_id)
+    if not device or device.revoked or device.user_id != actor.user_id or not device.auto_review_enabled:
+        return False
+    task = db.get(Task, action.task_id)
+    if not task or task.owner_id != actor.user_id or task.household_id != actor.household_id or task.cancel_requested or task.status != 'WAITING_CLIENT':
+        return False
+    payload = app.vault.open(task.request, actor.user_id + ':task:' + task.id)
+    return payload.get('device_id') == actor.device_id and payload.get('_client_wait', {}).get('action_id') == action.id
+
+
 def _view(app, db, action, actor):
     payload = payload_of(app,action)
     withdrawn=action.kind=='member.notify' and not _notice_dependencies_valid(app,db,action,payload)
@@ -434,12 +564,17 @@ def _view(app, db, action, actor):
     if action.requester_id == actor.user_id:
         conversation = db.scalar(select(ConversationTurn.conversation_id).where(ConversationTurn.task_id == action.task_id))
     effective = 'REVOKED' if withdrawn else ('EXPIRED' if action.status == 'PENDING' and action.expires_at <= now() else action.status)
-    return {'id':action.id,'kind':action.kind,'status':effective,'purpose':payload['purpose'],
+    outcome = {}
+    if action.kind == 'read_health' and effective == 'RESPONDED' and action.response:
+        receipt = _response_receipt(app, action)
+        outcome = {key: receipt[key] for key in ('data_status', 'note') if key in receipt}
+    return {'id':action.id,'kind':action.kind,'status':effective,'purpose':display_purpose(action.kind, payload['purpose']),
         'parameters':payload['parameters'],'requested_by':{'id':action.requester_id,'name':requester.name if requester else '已离开的成员'},
         'target_member_id':action.owner_id,'scope':'personal','created_at':action.created_at,'expires_at':action.expires_at,
         'task_id':action.task_id if action.requester_id == actor.user_id else None,'conversation_id':conversation,
+        'automatic_capture_allowed':_automatic_capture_allowed(app,db,action,actor),
         'notification_id':action.notification_id,'can_respond':action.owner_id==actor.user_id and effective=='PENDING',
-        'can_revoke':action.owner_id==actor.user_id and action.status=='RESPONDED' and action.kind!='member.notify'}
+        'can_revoke':action.owner_id==actor.user_id and action.status=='RESPONDED' and action.kind not in {'member.notify', 'android.assist'}, **outcome}
 
 
 def task_actions(app, db, actor, task_id):
@@ -474,6 +609,7 @@ class ResponseInput(Contract):
     idempotency_key:str=Field(min_length=8,max_length=100)
     record_ids:list[str]=Field(default_factory=list,max_length=20)
     text:str|None=Field(default=None,max_length=10000)
+    automatic_review:bool=Field(default=False, strict=True)
 
 
 class DenialInput(Contract):
@@ -539,7 +675,15 @@ def _check_response(action, key, fingerprint):
     return False
 
 
-HEALTH_UNITS={'sleep':'category','steps':'count','heart_rate':'count/min','body_mass':'kg'}
+HEALTH_UNITS={'sleep':'category','steps':'count','heart_rate':'count/min','body_mass':'kg',
+    'resting_heart_rate':'count/min','heart_rate_variability':'ms','respiratory_rate':'count/min',
+    'oxygen_saturation':'%','active_energy':'kcal','basal_energy':'kcal','exercise_minutes':'min',
+    'walking_running_distance':'m','body_temperature':'degC','body_fat_percentage':'%'}
+HEALTH_MAX_SAMPLES_PER_RECORD = 5000
+HEALTH_MAX_SAMPLES_PER_REQUEST = 20000
+HEALTH_SAMPLE_FIELDS = {'type','sample_id','start_at','end_at','value','unit'}
+HEALTH_SAMPLE_METADATA = {'source_name','source_bundle','source_version','source_product','timezone',
+    'original_start_at','original_end_at'}
 
 
 def validate_health_record(record,payload,parameters):
@@ -553,23 +697,168 @@ def validate_health_record(record,payload,parameters):
         elif record.kind=='health.snapshot':
             if not isinstance(payload.get('types'),list) or set(payload['types'])!=requested or len(payload['types'])!=len(requested):raise ValueError()
             samples=payload.get('samples')
-            if not isinstance(samples,list) or len(samples)>1000:raise ValueError()
+            if not isinstance(samples,list) or len(samples)>HEALTH_MAX_SAMPLES_PER_RECORD:raise ValueError()
             if payload.get('status') not in (None,'available' if samples else 'no_data'):raise ValueError()
+            if 'schema_version' in payload and (type(payload['schema_version']) is not int or payload['schema_version'] != 2):raise ValueError()
+            for flag in ('query_complete','truncated'):
+                if flag in payload and type(payload[flag]) is not bool:raise ValueError()
+            if payload.get('query_complete') is True and payload.get('truncated') is True:raise ValueError()
+            chunks={'capture_id','chunk_index','chunk_count'}&set(payload)
+            if chunks:
+                if len(chunks)!=3 or not isinstance(payload['capture_id'],str) or not 1<=len(payload['capture_id'])<=100:raise ValueError()
+                if type(payload['chunk_index']) is not int or type(payload['chunk_count']) is not int or not 1<=payload['chunk_count']<=20 or not 0<=payload['chunk_index']<payload['chunk_count']:raise ValueError()
         else:raise ValueError()
         seen=set()
         for sample in samples:
-            if not isinstance(sample,dict) or set(sample)!={'type','sample_id','start_at','end_at','value','unit'}:raise ValueError()
+            if not isinstance(sample,dict) or not HEALTH_SAMPLE_FIELDS<=set(sample) or set(sample)-HEALTH_SAMPLE_FIELDS-HEALTH_SAMPLE_METADATA:raise ValueError()
             kind=sample['type'];identifier=sample['sample_id'];value=sample['value']
             if kind not in requested or sample['unit']!=HEALTH_UNITS[kind] or not isinstance(identifier,str) or not 1<=len(identifier)<=200 or (kind,identifier) in seen:raise ValueError()
             seen.add((kind,identifier))
-            if not start<=_instant(sample['start_at'])<=_instant(sample['end_at'])<=end:raise ValueError()
+            sample_start,sample_end=_instant(sample['start_at']),_instant(sample['end_at'])
+            if not start<=sample_start<=sample_end<=end:raise ValueError()
+            original={'original_start_at','original_end_at'}&set(sample)
+            if original:
+                if len(original)!=2 or kind!='sleep':raise ValueError()
+                original_start,original_end=_instant(sample['original_start_at']),_instant(sample['original_end_at'])
+                if not original_start<=sample_start<=sample_end<=original_end or original_end-original_start>31*86400:raise ValueError()
+                if sample_start!=max(start,original_start) or sample_end!=min(end,original_end):raise ValueError()
+            for field in HEALTH_SAMPLE_METADATA-{'original_start_at','original_end_at'}:
+                if field in sample and (not isinstance(sample[field],str) or len(sample[field])>200 or any(ord(char)<32 for char in sample[field])):raise ValueError()
             if type(value) not in (int,float) or not math.isfinite(value):raise ValueError()
             if kind=='sleep' and (not float(value).is_integer() or not 0<=value<=5):raise ValueError()
             if kind=='steps' and (not float(value).is_integer() or not 0<=value<=1_000_000_000):raise ValueError()
-            if kind=='heart_rate' and not 0<value<=1000:raise ValueError()
+            if kind in {'heart_rate','resting_heart_rate','respiratory_rate'} and not 0<value<=1000:raise ValueError()
             if kind=='body_mass' and not 0<value<=2000:raise ValueError()
+            if kind in {'oxygen_saturation','body_fat_percentage'} and not 0<=value<=100:raise ValueError()
+            if kind in {'heart_rate_variability','active_energy','basal_energy','exercise_minutes','walking_running_distance'} and not 0<=value<=1_000_000_000:raise ValueError()
+            if kind=='body_temperature' and not -273.15<=value<=1000:raise ValueError()
     except (KeyError,ValueError,TypeError,OverflowError):
         raise HTTPException(422,'健康快照类型、时间、单位或样本数不符合请求范围') from None
+
+
+def health_outcome(app, records, parameters):
+    """只根据实际样本描述可用性，HealthKit 空结果不能证明用户拒绝读取授权。"""
+    requested = parameters['types']
+    available = set()
+    count = 0
+    ranges = []
+    samples_by_id = {}
+    all_samples = []
+    query_complete = True
+    completeness_known = True
+    captures = {}
+    for record in records:
+        payload = app.vault.open(record.payload, record.owner_id + ':record:' + record.id)
+        validate_health_record(record, payload, parameters)
+        ranges.append((_instant(payload['start_at']), _instant(payload['end_at'])))
+        if record.kind == 'health.sleep':
+            available.add('sleep'); count += 1
+            completeness_known = False
+            samples = [{'type':'sleep','sample_id':record.id,'start_at':payload['start_at'],
+                'end_at':payload['end_at'],'value':payload['value'],'unit':'category'}]
+        else:
+            samples = payload['samples']
+            available.update(sample['type'] for sample in samples)
+            count += len(samples)
+            query_complete = query_complete and payload.get('query_complete', True) and not payload.get('truncated', False)
+            completeness_known = completeness_known and 'query_complete' in payload
+            if 'capture_id' in payload:
+                capture = captures.setdefault(payload['capture_id'], {'count':payload['chunk_count'], 'parts':set(),
+                    'window':(payload['start_at'],payload['end_at']), 'types':set(payload['types'])})
+                if capture['count']!=payload['chunk_count'] or capture['window']!=(payload['start_at'],payload['end_at']) or capture['types']!=set(payload['types']) or payload['chunk_index'] in capture['parts']:
+                    raise HTTPException(422, '健康采集分块不一致或重复，请重新采集')
+                capture['parts'].add(payload['chunk_index'])
+        for sample in samples:
+            key = (sample['type'], sample['sample_id'])
+            previous = samples_by_id.get(key)
+            if previous:
+                invariant = (HEALTH_SAMPLE_FIELDS | HEALTH_SAMPLE_METADATA) - {'start_at','end_at'}
+                # 分块可重复同一条睡眠 UUID，但不能用同一 UUID 替换原值、来源或不相交区间。
+                if any(previous.get(field)!=sample.get(field) for field in invariant) or max(_instant(previous['start_at']),_instant(sample['start_at']))>min(_instant(previous['end_at']),_instant(sample['end_at'])):
+                    raise HTTPException(422, '相同健康样本标识的内容或来源冲突，请重新采集')
+                samples_by_id[key] = {**previous,
+                    'start_at':min(previous['start_at'],sample['start_at'],key=_instant),
+                    'end_at':max(previous['end_at'],sample['end_at'],key=_instant)}
+            else:
+                samples_by_id[key] = sample
+        all_samples.extend(samples)
+    if count > HEALTH_MAX_SAMPLES_PER_REQUEST:
+        raise HTTPException(422, '本次健康请求超过20000条样本，请按较短时间范围继续查询')
+    query_complete = query_complete and all(len(capture['parts'])==capture['count'] for capture in captures.values())
+    missing = [kind for kind in requested if kind not in available]
+    # 查询窗口与样本时间不同：全部指标有样本，也不能把一天窗口说成已读取整周。
+    lower, upper = _instant(parameters['start_at']), _instant(parameters['end_at'])
+    covered_until = lower
+    for start, end in sorted(ranges):
+        if start > covered_until:
+            break
+        covered_until = max(covered_until, end)
+    time_range_complete = covered_until >= upper and query_complete
+    status = 'no_data' if not count else ('partial' if missing or not time_range_complete else 'available')
+    notes = {
+        'no_data': '本次没有读到健康样本。可能是所选时间内没有记录，或系统未开放读取权限；无法据此确定是否拒绝授权。不得把空样本当作零值，也不要重复请求同一范围，请说明缺失并让用户选择是否重新采集。',
+        'partial': '已提供部分健康数据。没有样本的指标可能没有记录或未开放读取权限，不能当作零值或断言授权被拒绝；仅依据实际样本继续本任务。',
+        'available': '已收到本次请求范围内的健康样本，可继续原任务；这不代表持续读取授权或实时监测。',
+    }
+    note = notes[status]
+    if not time_range_complete:
+        note += ' 本次提供的时间范围未完整覆盖请求，仅能分析已提供的时间段，不能声称已取得整个请求期间的数据。'
+    if not query_complete:
+        note += ' 本次采集未完整结束或缺少分块；需要完整结果时按更短时间段继续采集，不能从现有样本推断全部记录。'
+    elif not completeness_known:
+        note += ' 旧版采集未记录查询是否完整结束，以下统计覆盖已保存样本，不能据此保证已读到设备上的全部记录。'
+    from .health_summary import summarize
+    return {'data_status': status, 'note': note, 'health': {
+        'requested_types': requested, 'available_types': [kind for kind in requested if kind in available],
+        'missing_types': missing, 'sample_count': count,
+        'requested_start_at': parameters['start_at'], 'requested_end_at': parameters['end_at'],
+        'time_range_complete': time_range_complete,
+        'query_complete': query_complete if completeness_known or not query_complete else None,
+        'summary': summarize(all_samples, parameters['start_at']),
+        'provided_ranges': [{'start_at': datetime.fromtimestamp(start, timezone.utc).isoformat(),
+            'end_at': datetime.fromtimestamp(end, timezone.utc).isoformat()} for start, end in sorted(set(ranges))],
+    }}
+
+
+def _settled_health_request(app, db, actor, task, target, parameters):
+    """同一任务不因模型再次请求而重复弹出已经处理过的健康授权卡片。"""
+    rows = db.scalars(select(ClientAction).where(ClientAction.requester_id == actor.user_id,
+        ClientAction.task_id == task.id, ClientAction.owner_id == target,
+        ClientAction.household_id == actor.household_id, ClientAction.kind == 'read_health',
+        ClientAction.status == 'RESPONDED', ClientAction.expires_at > now()).order_by(ClientAction.created_at.desc()))
+    for action in rows:
+        payload = payload_of(app, action)
+        previous = payload.get('health_reuse', {}).get('original_parameters', payload['parameters'])
+        if (not set(parameters['types']) <= set(previous['types'])
+            or _instant(previous['end_at']) <= _instant(parameters['start_at'])
+            or _instant(previous['start_at']) >= _instant(parameters['end_at'])):
+            continue
+        receipt = _response_receipt(app, action)
+        if receipt.get('data_status') == 'no_data':
+            if (_instant(parameters['start_at']) < _instant(previous['start_at'])
+                or _instant(parameters['end_at']) > _instant(previous['end_at'])):
+                continue
+            return {'status': 'no_data', 'data_status': 'no_data', 'records': [],
+                'client_action_id': action.id, 'note': receipt['note']}
+        if receipt.get('data_status') in {'available', 'partial'}:
+            from .data import serialize
+            body = app.vault.open(task.request, actor.user_id + ':task:' + task.id)
+            records = [read_authorized_record(db, actor, identifier, body) for identifier in receipt['record_ids']]
+            from .health_reuse import project_outcome
+            outcome = project_outcome(app, records, parameters, queries=receipt.get('health_queries', []))
+            return {'status': 'succeeded', 'records': [serialize(row, app.vault) for row in records],
+                'client_action_id': action.id, 'health_queries': receipt.get('health_queries', []), **outcome,
+                'note': outcome['note'] + ' 同一请求已处理，请使用本次结果继续，不要重复弹出授权卡片。'}
+    return None
+
+
+def _response_notice(db, actor, action):
+    from .data import emit
+    if action.notification_id:
+        notification = db.get(Notification, action.notification_id)
+        if notification and notification.owner_id == actor.user_id:
+            notification.status = action.status
+    emit(db, actor, 'client.action.updated', action.id)
 
 
 def _records_for_response(app,db,actor,action,body):
@@ -632,35 +921,80 @@ def _records_for_response(app,db,actor,action,body):
 @router.post('/client-actions/{action_id}/respond')
 def respond(action_id:str,body:ResponseInput,request:Request,actor:Actor=Depends(authenticate)):
     app=request.app.state
-    fingerprint=digest(canonical({'decision':'respond',**body.model_dump()}))
     with app.db() as db:
-        from .sync_order import lock_changes
-        scope(db,actor.user_id,actor.household_id);lock_changes(db)
-        action,task=_locked_action(db,actor,action_id)
-        if _check_response(action,body.idempotency_key,fingerprint):return _response_receipt(app,action)
-        records=_records_for_response(app,db,actor,action,body)
-        action.status='RESPONDED';action.responded_at=now()
-        for record in records:
-            if record.owner_id==action.requester_id:continue
-            db.add(TaskDataGrant(owner_id=actor.user_id,household_id=actor.household_id,requester_id=action.requester_id,
-                task_id=action.task_id,action_id=action.id,record_id=record.id,record_version=record.version,expires_at=action.expires_at))
-        result={'status':'succeeded','client_action_id':action.id,'record_ids':[row.id for row in records]}
-        from .data import read_record,serialize
-        from .documents import checked_payload
-        for record in records:
-            if record.kind=='document.parsed' and record.source=='document_parse':
-                value=serialize(record,app.vault)['payload'];checked_payload(db,actor,record,app.vault,value)
-                parent=read_record(db,actor,record.source_id)
-                if parent.sensitivity=='SECRET':raise HTTPException(403,'秘密原件的解析内容不能用于任务授权')
-                result.setdefault('_derived_sources',{})[record.id]={'source_id':parent.id,'source_version':parent.version,'version':record.version}
-        from .data import audit
-        from .device_sync import sync_projection
-        result['records']=[sync_projection(row,app.vault) for row in records]
-        db.flush();_resume(app,db,action,task,result)
-        action.response_key,action.response_hash=body.idempotency_key,fingerprint
-        action.response=app.vault.seal({'id':action.id,'status':'RESPONDED','record_ids':[row.id for row in records]},actor.user_id+':client-response:'+action.id)
-        audit(db,actor,'client.respond',action.id,{'kind':action.kind,'records':len(records)})
-        db.commit();return _response_receipt(app,action)
+        result = respond_in_transaction(app, db, actor, action_id, body)
+        db.commit()
+        return result
+
+
+def respond_in_transaction(app, db, actor, action_id, body):
+    fingerprint=digest(canonical({'decision':'respond',**body.model_dump(exclude={'automatic_review'} if not body.automatic_review else set())}))
+    from .sync_order import lock_changes
+    scope(db,actor.user_id,actor.household_id);lock_changes(db)
+    action,task=_locked_action(db,actor,action_id)
+    if body.automatic_review:
+        from .auto_review import require_enabled
+        require_enabled(app, db, actor, task)
+        if action.owner_id != actor.user_id or action.requester_id != actor.user_id:
+            raise HTTPException(403, '自动审核不能代替其他成员响应')
+        if action.kind not in {'cloud.disclose', 'authorize_records', 'data.share', 'capture_location', 'read_health'}:
+            raise HTTPException(403, '本次请求需要用户提供真实输入')
+    if _check_response(action,body.idempotency_key,fingerprint):return _response_receipt(app,action)
+    if action.kind == 'android.assist':
+        raise HTTPException(422, '安卓协助只能通过继续或取消处理，不能提交资料或密码')
+    records=_records_for_response(app,db,actor,action,body)
+    outcome = health_outcome(app, records, payload_of(app, action)['parameters']) if action.kind == 'read_health' else {}
+    health_queries = ([{**payload_of(app, action)['parameters'],
+        'query_complete':outcome['health']['query_complete'],
+        'time_range_complete':outcome['health']['time_range_complete']}]
+        if action.kind == 'read_health' else [])
+    # 空快照是采集结果，不把它当作可供分析的健康资料或额外的云端披露来源。
+    if outcome.get('data_status') == 'no_data':
+        records = []
+    reuse = payload_of(app, action).get('health_reuse') if action.kind == 'read_health' else None
+    if reuse:
+        # 新采集仍按卡片的缩减范围严格校验；旧来源不能因一次响应而更新授权或版本。
+        from .health_reuse import project_outcome
+        task_body = app.vault.open(task.request, task.owner_id + ':task:' + task.id)
+        requester = db.get(Principal, action.requester_id)
+        if not requester or requester.household_id != action.household_id:
+            raise HTTPException(403, '原请求成员已离开家庭')
+        request_actor = Actor(requester.id, action.household_id, 'health-reuse', requester.role)
+        saved = []
+        for identifier, version in reuse['record_versions'].items():
+            row = read_authorized_record(db, request_actor, identifier, task_body)
+            if row.owner_id != action.owner_id or row.version != version or row.sensitivity == 'SECRET':
+                raise HTTPException(409, '此前已提供的健康资料已变化，请重新查询')
+            saved.append(row)
+        records = list({row.id: row for row in [*saved, *records]}.values())
+        outcome = project_outcome(app, records, reuse['original_parameters'], queries=health_queries)
+    action.status='RESPONDED';action.responded_at=now()
+    for record in records:
+        if record.owner_id==action.requester_id or (reuse and record.id in reuse['record_versions']):continue
+        db.add(TaskDataGrant(owner_id=actor.user_id,household_id=actor.household_id,requester_id=action.requester_id,
+            task_id=action.task_id,action_id=action.id,record_id=record.id,record_version=record.version,expires_at=action.expires_at))
+    result={'status':'no_data' if outcome.get('data_status') == 'no_data' else 'succeeded',
+        'client_action_id':action.id,'record_ids':[row.id for row in records], **outcome,
+        **({'health_queries':health_queries} if health_queries else {})}
+    from .data import read_record,serialize
+    from .documents import checked_payload
+    for record in records:
+        if record.kind=='document.parsed' and record.source=='document_parse':
+            value=serialize(record,app.vault)['payload'];checked_payload(db,actor,record,app.vault,value)
+            parent=read_record(db,actor,record.source_id)
+            if parent.sensitivity=='SECRET':raise HTTPException(403,'秘密原件的解析内容不能用于任务授权')
+            result.setdefault('_derived_sources',{})[record.id]={'source_id':parent.id,'source_version':parent.version,'version':record.version}
+    from .data import audit
+    from .device_sync import sync_projection
+    result['records']=[sync_projection(row,app.vault) for row in records]
+    db.flush();_resume(app,db,action,task,result)
+    action.response_key,action.response_hash=body.idempotency_key,fingerprint
+    action.response=app.vault.seal({'id':action.id,'status':'RESPONDED','record_ids':[row.id for row in records],
+        **({'health_queries':health_queries} if health_queries else {}),
+        **{key:outcome[key] for key in ('data_status','note') if key in outcome}},actor.user_id+':client-response:'+action.id)
+    _response_notice(db, actor, action)
+    audit(db,actor,'client.respond',action.id,{'kind':action.kind,'records':len(records), **({'automatic':True,'device_id':actor.device_id} if body.automatic_review else {})})
+    return _response_receipt(app,action)
 
 
 @router.post('/client-actions/{action_id}/deny')
@@ -669,10 +1003,17 @@ def deny(action_id:str,body:DenialInput,request:Request,actor:Actor=Depends(auth
     with app.db() as db:
         action,task=_locked_action(db,actor,action_id)
         if _check_response(action,body.idempotency_key,fingerprint):return _response_receipt(app,action)
-        action.status='DENIED';action.responded_at=now()
-        _resume(app,db,action,task,{'status':'denied','client_action_id':action.id},failed=True)
+        if action.kind == 'android.assist':
+            from .android_assistance import cancel_assistance
+            cancel_assistance(app, db, actor, action, task)
+            action.status = 'CANCELED'
+        else:
+            action.status = 'DENIED'
+            _resume(app,db,action,task,{'status':'denied','client_action_id':action.id},failed=True)
+        action.responded_at=now()
         action.response_key,action.response_hash=body.idempotency_key,fingerprint
-        action.response=app.vault.seal({'id':action.id,'status':'DENIED'},actor.user_id+':client-response:'+action.id)
+        action.response=app.vault.seal({'id':action.id,'status':action.status},actor.user_id+':client-response:'+action.id)
+        _response_notice(db, actor, action)
         from .data import audit
         audit(db,actor,'client.deny',action.id)
         db.commit();return _response_receipt(app,action)
@@ -704,7 +1045,7 @@ def revoke(action_id:str,request:Request,actor:Actor=Depends(authenticate)):
         scope(db,actor.user_id,actor.household_id);lock_changes(db)
         action,task=_locked_action(db,actor,action_id)
         if action.status=='REVOKED':return {'id':action.id,'status':'REVOKED'}
-        if action.status!='RESPONDED' or action.kind=='member.notify':raise HTTPException(409,'没有可撤回的数据授权')
+        if action.status!='RESPONDED' or action.kind in {'member.notify', 'android.assist'}:raise HTTPException(409,'没有可撤回的数据授权')
         _revoke(request.app.state,db,action)
         from .data import audit
         audit(db,actor,'client.revoke',action.id);db.commit()
@@ -791,25 +1132,35 @@ def expire_requests(app):
         with app.db() as db:
             from .sync_order import lock_changes
             scope(db,identifier,household);lock_changes(db)
-            actions=list(db.scalars(select(ClientAction).where(ClientAction.owner_id==identifier,ClientAction.expires_at<=now(),ClientAction.status.in_(['PENDING','RESPONDED']),ClientAction.kind!='member.notify').limit(100)))
+            actions=list(db.scalars(select(ClientAction).where(ClientAction.owner_id==identifier,ClientAction.expires_at<=now(),ClientAction.status.in_(['PENDING','RESPONDED']),ClientAction.kind!='member.notify',or_(ClientAction.kind!='android.assist',ClientAction.status=='PENDING')).limit(100)))
             for row in actions:
                 action,task=_locked_action(db,Actor(identifier,household,'expiry',role),row.id)
-                if action.status=='RESPONDED':_revoke(app,db,action);action.status='EXPIRED'
+                if action.status=='RESPONDED':
+                    if action.kind != 'android.assist':
+                        _revoke(app,db,action);action.status='EXPIRED'
                 elif action.status=='PENDING':
                     if task and task.status==WAITING_STATUS and not task.cancel_requested:
-                        _resume(app,db,action,task,{'status':'expired','client_action_id':action.id},failed=True)
+                        if action.kind == 'android.assist':
+                            from .android_assistance import cancel_assistance
+                            cancel_assistance(app, db, Actor(identifier,household,'expiry',role), action, task, expired=True)
+                        else:
+                            _resume(app,db,action,task,{'status':'expired','client_action_id':action.id},failed=True)
                     action.status='EXPIRED'
             db.commit()
     refresh_member_notices(app)
 
 
-def execute(app,db,actor,task,invocation,capability,arguments):
+def execute(app,db,actor,task,invocation,capability,arguments,*,request_key=None):
     body=app.vault.open(task.request,actor.user_id+':task:'+task.id)
     if capability=='client.request@v1':
         if set(arguments)!={'target_member_id','kind','purpose','parameters'} or arguments['kind'] not in DATA_KINDS:
             raise HTTPException(422,'客户端请求参数无效')
         target=allowed_target(db,actor,body,arguments['target_member_id'])
         parameters=parameters_for(arguments['kind'],arguments['parameters'])
+        if arguments['kind'] == 'read_health':
+            settled = _settled_health_request(app, db, actor, task, target, parameters)
+            if settled is not None:
+                return settled
         if arguments['kind']=='capture_location' and target==actor.user_id and parameters['precision']=='coarse':
             snapshot=body.get('_client_context',{})
             sample=snapshot.get('location')
@@ -818,18 +1169,32 @@ def execute(app,db,actor,task,invocation,capability,arguments):
                 except (KeyError,ValueError,TypeError):age=float('inf')
                 if 0<=age<=min(parameters['max_age_seconds'],900):
                     return {'status':'succeeded','location':sample,'source':'current_message_context','note':'这是消息内已授权的新鲜粗略采样，不是持续定位'}
-        if arguments['kind']=='read_health' and target==actor.user_id:
-            from .data import accessible,serialize
-            candidates=db.scalars(accessible(db,actor).where(Record.owner_id==actor.user_id,Record.kind=='health.snapshot',Record.sensitivity!='SECRET',Record.updated_at>=now()-900).order_by(Record.updated_at.desc()).limit(20))
-            for candidate in candidates:
-                value=serialize(candidate,app.vault)
-                try:
-                    stored=value['payload']
-                    if _instant(stored['start_at'])!=_instant(parameters['start_at']) or _instant(stored['end_at'])!=_instant(parameters['end_at']):continue
-                    validate_health_record(candidate,stored,parameters)
-                except (HTTPException,KeyError,ValueError,TypeError):continue
-                return {'status':'succeeded','records':[value],'source':'fresh_authorized_server_record','note':'复用十五分钟内、完全相同时间范围与指标的本人授权快照，不代表实时监测。'}
-        return create_request(app,db,actor,task,arguments['kind'],arguments['purpose'],arguments['parameters'],target_member_id=arguments['target_member_id'],invocation=invocation)
+        if arguments['kind']=='read_health':
+            from .data import serialize
+            from .health_reuse import refresh_requested, select_saved
+            reused = None if refresh_requested(body) else select_saved(app, db, actor, body, parameters, target)
+            if reused:
+                records, outcome = reused
+                missing = outcome['health']['uncollected_types']
+                if not missing:
+                    return {'status':'succeeded','records':[serialize(row,app.vault) for row in records],
+                        'source':'saved_authorized_server_record', **outcome}
+                labels = {'sleep':'睡眠','steps':'步数','heart_rate':'心率','resting_heart_rate':'静息心率',
+                    'heart_rate_variability':'心率变异性','respiratory_rate':'呼吸频率','oxygen_saturation':'血氧',
+                    'active_energy':'活动能量','basal_energy':'静息能量','exercise_minutes':'运动时间',
+                    'walking_running_distance':'步行跑步距离','body_temperature':'体温','body_fat_percentage':'体脂率','body_mass':'体重'}
+                existing = [labels.get(kind,kind) for kind in outcome['health']['queried_types']]
+                purpose = ('已使用服务器保存的' + '、'.join(existing) + '资料，本次只补充' + '、'.join(labels.get(kind,kind) for kind in missing) + '。')
+                requested = {**parameters, 'types':missing}
+                result = create_request(app,db,actor,task,'read_health',purpose,requested,
+                    target_member_id=arguments['target_member_id'],invocation=invocation,request_key=request_key)
+                action = db.get(ClientAction,result['client_action_id'])
+                payload = payload_of(app,action)
+                payload['health_reuse'] = {'record_versions':{row.id:row.version for row in records},
+                    'original_parameters':parameters}
+                action.payload = app.vault.seal(payload,action.owner_id+':client-action:'+action.id)
+                return result
+        return create_request(app,db,actor,task,arguments['kind'],arguments['purpose'],arguments['parameters'],target_member_id=arguments['target_member_id'],invocation=invocation,request_key=request_key)
     if capability=='member.read@v1':
         if set(arguments)!={'target_member_id','record_id','purpose'}:raise HTTPException(422,'成员数据请求参数无效')
         target=allowed_target(db,actor,body,arguments['target_member_id'])
@@ -947,9 +1312,32 @@ CLIENT_TOOLS = [
 ]
 CLIENT_MAPPING={'request_client_data':'client.request@v1','request_member_data':'member.read@v1','notify_member':'member.notify@v1'}
 
+CLIENT_TOOLS.append({'type': 'function', 'function': {
+    'name': 'ask_user',
+    'description': '本次任务缺少继续所必需且无法从当前已授权资料确定的信息时，向当前用户提出具体问题并等待补充，原任务收到回答后继续。只询问当前缺项，可合并紧密相关的问题；不要把未完成任务以纯文本提问结束。已有信息不重复询问，普通操作不要求确认。不猜测地址、预算或偏好；位置、健康、照片或文件用 request_client_data 的专门采集类型，不能要求手填健康数据。密码、验证码和支付验证由本人在目标设备处理；服务故障不能伪装成缺少用户信息。',
+    'parameters': {'type': 'object', 'properties': {
+        'question': {'type': 'string', 'maxLength': 1000, 'description': '只说明当前任务缺少什么以及需要用户补充什么'},
+        'options': {'type': 'array', 'maxItems': 8, 'description': '有明确候选时提供，不提供或空列表时允许文字回答',
+            'items': {'type': 'object', 'properties': {'id': {'type': 'string'}, 'label': {'type': 'string'}},
+                'required': ['id', 'label'], 'additionalProperties': False}},
+    }, 'required': ['question'], 'additionalProperties': False},
+}})
+CLIENT_MAPPING['ask_user'] = 'client.request@v1'
+
 # 模型必须知道精确的内置动作与参数，不能依靠猜测字段名驱动系统权限。
 _request_schema=CLIENT_TOOLS[0]['function']['parameters']['properties']
 _request_schema['target_member_id']['description']='本人填 self；其他成员只能使用本消息提供的结构化成员ID。'
+_request_schema['purpose']['description']='只用一句话说明本次需要哪项信息及其具体用途；仅陈述当前任务事实，不附加其他权限、通用隐私政策或未发生的风险。'
+CLIENT_TOOLS[1]['function']['parameters']['properties']['purpose']['description']=_request_schema['purpose']['description']
 _request_schema['kind']['enum']=sorted(DATA_KINDS)
-_request_schema['parameters']['description']='capture_location: precision=coarse或precise,max_age_seconds=0..3600；read_health: types为sleep/steps/heart_rate/body_mass的列表,start_at/end_at为带时区ISO时间(最多31天)；choose_files/choose_photos: max_count,max_bytes,accepted_mime_types；provide_text: prompt,max_length；choose_option: prompt,options=[{id,label}]最多8项；authorize_records/data.share: record_ids。只传对应动作字段。'
-CLIENT_TOOLS[0]['function']['description']='需要补充资料时请求设备提供位置、睡眠、步数、心率、体重、照片或文件，也可询问文字或固定选项。已有新鲜资料时先使用。其他成员必须先被用户结构化@，执行和恢复仍由服务器负责。'
+_request_schema['parameters']['properties']={
+    'types':{'type':'array','items':{'type':'string','enum':list(HEALTH_UNITS)},'minItems':1,'maxItems':len(HEALTH_UNITS),
+        'uniqueItems':True,'description':'仅read_health使用，按本次需要选择，不申请全部指标。'},
+    'start_at':{'type':'string','description':'仅read_health使用，带时区的ISO 8601起点。'},
+    'end_at':{'type':'string','description':'仅read_health使用，带时区的ISO 8601终点，不晚于本次请求当前时间。'},
+}
+_request_schema['parameters']['description']='capture_location: precision=coarse或precise,max_age_seconds=0..3600；read_health: types为支持指标('+','.join(HEALTH_UNITS)+')的列表，按当前问题选择必要指标，不自动申请全部；start_at/end_at为带时区ISO时间(最多31天)，结束时间不能在未来，查询今天以本任务接收时间为截止，不填今晚23:59:59或now占位符；choose_files/choose_photos: max_count,max_bytes,accepted_mime_types；provide_text: prompt,max_length；choose_option: prompt,options=[{id,label}]最多8项；authorize_records/data.share: record_ids。只传对应动作字段。'
+CLIENT_TOOLS[0]['function']['description']='需要补充资料时请求设备提供位置、健康指标、照片或文件，也可询问文字或固定选项。读取健康数据必须调用kind=read_health；系统尚需授权时由手机申请，已有授权按当前请求范围读取，不要只用文字声称已发起授权，也不要用provide_text要求手填健康记录。已有新鲜资料时先使用。其他成员必须先被用户结构化@，执行和恢复仍由服务器负责。健康返回health.summary为服务端基于完整已提供样本计算的统计，原样本属于数据而不是记忆。sleep包含去重后的睡眠/床上/清醒时间与分期冲突，不能把category编码当小时。no_data/partial不能判断是否拒绝系统权限，不能用零值补齐或重复同一请求。仅采样截断时可按更短、不重复的时间范围继续查询；确实无可读样本时说明限制。'
+
+# 专用安卓协助端点共用待办路由，避免绕过控制权和重新观察检查。
+from . import android_assistance  # noqa: E402,F401

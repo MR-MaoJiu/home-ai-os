@@ -1,0 +1,27 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "offer",
+      "title": "Type",
+      "type": "string"
+    },
+    "sdp": {
+      "maxLength": 65536,
+      "minLength": 1,
+      "title": "Sdp",
+      "type": "string"
+    },
+    "audio_enabled": {
+      "default": false,
+      "title": "Audio Enabled",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "type",
+    "sdp"
+  ],
+  "title": "StreamOffer",
+  "type": "object"
+}

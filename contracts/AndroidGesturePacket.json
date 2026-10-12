@@ -1,0 +1,110 @@
+{
+  "$defs": {
+    "GesturePoint": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maximum": 9,
+          "minimum": 0,
+          "title": "Id",
+          "type": "integer"
+        },
+        "x": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "x",
+        "y"
+      ],
+      "title": "GesturePoint",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "gesture_id": {
+      "maxLength": 36,
+      "minLength": 36,
+      "title": "Gesture Id",
+      "type": "string"
+    },
+    "epoch": {
+      "minimum": 1,
+      "title": "Epoch",
+      "type": "integer"
+    },
+    "sequence": {
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "frame_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 16,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Frame Id"
+    },
+    "phase": {
+      "enum": [
+        "down",
+        "pointer_down",
+        "move",
+        "pointer_up",
+        "up",
+        "cancel",
+        "keepalive"
+      ],
+      "title": "Phase",
+      "type": "string"
+    },
+    "changed_id": {
+      "anyOf": [
+        {
+          "maximum": 9,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Changed Id"
+    },
+    "points": {
+      "items": {
+        "$ref": "#/$defs/GesturePoint"
+      },
+      "maxItems": 5,
+      "title": "Points",
+      "type": "array"
+    }
+  },
+  "required": [
+    "gesture_id",
+    "epoch",
+    "sequence",
+    "phase"
+  ],
+  "title": "GesturePacket",
+  "type": "object"
+}

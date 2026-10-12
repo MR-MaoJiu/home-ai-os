@@ -14,11 +14,21 @@ struct TaskProgressView: View {
             if let result {
                 LabeledContent("状态", value: taskStatusLabel(result.status))
                 if let message = result.error { Text(message) }
+                if result.status == "FAILED" {
+                    TaskRetryControl(identifier: identifier) { await reload() }
+                }
+                if result.status == "WAITING_PRIVACY" {
+                    NavigationLink("查看原因与处理") { PrivacyReviewView(taskID: identifier) }
+                }
+                if result.status == "WAITING_BUDGET" && result.budget_recoverable != false {
+                    Button("重新检查预算", systemImage: "arrow.clockwise") { taskAction("resume") }
+                        .disabled(state.busy || loading || !state.connected || !state.serverReachable)
+                }
                 if let approval {
                     Section("确认本次操作") {
-                        ForEach(approval.arguments.keys.sorted(), id: \.self) { key in Text("\(key)：\(approval.arguments[key]?.description ?? "")") }
-                        Button("确认执行") { decide(approval.id, "APPROVED") }.disabled(state.busy)
-                        Button("拒绝", role: .destructive) { decide(approval.id, "REJECTED") }.disabled(state.busy)
+                        ChatApprovalCard(approval: approval, busy: state.busy || loading || !state.connected || !state.serverReachable) { decision in
+                            decide(approval.id, decision)
+                        }
                     }
                 }
                 if let hits = webSearchHits(result.result) {
@@ -36,17 +46,27 @@ struct TaskProgressView: View {
                 ForEach(ChatView.sources(result.result)) { source in
                     NavigationLink { RecordSourceView(source: source) } label: { Text(source.title) }
                 }
-                if ["RECEIVED", "APPROVED", "AWAITING_APPROVAL", "EXECUTING"].contains(result.status) {
-                    Button("取消未完成步骤", role: .destructive) { Task { await state.perform {
-                        _ = try await state.api.request("POST", "/api/v1/tasks/" + identifier + "/cancel")
-                        await reload()
-                    } } }
+                if ["RECEIVED", "APPROVED", "AWAITING_APPROVAL", "EXECUTING", "WAITING_PRIVACY", "WAITING_CLIENT", "WAITING_MEDIA", "WAITING_BUDGET"].contains(result.status) {
+                    Button("取消未完成步骤", role: .destructive) { taskAction("cancel") }
+                        .disabled(state.busy || loading || !state.connected || !state.serverReachable)
                 }
             } else if error == nil { ProgressView("读取任务状态…") }
         }.navigationTitle("任务 " + identifier.prefix(8))
         .task(id: identifier) { await reload() }
         .onChange(of: state.taskEventRevision) { _, _ in Task { await reload() } }
+        .onChange(of: state.connectionRevision) { _, _ in result = nil; approval = nil; error = nil; Task { await reload() } }
         .refreshable { await reload() }
+    }
+    private func taskAction(_ action: String) {
+        guard action != "resume" || result?.budget_recoverable != false else { return }
+        let revision = state.connectionRevision
+        Task { await state.perform {
+            let namespace = try await state.api.syncNamespace()
+            guard !Task.isCancelled, revision == state.connectionRevision else { return }
+            _ = try await state.api.request("POST", "/api/v1/tasks/" + identifier + "/" + action, expectedNamespace: namespace)
+            guard !Task.isCancelled, revision == state.connectionRevision else { return }
+            await reload()
+        } }
     }
     func decide(_ id: String, _ decision: String) {
         Task { await state.perform {
@@ -57,20 +77,122 @@ struct TaskProgressView: View {
     func reload() async {
         guard !loading else { return }
         loading = true; defer { loading = false }
+        let connection = state.connectionRevision
         do {
             let namespace = try await state.api.syncNamespace()
             let data = try await state.api.request("GET", "/api/v1/tasks/" + identifier, expectedNamespace: namespace)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, connection == state.connectionRevision else { return }
             result = try JSONDecoder().decode(TaskResult.self, from: data)
             if result?.status == "AWAITING_APPROVAL" {
                 let pending = try await state.api.request("GET", "/api/v1/approvals", expectedNamespace: namespace)
+                guard !Task.isCancelled, connection == state.connectionRevision else { return }
                 approval = try JSONDecoder().decode([ApprovalEntry].self, from: pending).first { $0.task_id == identifier }
             } else { approval = nil }
             error = nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, connection == state.connectionRevision else { return }
             result = nil
+            approval = nil
             self.error = error.localizedDescription
+        }
+    }
+}
+
+
+struct TaskRetryAssessment: Decodable {
+    let can_retry: Bool
+    let code: String
+    let reason: String
+    let retry_step: Int?
+    let completed_steps: Int
+}
+struct TaskRetryReceipt: Decodable { let id: String; let status: String; let replayed: Bool }
+
+/// 重试沿用原任务；仅保存无正文的请求幂等键，执行条件仍由服务端重新检查。
+struct TaskRetryControl: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.scenePhase) private var phase
+    let identifier: String
+    let onUpdate: () async -> Void
+    @State private var assessment: TaskRetryAssessment?
+    @State private var loading = false
+    @State private var submitting = false
+    @State private var error: String?
+    @State private var loadID = UUID()
+    @State private var visible = true
+    @State private var namespace: String?
+    private var online: Bool { state.connected && state.serverReachable && phase == .active }
+    private var revision: String { "\(identifier)-\(state.connectionRevision)-\(state.taskEventRevision)-\(online)" }
+    var body: some View {
+        TaskRetryPresentation(assessment: assessment, online: online, loading: loading, submitting: submitting, error: error,
+                              onRetry: { Task { await retry() } }, onRefresh: { Task { await load() } })
+        .task(id: revision) { await load() }
+        .onAppear { visible = true }
+        .onDisappear { visible = false; loadID = UUID() }
+        .onChange(of: submitting) { _, value in
+            if !value && assessment == nil && error == nil && visible { Task { await load() } }
+        }
+    }
+    private func load() async {
+        guard visible, online, !submitting, UUID(uuidString: identifier) != nil else { return }
+        let id = UUID(); loadID = id
+        let connection = state.connectionRevision
+        assessment = nil; loading = true
+        defer { if loadID == id { loading = false } }
+        do {
+            let scope = try await state.api.syncNamespace()
+            let raw = try await state.api.request("GET", "/api/v1/tasks/" + identifier + "/retry", expectedNamespace: scope)
+            guard await state.api.cachedNamespace() == scope, !Task.isCancelled, online, loadID == id, connection == state.connectionRevision else { return }
+            assessment = try JSONDecoder().decode(TaskRetryAssessment.self, from: raw); namespace = scope; error = nil
+        } catch { if loadID == id && !Task.isCancelled { self.error = error.localizedDescription } }
+    }
+    private func retry() async {
+        guard online, !submitting, !loading, assessment?.can_retry == true, let namespace else { return }
+        submitting = true; error = nil
+        let id = loadID, connection = state.connectionRevision
+        defer { submitting = false }
+        do {
+            let keyName = "task.retry.pending:" + namespace + ":" + identifier
+            let saved = DeviceIdentity.read(keyName).flatMap { String(data: $0, encoding: .utf8) }.flatMap { UUID(uuidString: $0) == nil ? nil : $0 }
+            let key = saved ?? UUID().uuidString.lowercased()
+            try DeviceIdentity.save(Data(key.utf8), name: keyName)
+            let body = try JSONSerialization.data(withJSONObject: ["idempotency_key": key])
+            let raw = try await state.api.request("POST", "/api/v1/tasks/" + identifier + "/retry", body: body, expectedNamespace: namespace)
+            let receipt = try JSONDecoder().decode(TaskRetryReceipt.self, from: raw)
+            guard receipt.id == identifier else { throw APIClient.APIError.message("服务器返回了不匹配的任务重试回执") }
+            try? DeviceIdentity.save(Data(), name: keyName)
+            guard await state.api.cachedNamespace() == namespace, !Task.isCancelled, online, loadID == id, state.connectionRevision == connection else { return }
+            assessment = nil; state.taskEventRevision = UUID()
+            await onUpdate()
+        } catch {
+            guard !Task.isCancelled, loadID == id, state.connectionRevision == connection else { return }
+            self.error = error.localizedDescription
+            assessment = nil
+        }
+    }
+}
+
+struct TaskRetryPresentation: View {
+    let assessment: TaskRetryAssessment?
+    let online: Bool
+    let loading: Bool
+    let submitting: Bool
+    let error: String?
+    let onRetry: () -> Void
+    let onRefresh: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Button(action: onRetry) {
+                Label(submitting ? "正在请求重试…" : "重试", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.borderedProminent).tint(.teal)
+                .disabled(!online || loading || submitting || assessment?.can_retry != true)
+            if loading { ProgressView("正在检查重试条件…").font(.caption) }
+            if let assessment { Text(verbatim: assessment.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            if let error {
+                Text(verbatim: error).font(.caption).foregroundStyle(.red)
+                Button("重新检查重试条件", action: onRefresh).font(.caption).disabled(!online || loading || submitting)
+            }
         }
     }
 }
@@ -94,10 +216,10 @@ struct DataView: View {
             }.pickerStyle(.segmented)
             Section("上传资料") { MediaComposer(draft: uploads) }
             Section("服务器数据") {
-                if state.records.filter({ !$0.kind.hasPrefix("memory.") && ($0.isFamily || $0.owner_id == currentUser) && ($0.isFamily ? "family" : "personal") == scope }).isEmpty {
+                if state.records.filter({ $0.isBusinessData && ($0.isFamily || $0.owner_id == currentUser) && ($0.isFamily ? "family" : "personal") == scope }).isEmpty {
                     ContentUnavailableView(scope == "family" ? "暂无家庭数据" : "暂无个人数据", systemImage: "externaldrive", description: Text("导入图片或文件后，可选择仅自己或家庭可见。"))
                 }
-                ForEach(state.records.filter { !$0.kind.hasPrefix("memory.") && ($0.isFamily || $0.owner_id == currentUser) && ($0.isFamily ? "family" : "personal") == scope }) { record in
+                ForEach(state.records.filter { $0.isBusinessData && ($0.isFamily || $0.owner_id == currentUser) && ($0.isFamily ? "family" : "personal") == scope }) { record in
                     NavigationLink {
                         MemberRecordDetail(record: record, isOwner: record.owner_id == currentUser)
                     } label: {
@@ -206,19 +328,36 @@ private struct AutomationRunsView: View {
 
 struct FamilyMember: Codable, Identifiable, Sendable { let id: String; let name: String }
 
+/// 合并同一身份的刷新；身份切换后旧请求不能清理新请求的运行状态。
+struct MemoryRefreshGate {
+    private(set) var generation = UUID()
+    private(set) var run: UUID?
+    private var requested = false
+    var loading: Bool { run != nil }
+    mutating func reset() { generation = UUID(); run = nil; requested = false }
+    mutating func begin() -> UUID? {
+        guard run == nil else { requested = true; return nil }
+        let token = UUID(); run = token; return token
+    }
+    func accepts(_ token: UUID, generation: UUID) -> Bool { run == token && self.generation == generation }
+    mutating func finish(_ token: UUID) -> Bool {
+        guard run == token else { return false }
+        let again = requested
+        run = nil; requested = false
+        return again
+    }
+}
+
 struct MemberMemoryView: View {
     @Environment(AppState.self) private var state
-    struct Candidate: Codable, Identifiable { let id: String; let content: String }
-    private struct Snapshot: Codable { let entries: [DataEntry]; let candidates: [Candidate] }
+    private struct Snapshot: Codable { let entries: [DataEntry] }
     @State private var lastRefresh: Date?
     @State private var cached = false
     @State private var editing: DataEntry?
     @State private var entries: [DataEntry] = []
-    @State private var candidates: [Candidate] = []
-    @State private var deciding = false
     @State private var error: String?
-    @State private var loading = false
-    @State private var needsRefresh = false
+    @State private var refreshGate = MemoryRefreshGate()
+    private var loading: Bool { refreshGate.loading }
     var body: some View {
         List {
             if cached { Text("显示本机缓存，正在检查更新").font(.caption).foregroundStyle(.secondary) }
@@ -229,7 +368,7 @@ struct MemberMemoryView: View {
                     ForEach(entries) { record in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text(record.payload["origin"]?.description == "automatic_preference" ? "自动记忆" : "已确认记忆").font(.caption).foregroundStyle(.secondary)
+                                Text(record.payload["origin"]?.description == "automatic_preference" ? "自动记忆" : record.source == "conversation_memory" ? "已确认记忆" : "历史记忆").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
                                 Button("修改") { editing = record }.font(.caption)
                             }
@@ -237,73 +376,67 @@ struct MemberMemoryView: View {
                             if let quote = record.payload["source_quote"]?.description, !quote.isEmpty { Text("来源原话：" + quote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
                         }.swipeActions {
                             Button("删除", role: .destructive) { Task {
-                                do { _ = try await state.api.request("DELETE", "/api/v1/data/" + record.id); await load(force: true) }
+                                do { _ = try await state.api.request("DELETE", "/api/v1/memory/entries/" + record.id); await load(force: true) }
                                 catch { self.error = error.localizedDescription }
                             } }
                         }
                     }
                 }
             }
-            if !candidates.isEmpty {
-                Section("等待确认") {
-                    ForEach(candidates) { candidate in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(candidate.content)
-                            HStack {
-                                Button("确认记住") { Task { await decide(candidate.id, "confirm") } }
-                                Button("不记住", role: .destructive) { Task { await decide(candidate.id, "reject") } }
-                            }.disabled(deciding)
-                        }
-                    }
-                }
-            }
-            if !loading && error == nil && entries.isEmpty && candidates.isEmpty {
-                ContentUnavailableView("暂无聊天记忆", systemImage: "brain", description: Text("在 AI 对话中告诉它需要记住的内容。记忆由服务器保存，仅你自己可见。"))
+            if !loading && error == nil && entries.isEmpty {
+                ContentUnavailableView("暂无聊天记忆", systemImage: "brain", description: Text("明确说“记住我…”后会直接保存，无需再次确认。支持的普通偏好也会自动记住；这里只展示你的长期记忆。"))
             }
         }.navigationTitle("记忆")
             .sheet(item: $editing) { record in MemoryEditor(record: record) { Task { await load(force: true) } } }
-            .task(id: state.connectionRevision) { entries = []; candidates = []; lastRefresh = nil; await load() }
+            .task(id: "\(state.connected)-\(state.connectionRevision)") {
+                refreshGate.reset(); entries = []; lastRefresh = nil; cached = false; error = nil; editing = nil
+                if state.connected { await load() }
+            }
+            .onChange(of: state.serverReachable) { _, online in if online { Task { await load(force: true) } } }
             .onChange(of: state.memoryEventRevision) { _, _ in Task { await load(force: true) } }
             .onChange(of: state.dataEventRevision) { _, _ in Task { await load(force: true) } }
             .refreshable { await load(force: true) }
     }
     private func load(force: Bool = false) async {
-        guard !loading else { if force { needsRefresh = true }; return }
-        loading = true
+        guard state.connected, let run = refreshGate.begin() else { return }
+        let generation = refreshGate.generation, connection = state.connectionRevision
+        var requestNamespace: String?
+        func isCurrent() -> Bool {
+            refreshGate.accepts(run, generation: generation) && state.connected && state.connectionRevision == connection && !Task.isCancelled
+        }
         defer {
-            loading = false
-            if needsRefresh && !Task.isCancelled && state.connected {
-                needsRefresh = false
+            // 被取消的旧刷新仍可触发已排队的新刷新，避免页签切换或重连后停在空列表。
+            if refreshGate.finish(run) && state.connected && state.connectionRevision == connection {
                 Task { await load(force: true) }
             }
         }
         do {
-            let namespace = try await state.api.syncNamespace()
-            if entries.isEmpty && candidates.isEmpty, let raw = await ClientViewCache.shared.read(key: "memory", namespace: namespace), let saved = try? JSONDecoder().decode(Snapshot.self, from: raw), await state.api.cachedNamespace() == namespace {
-                entries = saved.entries; candidates = saved.candidates; cached = true
+            if let local = await state.api.cachedNamespace() {
+                requestNamespace = local
+                if entries.isEmpty, let raw = await ClientViewCache.shared.read(key: "memory", namespace: local),
+                   let saved = try? JSONDecoder().decode(Snapshot.self, from: raw), isCurrent(), await state.api.cachedNamespace() == local {
+                    entries = saved.entries.filter(\.isMemory); cached = true
+                }
             }
+            guard isCurrent() else { return }
+            let namespace = try await state.api.syncNamespace()
+            guard isCurrent() else { return }
+            requestNamespace = namespace
             if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 3 { return }
             let bytes = try await state.api.request("GET", "/api/v1/memory/entries", expectedNamespace: namespace)
-            let pending = try await state.api.request("GET", "/api/v1/memory/candidates", expectedNamespace: namespace)
-            guard !Task.isCancelled, await state.api.cachedNamespace() == namespace else { return }
-            entries = try JSONDecoder().decode([DataEntry].self, from: bytes)
-            candidates = try JSONDecoder().decode([Candidate].self, from: pending)
+            guard isCurrent(), await state.api.cachedNamespace() == namespace else { return }
+            entries = try JSONDecoder().decode([DataEntry].self, from: bytes).filter(\.isMemory)
             cached = false; lastRefresh = Date(); error = nil
-            try? await ClientViewCache.shared.write(JSONEncoder().encode(Snapshot(entries: entries, candidates: candidates)), key: "memory", namespace: namespace)
+            try? await ClientViewCache.shared.write(JSONEncoder().encode(Snapshot(entries: entries)), key: "memory", namespace: namespace)
         } catch {
+            guard isCurrent() else { return }
+            if let requestNamespace, await state.api.cachedNamespace() != requestNamespace { return }
             if case APIClient.APIError.http(let code, _) = error, [401, 403].contains(code) {
-                entries = []; candidates = []; cached = false
-                if let namespace = await state.api.cachedNamespace() { await ClientViewCache.shared.remove(key: "memory", namespace: namespace) }
+                entries = []; cached = false
+                if let requestNamespace { await ClientViewCache.shared.remove(key: "memory", namespace: requestNamespace) }
             }
-            self.error = error.localizedDescription
+            if isCurrent() { self.error = error.localizedDescription }
         }
-    }
-    private func decide(_ id: String, _ action: String) async {
-        guard !deciding else { return }; deciding = true; defer { deciding = false }
-        do {
-            _ = try await state.api.request("POST", "/api/v1/memory/candidates/" + id + "/" + action)
-            await load(force: true)
-        } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -368,7 +501,15 @@ struct MemberRecordDetail: View {
     private var displayed: DataEntry { detail ?? record }
     private var isNewAsset: Bool { displayed.payload["media_upload_id"] != nil }
     private var isFile: Bool { ["document.file", "document.import"].contains(displayed.kind) }
+    private var isHTMLFile: Bool { RecordAttachment.isHTML(name: displayed.payload["name"]?.description ?? displayed.title, mime: displayed.payload["mime_type"]?.description) }
     private var recordKey: String { ResourceRoutes.cacheScope(taskID) + "record:" + record.id + ":" + String(record.version ?? 0) }
+    private func recordRoute() throws -> String {
+        if record.isMemory && taskID == nil {
+            guard let id = UUID(uuidString: record.id) else { throw APIClient.APIError.message("记忆标识无效") }
+            return "/api/v1/memory/entries/" + id.uuidString.lowercased()
+        }
+        return try ResourceRoutes.record(record.id, taskID: taskID)
+    }
 
     var body: some View {
         List {
@@ -391,7 +532,7 @@ struct MemberRecordDetail: View {
                 if isFile {
                     Section("原文件") {
                         Text(displayed.title).textSelection(.enabled)
-                        if !isNewAsset { Button("打开原文件", systemImage: "doc.text.magnifyingglass") { open() }.disabled(attachmentBusy) }
+                        if !isNewAsset { Button(isHTMLFile ? "查看 HTML（代码／网页）" : "打开原文件", systemImage: "doc.text.magnifyingglass") { open() }.disabled(attachmentBusy) }
                         if attachmentBusy { ProgressView("正在读取原文件…") }
                     }
                     if let fileDetails {
@@ -415,7 +556,7 @@ struct MemberRecordDetail: View {
                         Text("资料：" + displayed.id).textSelection(.enabled)
                         if let sourceID = displayed.source_id { Text("来源：" + sourceID).textSelection(.enabled) }
                     }
-                    if isOwner && displayed.sensitivity != "SECRET" {
+                    if isOwner && displayed.isBusinessData && displayed.sensitivity != "SECRET" {
                         Picker("可见范围", selection: Binding(get: { visibility }, set: { selected in Task { await change(selected) } })) {
                             Text("仅自己").tag("personal")
                             Text("家庭所有成员").tag("family")
@@ -437,6 +578,7 @@ struct MemberRecordDetail: View {
             else if phase == .active && taskID != nil { Task { await loadDetails() } }
         }
         .onChange(of: state.dataEventRevision) { _, _ in Task { await loadDetails() } }
+        .onChange(of: state.memoryEventRevision) { _, _ in Task { await loadDetails() } }
         .onChange(of: state.connectionRevision) { _, _ in clearSensitiveDisplay() }
         .onChange(of: state.connected) { _, connected in if !connected { clearSensitiveDisplay() } }
         .onChange(of: state.serverReachable) { _, reachable in if !reachable && taskID != nil { clearSensitiveDisplay() } }
@@ -445,7 +587,7 @@ struct MemberRecordDetail: View {
     private var assetSection: some View {
         Section("原件") {
             NavigationLink { MediaAssetViewer(recordID: displayed.id, version: displayed.version ?? 1, taskID: taskID) } label: {
-                Label("查看完整附件", systemImage: "doc.text.magnifyingglass")
+                Label(isHTMLFile ? "查看 HTML（代码／网页）" : "查看完整附件", systemImage: "doc.text.magnifyingglass")
             }
             Text("按需读取完整原件，服务端负责解析与处理。").font(.caption).foregroundStyle(.secondary)
         }
@@ -496,7 +638,7 @@ struct MemberRecordDetail: View {
             let current = try await state.api.syncNamespace(); namespace = current
             if taskID == nil, detail == nil, let cached = await ClientViewCache.shared.read(key: recordKey, namespace: current),
                let value = try? JSONDecoder().decode(DataEntry.self, from: cached), await state.api.cachedNamespace() == current { apply(value) }
-            let raw = try await state.api.request("GET", ResourceRoutes.record(record.id, taskID: taskID), expectedNamespace: current)
+            let raw = try await state.api.request("GET", recordRoute(), expectedNamespace: current)
             guard active, !Task.isCancelled, loadGeneration == generation, state.dataEventRevision == revision, state.connectionRevision == connection, await state.api.cachedNamespace() == current else { return }
             let complete = try JSONDecoder().decode(DataEntry.self, from: raw)
             if let previous = detail?.version, previous != complete.version { closePreview(); fileDetails = nil }
@@ -523,7 +665,7 @@ struct MemberRecordDetail: View {
         do {
             let current = try await state.api.syncNamespace(); namespace = current
             // 下载/导出前重新读取权限和版本，缓存不能替代服务器授权判断。
-            let raw = try await state.api.request("GET", ResourceRoutes.record(record.id, taskID: taskID), expectedNamespace: current)
+            let raw = try await state.api.request("GET", recordRoute(), expectedNamespace: current)
             let verified = try JSONDecoder().decode(DataEntry.self, from: raw)
             guard active, !Task.isCancelled, state.connectionRevision == connection, state.dataEventRevision == revision, await state.api.cachedNamespace() == current else { return }
             apply(verified)
@@ -629,7 +771,7 @@ struct NotificationInboxView: View {
                         Spacer()
                         Text(item.scope == "family" ? "家庭" : "个人").font(.caption).foregroundStyle(.secondary)
                     }
-                    if let status = item.status { Text(status == "DUE" ? "已到期" : taskStatusLabel(status)).font(.subheadline) }
+                    if let status = item.status { Text(taskStatusLabel(status)).font(.subheadline) }
                     Text(Date(timeIntervalSince1970: item.created_at), format: .dateTime.month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
                     if item.kind == "client.action" {
                         NavigationLink("查看成员请求") { ClientActionInbox(notificationID: item.id).task { await markRead(item) } }

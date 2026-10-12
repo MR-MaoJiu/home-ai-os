@@ -31,8 +31,10 @@ def test_delete_legacy_source_removes_derived_fact(system,alice):
         db.add(MemoryCandidate(id=candidate,owner_id=alice.user_id,household_id='h1',source_ids=json.dumps([source]),content=system[0].state.vault.seal('历史来源派生的私人内容',alice.user_id+':candidate:'+candidate)))
         db.commit()
     assert alice.request('GET','/api/v1/memory/candidates').json()==[]
-    fact=alice.request('POST',f'/api/v1/memory/candidates/{candidate}/confirm').json()['record_id']
-    assert alice.request('GET','/api/v1/memory/entries').json()==[]
+    assert alice.request('POST',f'/api/v1/memory/candidates/{candidate}/confirm').status_code==410
+    fact=put(alice,{'source':'memory_candidate','source_id':candidate,'kind':'memory.fact','version':1,'payload':{'content':'已确认的历史记忆','source_ids':[source]}})
+    assert [row['id'] for row in alice.request('GET','/api/v1/memory/entries').json()]==[fact]
+    assert alice.request('GET','/api/v1/data/'+fact).status_code==404
     deleted=alice.request('DELETE','/api/v1/data/'+source)
     assert deleted.status_code==200,deleted.text
     assert fact in deleted.json()['deleted_ids']
@@ -50,7 +52,7 @@ def test_index_status_scoped_and_rebuild_requires_auth(system, alice):
     assert bob.request('GET', '/api/v1/memory/index').json()['eligible'] == 0
     assert system[1].post('/api/v1/memory/index/rebuild').status_code == 401
     assert bob.request('POST', '/api/v1/memory/index/rebuild').status_code == 200
-    assert alice.request('GET', '/api/v1/data/' + rid).status_code == 200
+    assert alice.request('GET', '/api/v1/memory/entries/' + rid).status_code == 200
 
 
 def test_reject_invalid_embedding():

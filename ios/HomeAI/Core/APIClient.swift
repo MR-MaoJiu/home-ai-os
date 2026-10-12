@@ -34,7 +34,12 @@ struct PairingCode: Codable, Sendable {
 
 /// 网络与身份集中在单一 actor，避免页面自行处理签名或泄露会话。
 struct TaskStateEvent: Decodable, Sendable {
-    struct Item: Decodable, Sendable, Identifiable, Equatable { let id: String; let status: String }
+    struct Item: Decodable, Sendable, Identifiable, Equatable {
+        let id: String; let status: String
+        var used_android: Bool? = nil
+        var android_workspace_id: String? = nil
+        var android_task_id: String? = nil
+    }
     let type: String
     let tasks: [Item]
     let has_more: Bool
@@ -42,6 +47,8 @@ struct TaskStateEvent: Decodable, Sendable {
     let data_revision: Int?
     let memory_revision: Int?
     let automation_revision: Int?
+    var android_revision: Int? = nil
+    var android_active_task_id: String? = nil
 }
 
 struct TaskEventSubscription: Sendable {
@@ -60,13 +67,103 @@ actor APIClient {
     private var rejectedNamespace: String?
     private var authorizationSerial = 0
     private var authorizationFailureHandler: (@Sendable (String) async -> Void)?
+    private var reachabilityHandler: (@Sendable (String, UUID) async -> Void)?
     private var pairingAttempt = UUID()
     private let directGate = AsyncOperationGate()
+    private let directConnectionWork = SharedClientOperation<Void>()
+    private var lastDirectFailure: (generation: UUID, publicOnly: Bool, until: Date, error: Error)?
     private var directPublicOnly = false
     private var fullGatheringNextAttempt = false
     private var directTransport: DirectTransport?
     private var directEvents: [UUID: Task<Void, Never>] = [:]
     private var eventSockets: [UUID: URLSessionWebSocketTask] = [:]
+    private let preferredConnectionWork = SharedClientOperation<Void>()
+    private struct HTTPSRoute {
+        let address: URL
+        let session: URLSession
+        let generation: UUID
+    }
+    private var fastHTTPS: HTTPSRoute?
+    private var localProbeAfter = Date.distantPast
+    private var encryptedRelay: EncryptedRelay?
+    private var relayGeneration: UUID?
+    private var directUpgrade: Task<Void, Never>?
+    private var directUpgradeAfter = Date.distantPast
+    private enum PreparedRoute: Sendable {
+        case local(FastConnection.Verified)
+        case relay(EncryptedRelay)
+    }
+
+    func networkPathChanged() {
+        // 换网后重新验证局域网地址；已发出的请求保留原连接，不重放。
+        fastHTTPS?.session.finishTasksAndInvalidate()
+        fastHTTPS = nil
+        localProbeAfter = .distantPast
+        directUpgradeAfter = .distantPast
+    }
+
+    private func preparePreferredConnection() async throws {
+        let started = generation
+        if relayGeneration != started { encryptedRelay = nil; relayGeneration = nil }
+        if let route = fastHTTPS, route.generation == started { return }
+        if let directTransport, await directTransport.isReady { return }
+        if let encryptedRelay, await encryptedRelay.isReady { scheduleDirectUpgrade(); return }
+        try await preferredConnectionWork.run(key: started.uuidString) {
+            if await self.prepareFastRoute(expectedGeneration: started) { return }
+            try await self.connectRemoteDirect(requirePublicPath: await self.directPublicOnly, resetEvents: false)
+        }
+        guard generation == started else { throw APIError.message("连接身份已切换") }
+    }
+
+    private func prepareFastRoute(expectedGeneration: UUID) async -> Bool {
+        guard generation == expectedGeneration, !directPublicOnly,
+              let saved = connection, let id = saved.serverID, let key = saved.serverPublicKey, let anchor = saved.namespaceAnchor else { return false }
+        let probeLocal = Date() >= localProbeAfter
+        localProbeAfter = Date().addingTimeInterval(10)
+        let choice = await withTaskGroup(of: PreparedRoute?.self, returning: PreparedRoute?.self) { group in
+            if probeLocal {
+                group.addTask {
+                    if let proof = await FastConnection.probe([saved.url] + (saved.addresses ?? []), serverID: id, publicKey: key, namespace: anchor) { return .local(proof) }
+                    return nil
+                }
+            }
+            if let access = saved.directAccess {
+                group.addTask {
+                    if let relay = try? await EncryptedRelay.connect(access: access, serverID: id, publicKey: key, namespace: anchor) { return .relay(relay) }
+                    return nil
+                }
+            }
+            for await result in group {
+                if let result { group.cancelAll(); return result }
+            }
+            return nil
+        }
+        guard generation == expectedGeneration, !Task.isCancelled, let choice else { return false }
+        switch choice {
+        case .local(let found):
+            let config = URLSessionConfiguration.ephemeral
+            config.httpShouldSetCookies = false; config.urlCredentialStorage = nil; config.httpCookieStorage = nil
+            config.timeoutIntervalForRequest = 15
+            let session = URLSession(configuration: config, delegate: PinnedSession(fingerprint: found.identity.proof.fingerprint, keyFingerprint: found.identity.tlsKey), delegateQueue: nil)
+            fastHTTPS = HTTPSRoute(address: URL(string: found.address)!, session: session, generation: expectedGeneration)
+        case .relay(let relay):
+            encryptedRelay = relay
+            relayGeneration = expectedGeneration
+            scheduleDirectUpgrade()
+        }
+        return true
+    }
+
+    private func scheduleDirectUpgrade() {
+        guard directUpgrade == nil, Date() >= directUpgradeAfter else { return }
+        directUpgradeAfter = Date().addingTimeInterval(60)
+        let started = generation
+        directUpgrade = Task {
+            defer { directUpgrade = nil }
+            guard generation == started else { return }
+            try? await connectRemoteDirect(requirePublicPath: false, resetEvents: false)
+        }
+    }
 
     init(persistConnection: Bool = true) {
         self.persistConnection = persistConnection
@@ -77,6 +174,19 @@ actor APIClient {
     }
 
     #if DEBUG
+    func verifyEncryptedRelayForAcceptance() async throws -> Double {
+        _ = try await request("GET", "/api/v1/me")
+        guard let saved = connection, let access = saved.directAccess, let id = saved.serverID,
+              let key = saved.serverPublicKey, let anchor = saved.namespaceAnchor, let deviceID = saved.deviceID,
+              let base = URL(string: saved.url) else { throw APIError.message("缺少已配对连接") }
+        let start = Date()
+        let relay = try await EncryptedRelay.connect(access: access, serverID: id, publicKey: key, namespace: anchor)
+        let request = try signedRequest("GET", "/api/v1/me", body: nil, token: saved.token, base: base)
+        let (data, status) = try await relay.request(request, deviceID: deviceID)
+        guard status == 200, !data.isEmpty else { throw APIError.message("加密通道真实鉴权失败") }
+        return Date().timeIntervalSince(start)
+    }
+
     func expireAccessForAcceptance() throws {
         guard !persistConnection, connection != nil else { throw APIError.message("只允许隔离验收会话强制刷新") }
         connection?.expiresAt = .distantPast
@@ -245,18 +355,34 @@ actor APIClient {
         let access = try JSONDecoder().decode(DirectAccess.self, from: data)
         guard started == generation, access.transport_policy == "direct_only" else { throw APIError.message("连接授权期间身份已变化") }
         connection?.directAccess = access
+        lastDirectFailure = nil
         try persist()
     }
 
     func connectRemoteDirect(requirePublicPath: Bool = false, resetEvents: Bool = true) async throws {
-        try await directGate.withPermit {
-            try await self.establishRemoteDirect(requirePublicPath: requirePublicPath, resetEvents: resetEvents)
+        if requirePublicPath { fastHTTPS?.session.finishTasksAndInvalidate(); fastHTTPS = nil; encryptedRelay = nil }
+        let started = generation
+        let key = started.uuidString + (requirePublicPath ? ":public" : ":all")
+        // 同一身份的页面共用一个建连结果，失败也一起返回，避免排队重复协商。
+        try await directConnectionWork.run(key: key) {
+            try await self.directGate.withPermit {
+                try await self.establishRemoteDirect(requirePublicPath: requirePublicPath, resetEvents: resetEvents, expectedGeneration: started)
+            }
         }
+        guard started == generation else { throw APIError.message("连接身份已切换") }
     }
 
     // 仅在持有 directGate 时调用，配对和后台恢复共享同一条建连流程。
-    private func establishRemoteDirect(requirePublicPath: Bool, resetEvents: Bool) async throws {
-        if let directTransport, await directTransport.isReady, directPublicOnly == requirePublicPath { return }
+    private func establishRemoteDirect(requirePublicPath: Bool, resetEvents: Bool, expectedGeneration: UUID) async throws {
+        guard expectedGeneration == generation else { throw APIError.message("连接身份已切换") }
+        if let directTransport, directPublicOnly == requirePublicPath {
+            if await directTransport.recoverIfPossible() {
+                guard expectedGeneration == generation else { throw APIError.message("连接身份已切换") }
+                lastDirectFailure = nil; return
+            }
+        }
+        guard expectedGeneration == generation else { throw APIError.message("连接身份已切换") }
+        if let failure = lastDirectFailure, failure.generation == generation, failure.publicOnly == requirePublicPath, failure.until > Date() { throw failure.error }
         let started = generation
         guard let saved = connection, let access = saved.directAccess, let publicKey = saved.serverPublicKey else { throw APIError.message("请先在家庭网络为此设备授权远程直连") }
         directPublicOnly = requirePublicPath
@@ -275,6 +401,7 @@ actor APIClient {
             let body = try JSONSerialization.data(withJSONObject: ["envelope": object])
             _ = try await ConnectSignalling.request(access, method: "POST", path: "/api/direct/offers", body: body)
             let deadline = Date().addingTimeInterval(45)
+            let pollingStarted = Date()
             while Date() < deadline {
                 try Task.checkCancellation()
                 guard started == generation else { throw APIError.message("直连协商期间身份已变化") }
@@ -283,25 +410,25 @@ actor APIClient {
                     try await transport.accept(JSONSerialization.data(withJSONObject: answer), serverPublicKey: publicKey)
                     guard started == generation else { throw APIError.message("连接已切换") }
                     fullGatheringNextAttempt = false
+                    lastDirectFailure = nil
                     return
                 }
-                try await Task.sleep(for: .seconds(1))
+                try await Task.sleep(for: Date().timeIntervalSince(pollingStarted) < 5 ? .milliseconds(200) : .milliseconds(500))
             }
             throw APIError.message("家庭服务器离线或当前网络无法直连；不会使用中继")
         } catch {
             // 快照候选无法建立连接时，下次收集完整候选；不重放业务请求。
             if !Task.isCancelled, !(error is CancellationError), await transport.candidateSnapshotWasEarly { fullGatheringNextAttempt = true }
+            if started == generation, !Task.isCancelled, !(error is CancellationError) {
+                lastDirectFailure = (started, requirePublicPath, Date().addingTimeInterval(2), error)
+            }
             await transport.close()
             throw error
         }
     }
 
-    private func reconnectDirectIfNeeded() async throws {
-        if let directTransport, await directTransport.isReady { return }
-        try await establishRemoteDirect(requirePublicPath: directPublicOnly, resetEvents: false)
-    }
-
     func disableDirect() async {
+        lastDirectFailure = nil
         await directTransport?.close()
         directTransport = nil
         directPublicOnly = false
@@ -384,6 +511,10 @@ actor APIClient {
         authorizationFailureHandler = handler
     }
 
+    func setReachabilityHandler(_ handler: @escaping @Sendable (String, UUID) async -> Void) {
+        reachabilityHandler = handler
+    }
+
     func syncNamespace() async throws -> String {
         if connection?.deviceID == nil || rejectedNamespace != nil { try await loadIdentityIfNeeded() }
         guard let value = cachedNamespace() else { throw APIError.message("请先配对") }
@@ -425,7 +556,7 @@ actor APIClient {
         let authorizationAtStart = authorizationSerial
         do {
             if connection?.prefersDirect == true {
-                try await directGate.withPermit { try await self.reconnectDirectIfNeeded() }
+                try await preparePreferredConnection()
                 guard started == generation else { throw APIError.message("直连恢复期间身份已变化") }
             }
             guard var saved = connection, let session, let base = URL(string: saved.url) else { throw APIError.message("请先配对家庭服务器") }
@@ -444,10 +575,15 @@ actor APIClient {
             guard started == generation else { throw APIError.message("连接已切换，请重试") }
             guard authorizationAtStart == authorizationSerial else { throw APIError.message("授权状态已变化，请重新验证") }
             if method == "GET", path == "/api/v1/me" {
-                struct Me: Decodable { let user_id: String; let device_id: String }
+                struct Me: Decodable { let user_id: String; let device_id: String; let server_addresses: [String]? }
                 let verified = try JSONDecoder().decode(Me.self, from: data)
                 connection?.ownerID = verified.user_id
                 connection?.deviceID = verified.device_id
+                if let addresses = verified.server_addresses {
+                    var known = connection?.addresses ?? []
+                    for value in addresses where (try? ServerTrust.origin(value)) != nil && !known.contains(value) { known.append(value) }
+                    connection?.addresses = Array(known.suffix(8))
+                }
                 rejectedNamespace = nil
                 if let verifiedNamespace = pairedNamespace() {
                     await ClientViewCache.shared.authorize(namespace: verifiedNamespace)
@@ -455,6 +591,10 @@ actor APIClient {
                 }
                 try persist()
             }
+            if let currentNamespace = cachedNamespace() {
+                await reachabilityHandler?(currentNamespace, started)
+            }
+            guard started == generation, authorizationAtStart == authorizationSerial else { throw APIError.message("连接或授权状态已变化，请重试") }
             return data
         } catch {
             if started == generation, case APIError.http(let code, _) = error, Self.invalidatesCredentials(status: code), let namespace {
@@ -609,8 +749,34 @@ actor APIClient {
     }
 
     private func send(_ method: String, _ path: String, body: Data?, token: String, base: URL, session: URLSession, expectedGeneration: UUID, contentType: String = "application/json") async throws -> Data {
-        let request = try signedRequest(method, path, body: body, token: token, base: base, contentType: contentType)
+        let localRoute = fastHTTPS?.generation == expectedGeneration ? fastHTTPS : nil
+        let request = try signedRequest(method, path, body: body, token: token, base: localRoute?.address ?? base, contentType: contentType)
         do {
+            if let localRoute {
+                let (data, response) = try await localRoute.session.data(for: request)
+                guard expectedGeneration == generation else { throw APIError.message("连接已切换") }
+                try Self.validate(data, response)
+                return data
+            }
+            let directReady = if let directTransport { await directTransport.isReady } else { false }
+            if !directReady, relayGeneration == expectedGeneration, let relay = encryptedRelay, let deviceID = connection?.deviceID {
+                let data: Data, status: Int
+                do {
+                    (data, status) = try await relay.request(deviceID: deviceID) {
+                        try await self.makeQueuedRelayRequest(method, path, body: body, token: token, base: base,
+                            expectedGeneration: expectedGeneration, contentType: contentType)
+                    }
+                } catch {
+                    if generation == expectedGeneration, encryptedRelay === relay, EncryptedRelay.shouldDiscardConnection(after: error) {
+                        encryptedRelay = nil
+                    }
+                    throw error
+                }
+                guard expectedGeneration == generation else { throw APIError.message("连接已切换") }
+                guard let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil) else { throw APIError.message("加密响应无效") }
+                try Self.validate(data, response)
+                return data
+            }
             if let directTransport {
                 let (data, status) = try await directTransport.request(request)
                 guard expectedGeneration == generation else { throw APIError.message("连接已切换，请重试") }
@@ -624,9 +790,19 @@ actor APIClient {
             try Self.validate(data, response)
             return data
         } catch {
+            if let localRoute, error is URLError, fastHTTPS?.session === localRoute.session {
+                fastHTTPS?.session.finishTasksAndInvalidate(); fastHTTPS = nil
+            }
             guard expectedGeneration == generation else { throw APIError.message("连接已切换，请重试") }
             throw error
         }
+    }
+
+    private func makeQueuedRelayRequest(_ method: String, _ path: String, body: Data?, token: String, base: URL,
+                                        expectedGeneration: UUID, contentType: String) throws -> URLRequest {
+        try Task.checkCancellation()
+        guard generation == expectedGeneration else { throw APIError.message("连接身份已切换") }
+        return try signedRequest(method, path, body: body, token: token, base: base, contentType: contentType)
     }
 
     private static func validate(_ data: Data, _ response: URLResponse) throws {

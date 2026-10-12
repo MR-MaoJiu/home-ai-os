@@ -23,6 +23,7 @@ import UIKit
         }
         .onChange(of: phase) { _, phase in
             if phase == .background {
+                state.androidPresentation.background()
                 Task { await state.stopForegroundEvents() }
                 state.configureBackgroundSync(enabled: UserDefaults.standard.bool(forKey: BackgroundSync.preference))
             } else if phase == .active {
@@ -96,17 +97,39 @@ struct RootView: View {
             Tab("数据", systemImage: "externaldrive", value: HomeDestination.data) { NavigationStack { DataView() }.id(state.connectionRevision) }
             Tab("设置", systemImage: "gearshape", value: HomeDestination.settings) { NavigationStack { SettingsView() } }
         }
+        .onAppear {
+            #if DEBUG
+            AndroidPresentationAcceptance.current = state.androidPresentation
+            #endif
+        }
+        .fullScreenCover(isPresented: Binding(get: { state.androidPresentation.wantsFullScreen }, set: { shown in
+            if !shown { state.androidPresentation.fullScreenDismissed() }
+        }), onDismiss: { state.androidPresentation.fullScreenDismissed() }) {
+            AndroidWorkspaceView(session: state.androidPresentation).environment(state).interactiveDismissDisabled()
+        }
+        .onChange(of: state.connected) { _, connected in
+            if !connected { state.androidPresentation.identityChanged() }
+            if !connected { VoiceCalls.shared.identityChanged() }
+            else { state.androidPresentation.foreground() }
+        }
         .task(id: state.connectionRevision) {
             if state.connected {
                 state.startForegroundEvents()
                 await ClientNotifications.shared.synchronize(api: state.api)
+                await VoiceCalls.shared.synchronize()
             }
         }
-        .onChange(of: state.connected) { _, connected in if connected { state.startForegroundEvents() } }
+        .onChange(of: state.connected) { _, connected in if connected {
+            state.startForegroundEvents()
+            Task { await VoiceCalls.shared.synchronize() }
+        } }
         .sheet(isPresented: Binding(get: { notifications.pendingNotificationID != nil }, set: { if !$0 { notifications.pendingNotificationID = nil } })) {
             NavigationStack { NotificationInboxView(highlightID: notifications.pendingNotificationID) }.environment(state)
         }
         .tint(.teal)
+        .sheet(isPresented: Binding(get: { VoiceCalls.shared.presented }, set: { VoiceCalls.shared.presented = $0 })) {
+            VoiceCallView()
+        }
         .alert(state.pairingNotice ? (state.pairingFeedback == .success ? "连接成功" : "连接未完成") : "操作未完成", isPresented: Binding(get: { state.pairingNotice || state.error != nil }, set: { if !$0 { state.pairingNotice = false; state.error = nil } })) {
             Button("知道了", role: .cancel) { state.pairingNotice = false; state.error = nil }
         } message: { Text(state.pairingNotice ? state.pairingFeedback.message : (state.error ?? "")) }

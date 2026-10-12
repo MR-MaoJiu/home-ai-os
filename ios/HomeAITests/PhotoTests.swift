@@ -1,6 +1,8 @@
 import XCTest
 import ImageIO
 import UniformTypeIdentifiers
+import SwiftUI
+import WebKit
 @testable import HomeAI
 
 final class PhotoTests: XCTestCase {
@@ -75,7 +77,7 @@ final class RecordDetailTests: XCTestCase {
         XCTAssertNil(node.text)
     }
 
-    func testWebContentIsAlwaysPlainTextAndNoTextIsTruncated() throws {
+    func testWebContentDecodesAsCompleteTextBeforeOptionalHTMLPreview() throws {
         let html = Data("<html><img src='https://example.invalid/private'></html>".utf8)
         XCTAssertEqual(RecordAttachment.format(name: "disguised.docx", data: html), .text)
         XCTAssertEqual(RecordAttachment.format(name: "image.svg", data: Data("<svg/>".utf8)), .text)
@@ -84,6 +86,58 @@ final class RecordDetailTests: XCTestCase {
         XCTAssertEqual(RecordAttachment.format(name: "invalid.docx", data: Data([0x01, 0x00, 0x02])), .unsupported)
         XCTAssertEqual(RecordAttachment.text(html), String(data: html, encoding: .utf8))
         XCTAssertEqual(RecordAttachment.format(name: "unknown.bin", data: Data([0xff, 0x01])), .unsupported)
+    }
+
+    func testOnlyDeclaredHTMLGetsWebpageModeAndKeepsOriginalBytes() throws {
+        XCTAssertTrue(RecordAttachment.isHTML(name: "页面.HTML"))
+        XCTAssertTrue(RecordAttachment.isHTML(name: "页面.htm"))
+        XCTAssertTrue(RecordAttachment.isHTML(name: "页面.xhtml"))
+        XCTAssertTrue(RecordAttachment.isHTML(name: "附件", mime: " Text/HTML; charset=utf-8"))
+        XCTAssertTrue(RecordAttachment.isHTML(name: "附件", mime: "application/xhtml+xml"))
+        XCTAssertFalse(RecordAttachment.isHTML(name: "image.svg", mime: "image/svg+xml"))
+        XCTAssertFalse(RecordAttachment.isHTML(name: "disguised.docx"))
+        let source = "<!doctype html><html><body>完整源码与网页切换</body></html>"
+        let bytes = Data(source.utf8)
+        let preview = try ProtectedRecordPreview(data: bytes, name: "页面.html")
+        defer { preview.remove() }
+        XCTAssertTrue(preview.isHTML)
+        XCTAssertEqual(preview.format, .text)
+        XCTAssertEqual(preview.text, source)
+        XCTAssertEqual(preview.contents, bytes)
+        XCTAssertEqual(try Data(contentsOf: preview.url), bytes)
+    }
+
+    func testLegacyHTMLTextAndMissingMetadataUseDocumentDetection() {
+        let html = "\u{FEFF} <!-- 文档说明 -->\n<!DOCTYPE HTML><html><body>完整原件</body></html>"
+        XCTAssertTrue(RecordTextContent(title: "文件全文", text: html).isHTML)
+        XCTAssertTrue(RecordAttachment.isHTML(name: "无扩展名资料", mime: "application/octet-stream", data: Data(html.utf8)))
+        XCTAssertTrue(RecordAttachment.isHTML(name: "原文.txt", data: Data(html.utf8)))
+        XCTAssertFalse(RecordAttachment.isHTML(name: "伪装.docx", data: Data(html.utf8)))
+        XCTAssertFalse(RecordTextContent(title: "文件全文", text: "# 解析标题\n这是已转换的 Markdown").isHTML)
+        XCTAssertFalse(RecordTextContent(title: "说明", text: "如何使用 <html> 标签").isHTML)
+        XCTAssertFalse(RecordTextContent(title: "图形", text: "<svg></svg>").isHTML)
+    }
+
+    @MainActor
+    func testLegacyFullTextEntryShowsHTMLModePicker() async throws {
+        let source = "<!doctype html><html><body>旧全文入口</body></html>"
+        let controller = UIHostingController(rootView: RecordLongTextView(content: RecordTextContent(title: "文件全文", text: source)))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene); window.rootViewController = controller; window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func picker(_ view: UIView) -> UISegmentedControl? {
+            if let control = view as? UISegmentedControl { return control }
+            return view.subviews.compactMap(picker).first
+        }
+        for _ in 0..<40 {
+            controller.view.layoutIfNeeded()
+            if picker(controller.view) != nil { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let control = try XCTUnwrap(picker(controller.view))
+        XCTAssertEqual(control.numberOfSegments, 2)
+        XCTAssertEqual(control.titleForSegment(at: 0), "代码")
+        XCTAssertEqual(control.titleForSegment(at: 1), "网页")
     }
 
     @MainActor
@@ -117,6 +171,54 @@ final class RecordDetailTests: XCTestCase {
 }
 
 extension RecordDetailTests {
+    @MainActor
+    func testExistingHTMLFileShowsCodeAndWebpageModes() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["HOMEAI_READONLY_HTML_CHECK"] == "1" || env["TEST_RUNNER_HOMEAI_READONLY_HTML_CHECK"] == "1" else {
+            throw XCTSkip("仅在用户报告 HTML 预览问题的已配对设备上只读验收")
+        }
+        let api = AppServices.api
+        await api.restoreConnectionIfNeeded()
+        let namespace = try await api.syncNamespace()
+        let page = try JSONDecoder().decode(DataPage.self, from: await api.request("GET", "/api/v1/data?limit=100", expectedNamespace: namespace))
+        let record = try XCTUnwrap(page.records.first { row in
+            ["document.file", "document.import"].contains(row.kind) && RecordAttachment.isHTML(name: row.payload["name"]?.description ?? row.title, mime: row.payload["mime_type"]?.description)
+        }, "没有找到当前成员可见的 HTML 附件")
+        let data = try await api.request("GET", "/api/v1/files/" + record.id + "/content", expectedNamespace: namespace)
+        let preview = try ProtectedRecordPreview(data: data, name: record.payload["name"]?.description ?? record.title, mime: record.payload["mime_type"]?.description)
+        defer { preview.remove() }
+        XCTAssertTrue(preview.isHTML && preview.text != nil, "原件必须被识别为可解码 HTML")
+        let controller = UIHostingController(rootView: RecordFilePreview(item: preview))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene); window.rootViewController = controller; window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func find<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+            if let matched = view as? T { return matched }
+            return view.subviews.compactMap { find(type, in: $0) }.first
+        }
+        for _ in 0..<50 {
+            controller.view.layoutIfNeeded()
+            if find(UISegmentedControl.self, in: controller.view) != nil { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let picker = try XCTUnwrap(find(UISegmentedControl.self, in: controller.view))
+        XCTAssertTrue(find(UITextView.self, in: controller.view)?.text == preview.text, "源码预览必须保留原文；不在测试日志中输出正文")
+        XCTAssertEqual(picker.selectedSegmentIndex, 0)
+        picker.selectedSegmentIndex = 1; picker.sendActions(for: .valueChanged)
+        var rendered = false
+        for _ in 0..<80 {
+            controller.view.layoutIfNeeded()
+            if let web = find(WKWebView.self, in: controller.view),
+               let ready = try? await web.evaluateJavaScript("document.readyState === 'complete' && document.body.children.length > 0"), ready as? Bool == true {
+                XCTAssertFalse(web.configuration.defaultWebpagePreferences.allowsContentJavaScript)
+                rendered = true; break
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertTrue(rendered, "实际 HTML 原件应进入网页模式")
+        print("HTML_EXISTING_ATTACHMENT_PREVIEW_OK code_switch=true webpage_loaded=true private_content_logged=false")
+    }
+
     @MainActor
     func testExistingRealAttachmentReadOnly() async throws {
         let env = ProcessInfo.processInfo.environment

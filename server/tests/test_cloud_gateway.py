@@ -100,7 +100,8 @@ def test_budget_reservations_are_idempotent_and_shared(system,alice):
         task=submit(db,actor,TaskRequest(message='测试',idempotency_key='budget-test-123'),app.vault)
         reserve(app,db,actor,task,'budget-1',40000)
         db.commit()
-        with pytest.raises(BudgetExceeded):reserve(app,db,actor,task,'budget-1',1)
+        with pytest.raises(HTTPException) as replay:reserve(app,db,actor,task,'budget-1',1)
+        assert replay.value.status_code==409 and not isinstance(replay.value,BudgetExceeded)
         with pytest.raises(BudgetExceeded):reserve(app,db,actor,task,'budget-2',10001)
 
 

@@ -16,7 +16,13 @@ struct RecordSourceView: View {
             .task(id: state.connectionRevision) {
                 do {
                     let namespace = try await state.api.syncNamespace()
-                    let data = try await state.api.request("GET", ResourceRoutes.record(source.id, taskID: source.taskID), expectedNamespace: namespace)
+                    let data: Data
+                    do {
+                        data = try await state.api.request("GET", ResourceRoutes.record(source.id, taskID: source.taskID), expectedNamespace: namespace)
+                    } catch APIClient.APIError.http(404, _) where source.taskID == nil {
+                        // 旧回答可能引用个人记忆，按本人记忆接口回读，不把它放进数据目录。
+                        data = try await state.api.request("GET", "/api/v1/memory/entries/" + source.id, expectedNamespace: namespace)
+                    }
                     let entry = try JSONDecoder().decode(DataEntry.self, from: data)
                     guard !Task.isCancelled, await state.api.cachedNamespace() == namespace else { return }
                     isOwner = try await state.api.ownerIdentity(expectedNamespace: namespace).userID == entry.owner_id
@@ -71,7 +77,8 @@ struct RecordPayloadView: View {
                 Text(field.name).font(.caption).foregroundStyle(.secondary)
                 if field.isAttachment { Button("打开附件", systemImage: "paperclip") { onAttachment(field.id) } }
                 if let text = field.text {
-                    if text.count > 4000 { Button("阅读全文（\(text.count) 字）") { onText(field.name, text) } }
+                    if RecordAttachment.looksLikeHTMLDocument(text) { Button("查看 HTML（代码／网页）", systemImage: "chevron.left.forwardslash.chevron.right") { onText(field.name, text) } }
+                    else if text.count > 4000 { Button("阅读全文（\(text.count) 字）") { onText(field.name, text) } }
                     else { Text(text.isEmpty ? "空文本" : text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
                 }
             }
@@ -83,6 +90,19 @@ enum RecordPreviewFormat: Equatable { case text, quickLook, unsupported }
 
 enum RecordAttachment {
     static let maximumBytes = 20 * 1024 * 1024
+    static func isHTML(name: String, mime: String? = nil, data: Data? = nil) -> Bool {
+        let ext = (name as NSString).pathExtension.lowercased()
+        let type = mime?.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if ["html", "htm", "xhtml"].contains(ext) || type == "text/html" || type == "application/xhtml+xml" { return true }
+        // 旧资料可能缺少 MIME 或扩展名；只识别明确的完整 HTML 文档，不猜测 Office/SVG。
+        guard ["", "txt"].contains(ext), ["", "text/plain", "application/octet-stream"].contains(type ?? ""),
+              let data, let source = text(data) else { return false }
+        return looksLikeHTMLDocument(source)
+    }
+    static func looksLikeHTMLDocument(_ text: String) -> Bool {
+        let prefix = String(text.prefix(4096)).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}")))
+        return prefix.range(of: #"\A(?:\s|<!--[\s\S]*?-->|<\?xml[\s\S]*?\?>)*(?:<!doctype\s+html\b|<html(?:\s|>))"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
     static func encodedValue(path: String, payload: [String: JSONValue]) -> String? {
         guard path.hasPrefix("/") else { return nil }
         var current: JSONValue = .object(payload)
@@ -102,7 +122,7 @@ enum RecordAttachment {
         let mime = mime?.lowercased() ?? ""
         let plainExtensions: Set<String> = ["txt", "md", "markdown", "json", "jsonl", "csv", "tsv", "log", "yaml", "yml", "toml", "xml", "html", "htm", "svg", "css", "js", "ts", "py", "sh", "sql", "ini", "conf"]
         // 先按可解码文本判断，覆盖 BOM、注释前缀和伪装成 Office 文件的 HTML。
-        if ["html", "htm", "svg"].contains(ext) || mime == "image/svg+xml" { return .text }
+        if isHTML(name: name, mime: mime) || ext == "svg" || mime == "image/svg+xml" { return .text }
         if data.starts(with: Data("%PDF-".utf8)) { return .quickLook }
         if let decoded = text(data) {
             let clean = decoded.trimmingCharacters(in: CharacterSet(charactersIn: "\u{FEFF}"))
@@ -163,6 +183,7 @@ final class ProtectedRecordPreview: NSObject, QLPreviewItem, Identifiable, @unch
     let contents: Data
     let text: String?
     let format: RecordPreviewFormat
+    let isHTML: Bool
     private let directory: URL
     var previewItemURL: URL? { url }
     var previewItemTitle: String? { title }
@@ -170,6 +191,7 @@ final class ProtectedRecordPreview: NSObject, QLPreviewItem, Identifiable, @unch
     init(data: Data, name: String, mime: String? = nil, temporaryRoot: URL? = nil) throws {
         guard data.count <= RecordAttachment.maximumBytes else { throw APIClient.APIError.message("附件超过当前客户端的 20 MB 预览限制") }
         title = name; contents = data
+        isHTML = RecordAttachment.isHTML(name: name, mime: mime, data: data)
         format = RecordAttachment.format(name: name, mime: mime, data: data)
         text = format == .text ? RecordAttachment.text(data) : nil
         let root = temporaryRoot ?? FileManager.default.temporaryDirectory.appendingPathComponent("HomeAIProtectedPreviews", isDirectory: true)
@@ -200,7 +222,10 @@ struct RecordFilePreview: View {
     var body: some View {
         NavigationStack {
             Group {
-                if item.format == .text, let text = item.text { CompleteTextPreview(text: text) }
+                if item.format == .text, let text = item.text {
+                    if item.isHTML { HTMLFileContent(text: text) }
+                    else { CompleteTextPreview(text: text) }
+                }
                 else if item.format == .quickLook, QLPreviewController.canPreview(item) { NativeRecordPreview(item: item) }
                 else {
                     ContentUnavailableView("暂不支持预览此格式", systemImage: "doc", description: Text("可以导出原文件，使用相应的应用打开。"))
@@ -231,6 +256,11 @@ struct RecordTextContent: Identifiable {
     let id = UUID()
     let title: String
     let text: String
+    let isHTML: Bool
+    init(title: String, text: String, isHTML: Bool? = nil) {
+        self.title = title; self.text = text
+        self.isHTML = isHTML ?? RecordAttachment.looksLikeHTMLDocument(text)
+    }
 }
 
 struct RecordLongTextView: View {
@@ -238,18 +268,58 @@ struct RecordLongTextView: View {
     let content: RecordTextContent
     var body: some View {
         NavigationStack {
-            CompleteTextPreview(text: content.text).navigationTitle(content.title).navigationBarTitleDisplayMode(.inline)
+            Group {
+                if content.isHTML { HTMLFileContent(text: content.text) }
+                else { CompleteTextPreview(text: content.text) }
+            }.navigationTitle(content.title).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
         }
     }
 }
 
+enum HTMLFilePreviewMode: String, CaseIterable, Identifiable {
+    case code = "代码", webpage = "网页"
+    var id: String { rawValue }
+}
+
+struct HTMLFileContent: View {
+    static let maximumRenderedBytes = 2 * 1024 * 1024
+    let text: String
+    let initialMode: HTMLFilePreviewMode
+    let allowsScripts: Bool
+    @State private var mode: HTMLFilePreviewMode
+    init(text: String, initialMode: HTMLFilePreviewMode = .code, allowsScripts: Bool = false) {
+        self.text = text; self.initialMode = initialMode; self.allowsScripts = allowsScripts
+        _mode = State(initialValue: initialMode)
+    }
+    private var canRender: Bool { text.utf8.count <= Self.maximumRenderedBytes }
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("HTML查看方式", selection: $mode) {
+                ForEach(HTMLFilePreviewMode.allCases) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 10)
+                .accessibilityIdentifier("htmlPreviewMode")
+            if mode == .code {
+                CompleteTextPreview(text: text, code: true)
+            } else if canRender {
+                Text(allowsScripts ? "隔离网页预览：不会加载外部资源。" : "静态网页预览：脚本和外部资源不会加载。").font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal).padding(.bottom, 8)
+                IsolatedHTML(html: text, allowsScripts: allowsScripts)
+            } else {
+                ContentUnavailableView("网页内容过大", systemImage: "doc.badge.ellipsis",
+                    description: Text("超过 2 MiB 网页预览限制，可切回代码查看完整内容。"))
+            }
+        }.onChange(of: text) { _, _ in mode = initialMode }
+    }
+}
+
 private struct CompleteTextPreview: UIViewRepresentable {
     let text: String
+    var code = false
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
         view.isEditable = false; view.isSelectable = true
-        view.font = .preferredFont(forTextStyle: .body)
+        view.font = code ? UIFontMetrics(forTextStyle: .body).scaledFont(for: .monospacedSystemFont(ofSize: 15, weight: .regular)) : .preferredFont(forTextStyle: .body)
         view.adjustsFontForContentSizeCategory = true
         view.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 16, right: 12)
         view.dataDetectorTypes = []

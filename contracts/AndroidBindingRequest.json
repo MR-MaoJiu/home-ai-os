@@ -1,0 +1,31 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "serial": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Serial",
+      "type": "string"
+    },
+    "label": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+    },
+    "packages": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Packages",
+      "type": "array"
+    }
+  },
+  "required": [
+    "serial",
+    "label"
+  ],
+  "title": "BindingRequest",
+  "type": "object"
+}

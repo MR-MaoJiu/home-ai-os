@@ -37,6 +37,15 @@
       "default": null,
       "title": "Cloud Planner"
     },
+    "cloud_planner_thinking": {
+      "default": "provider_default",
+      "enum": [
+        "provider_default",
+        "disabled"
+      ],
+      "title": "Cloud Planner Thinking",
+      "type": "string"
+    },
     "vision": {
       "anyOf": [
         {
@@ -49,23 +58,77 @@
       "default": null,
       "title": "Vision"
     },
+    "image_generation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Image Generation"
+    },
+    "image_editing": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Image Editing"
+    },
     "shared_cloud": {
       "default": false,
       "title": "Shared Cloud",
       "type": "boolean"
     },
     "household_daily_tokens": {
+      "anyOf": [
+        {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "const": "unlimited",
+          "type": "string"
+        }
+      ],
       "default": 0,
-      "maximum": 100000000,
-      "minimum": 0,
-      "title": "Household Daily Tokens",
-      "type": "integer"
+      "title": "Household Daily Tokens"
     },
     "member_daily_tokens": {
+      "anyOf": [
+        {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "const": "unlimited",
+          "type": "string"
+        }
+      ],
       "default": 0,
-      "maximum": 10000000,
+      "title": "Member Daily Tokens"
+    },
+    "household_daily_images": {
+      "default": 0,
+      "maximum": 10000,
       "minimum": 0,
-      "title": "Member Daily Tokens",
+      "title": "Household Daily Images",
+      "type": "integer"
+    },
+    "member_daily_images": {
+      "default": 0,
+      "maximum": 1000,
+      "minimum": 0,
+      "title": "Member Daily Images",
       "type": "integer"
     }
   },

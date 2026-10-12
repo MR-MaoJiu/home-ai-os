@@ -225,6 +225,19 @@ final class DirectTransport: NSObject, RTCPeerConnectionDelegate, RTCDataChannel
 
     var isReady: Bool { !closed && answerAccepted && channel.readyState == .open && peer.connectionState == .connected }
 
+    /// 前后台切换中的短暂断连先交给 ICE 恢复，避免立即销毁仍可恢复的通道。
+    func recoverIfPossible() async -> Bool {
+        if isReady { return true }
+        guard !closed, answerAccepted, channel.readyState == .open, peer.connectionState == .disconnected else { return false }
+        let deadline = Date().addingTimeInterval(1)
+        while !closed && !Task.isCancelled && Date() < deadline {
+            if isReady { return true }
+            if peer.connectionState == .failed || channel.readyState != .open { return false }
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { return false }
+        }
+        return isReady
+    }
+
     func close() {
         guard !closed else { return }
         closed = true
